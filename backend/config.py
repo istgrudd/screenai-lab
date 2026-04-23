@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     deepseek_base_url: str = "https://api.deepseek.com/v1"
 
     # --- Database ---
-    database_url: str = "sqlite:///./data/app.db"
+    database_url: str = "sqlite:///./data/screenai_lab.db"
 
     # --- Vector Store ---
     chroma_persist_dir: str = "./backend/vectorstore"
@@ -45,7 +45,7 @@ class Settings(BaseSettings):
         """Return the list of origins allowed to call the API.
 
         Production deployments set ALLOWED_ORIGINS to a comma-separated list
-        (e.g. "https://screenai.vercel.app,https://www.example.com"). Local
+        (e.g. "https://screenai-lab.vercel.app,https://www.example.com"). Local
         dev falls back to a single FRONTEND_URL.
         """
         if self.allowed_origins.strip():

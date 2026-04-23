@@ -6,7 +6,7 @@
  * email, role, iat, exp.
  */
 
-const TOKEN_KEY = "screenai.token";
+const TOKEN_KEY = "screenai_lab.token";
 
 // ── Token storage ──────────────────────────────────────────────────────────
 

@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from backend.database import get_db
 from backend.middleware.auth_middleware import get_current_user, require_role
-from backend.models.candidate import Candidate, Document, DimensionScore
+from backend.models.candidate import Candidate, CandidateDocument, DimensionScore
 from backend.models.rubric import Dimension, Rubric
 from backend.models.user import User, UserRole
 from backend.services.scoring import cefr_from_score
@@ -64,8 +64,8 @@ def list_candidates(
     for rank, cand in enumerate(candidates, start=1):
         # Get document info
         doc = (
-            db.query(Document)
-            .filter(Document.candidate_id == cand.id, Document.document_type == "cv")
+            db.query(CandidateDocument)
+            .filter(CandidateDocument.candidate_id == cand.id, CandidateDocument.document_type == "cv")
             .first()
         )
 
@@ -124,8 +124,8 @@ def get_candidate(candidate_id: int, db: Session = Depends(get_db)):
 
     # Get documents
     documents = (
-        db.query(Document)
-        .filter(Document.candidate_id == candidate_id)
+        db.query(CandidateDocument)
+        .filter(CandidateDocument.candidate_id == candidate_id)
         .all()
     )
 
@@ -297,10 +297,10 @@ def list_my_applications(
     results = []
     for cand in candidates:
         cv_doc = (
-            db.query(Document)
+            db.query(CandidateDocument)
             .filter(
-                Document.candidate_id == cand.id,
-                Document.document_type == "cv",
+                CandidateDocument.candidate_id == cand.id,
+                CandidateDocument.document_type == "cv",
             )
             .first()
         )

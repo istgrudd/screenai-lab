@@ -128,7 +128,7 @@ def create_rubric(payload: RubricCreate, db: Session = Depends(get_db)):
     }
 
 
-@router.get("")
+@router.get("", dependencies=[Depends(_recruiter_or_admin)])
 def list_rubrics(db: Session = Depends(get_db)):
     """List all rubrics (without full dimension details)."""
     rubrics = db.query(Rubric).all()
@@ -149,7 +149,7 @@ def list_rubrics(db: Session = Depends(get_db)):
     }
 
 
-@router.get("/{rubric_id}")
+@router.get("/{rubric_id}", dependencies=[Depends(_recruiter_or_admin)])
 def get_rubric(rubric_id: int, db: Session = Depends(get_db)):
     """Get a single rubric with all its dimensions."""
     rubric = db.query(Rubric).filter(Rubric.id == rubric_id).first()

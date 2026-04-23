@@ -1,5 +1,6 @@
 # Product Requirements Document (PRD)
-## ScreenAI — Sistem Screening Rekrutasi Otomatis Berbasis RAG dan NER dengan Explainable AI
+## ScreenAI Lab — Sistem Screening Rekrutasi Otomatis untuk MBC Laboratory
+## Telkom University
 
 ---
 
@@ -7,8 +8,9 @@
 
 | Phase | Scope | Status |
 |---|---|---|
-| **Phase 1 — MVP** | Core pipeline + local dashboard (no auth) | ✅ Complete |
-| **Phase 2 — Production** | RBAC + deployment + certificate verification | 🔄 In Progress |
+| **Phase 1 — Candidate Portal MVP** | Platform pendaftaran + upload dokumen + dashboard kandidat | 🔄 In Progress |
+| **Phase 2 — Full Recruitment Flow** | Evaluasi AI + pengumuman hasil + RBAC lengkap | 📋 Planned |
+| **Phase 3 — Deployment** | VPS lab / cloud hosting + production config | 📋 Planned |
 
 ---
 
@@ -16,162 +18,278 @@
 
 ### 1.1 Ringkasan Produk
 
-Platform berbasis AI yang mengotomatiskan proses seleksi awal kandidat (CV screening) dengan tiga mekanisme utama: **Blind Screening** berbasis NER, **Evaluasi Kompetensi** berbasis RAG, dan **Explainable AI (XAI)** untuk transparansi penilaian.
+ScreenAI Lab adalah fork dari ScreenAI (Capstone) yang diadaptasi untuk kebutuhan rekrutasi internal MBC Laboratory, Telkom University. Platform ini mengintegrasikan tiga mekanisme utama yang diwarisi dari Capstone — **Blind Screening** berbasis NER, **Evaluasi Kompetensi** berbasis RAG, dan **Explainable AI (XAI)** — dengan penambahan **Candidate Portal** sebagai platform pendaftaran dan pengumpulan dokumen end-to-end, serta dukungan dokumen tambahan yang spesifik untuk konteks rekrutasi lab mahasiswa.
 
-### 1.2 Masalah yang Diselesaikan
+### 1.2 Perbedaan dengan ScreenAI (Capstone)
 
-1. Rekruter hanya punya ~7 detik per CV → banyak kandidat bagus terlewat.
-2. Seleksi manual rentan bias (nama, institusi, gender) → keputusan tidak adil.
-3. ATS yang ada hanya cocokkan keyword → tidak transparan, tidak dipercaya rekruter.
+| Aspek | ScreenAI (Capstone) | ScreenAI Lab |
+|---|---|---|
+| Target pengguna | Perusahaan umum | MBC Laboratory, Telkom University |
+| Dokumen input | CV + sertifikat EPrT | CV + KHS + KTM + Motivation Letter + SWOT + Dokumen Pendukung |
+| Candidate portal | Phase 2 (planned) | Phase 1 MVP (prioritas utama) |
+| Database | SQLite → PostgreSQL | SQLite → PostgreSQL (sesuai resource lab) |
+| Branding | ScreenAI | ScreenAI Lab |
+| UI style | Dashboard rekruter | Academic Luminary style (mockup MBC) |
+
+### 1.3 Masalah yang Diselesaikan
+
+1. Proses pendaftaran rekrutasi lab masih manual (Google Form + email) → tidak terintegrasi dengan sistem evaluasi.
+2. Pengumpulan dokumen tersebar di berbagai platform → sulit dikelola rekruter.
+3. Tidak ada transparansi bagi kandidat soal status lamaran mereka.
+4. Evaluasi manual rentan bias dan tidak konsisten antar rekruter.
 
 ---
 
 ## 2. Ruang Lingkup
 
-### Phase 1 — MVP (✅ Complete)
+### Phase 1 — Candidate Portal MVP (🔄 In Progress)
 
-- Ekstraksi teks dari PDF CV dan sertifikat bahasa (ATS-compatible only).
-- Anonimisasi otomatis identitas kandidat via IndoBERT NER.
-- Evaluasi kompetensi terhadap rubrik rekruter via RAG + LangChain + DeepSeek V3.
-- Skor per dimensi kompetensi + justifikasi berbasis bukti (XAI).
-- Ringkasan profil kandidat.
-- Dashboard rekruter: ranking, detail kandidat, override penilaian.
-- Batch processing dokumen.
-- EPrT language certificate bonus scoring.
-- Reveal Identity feature (post-evaluation).
+- Registrasi dan login kandidat (JWT-based).
+- Form profil mahasiswa (Nama, NIM, Fakultas, Jurusan, Angkatan).
+- Pemilihan divisi/posisi (Big Data, Cyber Security, Game Technology, GIS).
+- Upload multi-dokumen dengan zona terpisah per tipe dokumen.
+- Checklist kelengkapan dokumen sebelum submit.
+- Halaman status lamaran kandidat (tracking progress).
+- Dashboard rekruter: melihat daftar pelamar + status kelengkapan dokumen.
+- Submit final dengan konfirmasi (irreversible).
 
-### Phase 2 — Production (🔄 In Progress)
+### Phase 2 — Full Recruitment Flow (📋 Planned)
 
-- **RBAC** — Role-Based Access Control (Super Admin, Recruiter, Candidate).
-- **Authentication** — register, login, JWT-based session.
-- **Deployment** — VPS/cloud hosting, accessible via public URL.
-- **Certificate Ownership Verification** — name matching CV vs sertifikat.
-- **Audit Log** — log semua tindakan override rekruter.
+- Pipeline evaluasi AI dijalankan oleh rekruter (warisan dari Capstone Phase 1).
+- Pengumuman hasil seleksi administrasi via platform.
+- Skor per dimensi + justifikasi XAI ditampilkan ke rekruter.
+- Override penilaian oleh rekruter (dengan audit log).
+- Reveal Identity post-evaluasi.
+- RBAC lengkap (Super Admin, Recruiter, Candidate).
+- Audit log semua tindakan rekruter.
 
-### Out-of-Scope (Both Phases)
+### Phase 3 — Deployment (📋 Planned)
+
+- Backend deployed ke VPS lab atau Railway/Render.
+- Frontend deployed ke Vercel/Netlify.
+- Migrasi SQLite → PostgreSQL untuk production.
+- Environment variables configured untuk production.
+- CORS configured untuk production domain.
+
+### Out-of-Scope (Semua Phase)
 
 - PDF berbasis scan / gambar (OCR).
 - Sertifikat bahasa non-EPrT sebagai standar utama.
-- Evaluasi binary classification (ground truth belum tersedia).
-- Generator pertanyaan wawancara.
+- Generator pertanyaan wawancara (ada di Capstone, tidak diprioritaskan di Lab).
+- Notifikasi email otomatis (Phase 3+ backlog).
+- Mobile app native.
 
 ---
 
-## 3. Fitur
+## 3. Dokumen yang Didukung
 
-### Phase 1 Features (✅ Implemented)
+| ID | Dokumen | Wajib | Diproses AI | Keterangan |
+|---|---|---|---|---|
+| D-01 | CV (PDF) | ✅ | ✅ RAG + NER | Sama seperti Capstone |
+| D-02 | KHS / Transkrip Nilai (PDF) | ✅ | ✅ Parser khusus | Ekstrak IPK + mata kuliah relevan |
+| D-03 | KTM / Student ID (PDF/JPG) | ✅ | ✅ Rule-based validator | Verifikasi NIM, status aktif, prodi |
+| D-04 | Motivation Letter (PDF) | ✅ | ✅ RAG | Evaluasi kesesuaian motivasi dengan visi lab |
+| D-05 | Analisis SWOT Diri Sendiri (PDF) | ✅ | ⚠️ Highlight only | Tidak dijadikan skor — ditampilkan sebagai highlight untuk dibaca rekruter |
+| D-06 | Dokumen Pendukung (PDF) | ✅ | ❌ Manual checklist | Kumpulan screenshot bukti follow IG, share broadcast, dll dalam 1 PDF — diverifikasi manual rekruter |
 
-| ID | Fitur | Status |
-|---|---|---|
-| F-01 | Upload PDF (CV + sertifikat bahasa) via antarmuka web | ✅ |
-| F-02 | Ekstraksi teks dari PDF menggunakan PyMuPDF | ✅ |
-| F-03 | Normalisasi & segmentasi teks per seksi | ✅ |
-| F-04 | Deteksi entitas identitas via IndoBERT NER | ✅ |
-| F-05 | Anonimisasi otomatis dengan token anonim | ✅ |
-| F-07 | Konfigurasi rubrik per posisi | ✅ |
-| F-08 | Indexing rubrik ke ChromaDB | ✅ |
-| F-09 | Pipeline RAG: Embedding → Retrieval → Augmentation → Generation | ✅ |
-| F-10 | Competency-based inference | ✅ |
-| F-11 | Output skor per dimensi dalam format JSON | ✅ |
-| F-12 | Justifikasi berbasis bukti per dimensi | ✅ |
-| F-13 | Ringkasan profil naratif per kandidat | ✅ |
-| F-15 | Ranking kandidat berdasarkan skor komposit | ✅ |
-| F-16 | Halaman detail kandidat | ✅ |
-| F-17 | Override skor penilaian oleh rekruter | ✅ |
-| F-18 | Batch processing dokumen | ✅ |
-| F-19 | EPrT certificate bonus scoring (CEFR mapping) | ✅ |
-| F-20 | Reveal Identity (post-evaluation) | ✅ |
-| F-21 | Certificate ownership name matching | 🔄 Phase 2 |
+---
 
-### Phase 2 Features (🔄 Planned)
+## 4. Fitur
 
-#### Modul Autentikasi & RBAC
+### Phase 1 Features — Candidate Portal MVP
+
+#### Modul Autentikasi
 
 | ID | Fitur | Role | Prioritas |
 |---|---|---|---|
-| F-30 | Registrasi akun Candidate | Candidate | Must Have |
-| F-31 | Login / Logout (JWT) | All roles | Must Have |
-| F-32 | Role assignment oleh Super Admin | Super Admin | Must Have |
-| F-33 | Route protection per role | All | Must Have |
+| F-01 | Registrasi akun Candidate (email + password + data mahasiswa) | Candidate | Must Have |
+| F-02 | Login / Logout (JWT) | All | Must Have |
+| F-03 | Route protection per role | All | Must Have |
 
-#### Role Definitions
+#### Modul Profil Mahasiswa
+
+| ID | Fitur | Role | Prioritas |
+|---|---|---|---|
+| F-10 | Form profil: Nama Lengkap, NIM, Fakultas, Jurusan, Angkatan | Candidate | Must Have |
+| F-11 | Pemilihan divisi/posisi (satu pilihan per periode rekrutasi) | Candidate | Must Have |
+| F-12 | Edit profil sebelum submit final | Candidate | Must Have |
+
+#### Modul Upload Dokumen
+
+| ID | Fitur | Role | Prioritas |
+|---|---|---|---|
+| F-20 | Upload CV (PDF, max 5MB) | Candidate | Must Have |
+| F-21 | Upload KHS / Transkrip (PDF, max 5MB) | Candidate | Must Have |
+| F-22 | Upload KTM (PDF/JPG, max 2MB) | Candidate | Must Have |
+| F-23 | Upload Motivation Letter (PDF, max 5MB) | Candidate | Must Have |
+| F-24 | Upload SWOT Analysis (PDF, max 5MB) | Candidate | Must Have |
+| F-25 | Upload Dokumen Pendukung (PDF, max 10MB) | Candidate | Must Have |
+| F-26 | Multi-step upload flow (per dokumen, ada progress tracker) | Candidate | Must Have |
+| F-27 | Preview dokumen yang sudah diupload | Candidate | Should Have |
+| F-28 | Replace dokumen sebelum submit final | Candidate | Must Have |
+| F-29 | Checklist kelengkapan — semua dokumen wajib harus ada sebelum submit | Candidate | Must Have |
+
+#### Modul Submission & Status
+
+| ID | Fitur | Role | Prioritas |
+|---|---|---|---|
+| F-30 | Submit Final Application (irreversible, dengan konfirmasi + checklist) | Candidate | Must Have |
+| F-31 | Halaman status lamaran: progress tracker (Submitted → AI Screening → Hasil) | Candidate | Must Have |
+| F-32 | Progress % kelengkapan aplikasi di dashboard kandidat | Candidate | Should Have |
+| F-33 | Countdown deadline pendaftaran | Candidate | Should Have |
+
+#### Modul Dashboard Rekruter (Phase 1 scope)
+
+| ID | Fitur | Role | Prioritas |
+|---|---|---|---|
+| F-40 | Daftar pelamar per divisi + status kelengkapan dokumen | Recruiter | Must Have |
+| F-41 | Lihat detail dokumen per kandidat (preview/download) | Recruiter | Must Have |
+| F-42 | Checklist manual verifikasi Dokumen Pendukung (D-06) | Recruiter | Must Have |
+| F-43 | Filter pelamar berdasarkan divisi dan status | Recruiter | Should Have |
+
+### Phase 2 Features — Full Recruitment Flow
+
+| ID | Fitur | Role | Prioritas |
+|---|---|---|---|
+| F-50 | Jalankan pipeline evaluasi AI (NER + RAG + LLM) per batch | Recruiter | Must Have |
+| F-51 | KHS Parser: ekstrak IPK + mata kuliah relevan | System | Must Have |
+| F-52 | KTM Validator: verifikasi NIM + status aktif (rule-based) | System | Must Have |
+| F-53 | SWOT Highlight: tampilkan SWOT kandidat sebagai panel highlight | Recruiter | Must Have |
+| F-54 | Skor per dimensi kompetensi + justifikasi XAI | Recruiter | Must Have |
+| F-55 | Ranking kandidat per divisi | Recruiter | Must Have |
+| F-56 | Override skor + audit log | Recruiter | Must Have |
+| F-57 | Reveal Identity post-evaluasi | Recruiter | Must Have |
+| F-58 | Pengumuman hasil seleksi administrasi via platform | Recruiter | Must Have |
+| F-59 | Kandidat dapat melihat hasil pengumuman dari dashboard | Candidate | Must Have |
+| F-60 | RBAC lengkap: Super Admin, Recruiter, Candidate | All | Must Have |
+| F-61 | Super Admin: manajemen user + manajemen rubrik | Super Admin | Must Have |
+
+---
+
+## 5. Stack Teknologi
+
+| Layer | Stack | Keterangan |
+|---|---|---|
+| PDF Parsing | PyMuPDF | Sama seperti Capstone |
+| NER | IndoBERT (ageng-anugrah/indobert-large-p2-finetuned-ner) | Sama seperti Capstone |
+| RAG & Orchestration | LangChain | Sama seperti Capstone |
+| Vector Store | ChromaDB (persistent) | Sama seperti Capstone |
+| LLM Inference | DeepSeek V3 (deepseek-chat) | Sama seperti Capstone |
+| KHS Parser | Custom rule-based + PyMuPDF | Baru di Lab |
+| KTM Validator | Custom rule-based | Baru di Lab |
+| Backend | FastAPI + python-jose (JWT) + passlib (bcrypt) | Extended dari Capstone |
+| Frontend | React + Vite + Tailwind + shadcn/ui | Extended dari Capstone, UI style Academic Luminary |
+| Database | SQLite (dev/prod awal) | Sesuai resource server lab |
+| Auth | JWT-based, httpOnly cookie atau localStorage | Baru di Lab Phase 1 |
+| Deployment | VPS lab / Railway + Vercel | Phase 3 |
+
+---
+
+## 6. Alur Sistem
+
+### Phase 1 — Candidate Portal Flow
+```
+Candidate: Register (NIM, nama, prodi, angkatan)
+    → Login
+    → Lengkapi profil (pilih divisi)
+    → Upload dokumen step-by-step:
+        Step 1: CV
+        Step 2: Motivation Letter
+        Step 3: KHS / Transkrip
+        Step 4: KTM
+        Step 5: SWOT Analysis
+        Step 6: Dokumen Pendukung
+    → Review & checklist kelengkapan
+    → Submit Final (irreversible)
+    → Dashboard: status "Submitted — Menunggu Proses"
+
+Recruiter: Login
+    → Dashboard: daftar pelamar + status kelengkapan
+    → Lihat dokumen per kandidat
+    → Checklist manual Dokumen Pendukung
+```
+
+### Phase 2 — Full Recruitment Flow
+```
+Recruiter: Login
+    → Dashboard → Filter per divisi
+    → Run Evaluation (batch)
+        → KTM Validator (rule-based)
+        → KHS Parser (IPK + mata kuliah)
+        → NER Anonymization (CV + Motivation Letter)
+        → RAG Pipeline (CV + Motivation Letter + KHS → rubrik)
+        → LLM Inference (DeepSeek V3)
+        → SWOT ditampilkan sebagai highlight (tidak di-score)
+        → Dokumen Pendukung: checklist manual rekruter
+    → Ranking + Skor + Justifikasi XAI
+    → Override (logged) → Reveal Identity
+    → Publish pengumuman hasil administrasi
+
+Candidate: Login → Dashboard → Lihat status pengumuman
+```
+
+---
+
+## 7. Role Definitions
 
 | Role | Akses |
 |---|---|
-| **Super Admin** | Semua fitur + manage users + manage rubrics |
-| **Recruiter** | Dashboard, detail kandidat, override, reveal identity, run evaluation |
-| **Candidate** | Upload CV + sertifikat, lihat status lamaran sendiri |
-
-#### Modul Deployment
-
-| ID | Fitur | Prioritas |
-|---|---|---|
-| F-40 | Backend deployed ke VPS/cloud (Railway/Render/DigitalOcean) | Must Have |
-| F-41 | Frontend deployed (Vercel/Netlify) | Must Have |
-| F-42 | Environment variables configured for production | Must Have |
-| F-43 | CORS configured for production domain | Must Have |
-| F-44 | Database migration: SQLite → PostgreSQL (production) | Should Have |
-
-#### Modul Tambahan
-
-| ID | Fitur | Prioritas |
-|---|---|---|
-| F-50 | Audit log: catat semua override (old score, new score, reason, timestamp) | Should Have |
-| F-51 | Candidate dapat melihat status lamaran mereka sendiri | Should Have |
-| F-52 | Super Admin dashboard: user management, system stats | Should Have |
+| **Super Admin** | Semua fitur + manage users + manage rubrics + manage recruitment period |
+| **Recruiter** | Dashboard pelamar, detail kandidat, run evaluation, override, reveal identity, publish pengumuman |
+| **Candidate** | Registrasi, upload dokumen, submit lamaran, lihat status & pengumuman |
 
 ---
 
-## 4. Stack Teknologi
+## 8. Non-Fungsional
 
-| Layer | Phase 1 | Phase 2 Addition |
-|---|---|---|
-| PDF Parsing | PyMuPDF | — |
-| NER | IndoBERT via Hugging Face | — |
-| RAG & Orchestration | LangChain | — |
-| Vector Store | ChromaDB (local) | ChromaDB (persistent) |
-| LLM Inference | DeepSeek V3 | — |
-| Backend | FastAPI | + JWT auth (python-jose) |
-| Frontend | React + Vite + Tailwind + shadcn/ui | + Auth pages |
-| Database | SQLite | PostgreSQL (production) |
-| Deployment | Local | Railway / Render + Vercel |
-
----
-
-## 5. Alur Sistem
-
-### Phase 1 (Current)
-```
-Upload CV/Sertifikat (PDF)
-    → Name matching (CV vs certificate)
-    → Ekstraksi teks (PyMuPDF)
-    → Anonimisasi identitas (IndoBERT NER)
-    → RAG Pipeline (LangChain + ChromaDB) ← Rubrik dari rekruter
-    → LLM Inference (DeepSeek V3)
-    → Skor JSON + Justifikasi + Ringkasan Profil + Language Bonus
-    → Dashboard Rekruter (ranking, detail, override, reveal identity)
-```
-
-### Phase 2 (Target)
-```
-Candidate: Register → Login → Upload CV (pilih posisi) → Submit
-                                        ↓
-Recruiter: Login → Dashboard → Filter per posisi → Run Evaluation
-                                        ↓
-                          Ranking + Skor + Justifikasi XAI
-                                        ↓
-                    Override (logged) → Reveal Identity → Keputusan
-```
+| Kategori | Target |
+|---|---|
+| Auth security | JWT dengan expiry 8 jam, bcrypt password hashing |
+| Data privacy | Data lokal server lab, tidak diunggah ke third-party public service |
+| NER accuracy | Miss rate ≤ 5% (sama seperti Capstone) |
+| File upload | Max size per dokumen: CV/KHS/ML/SWOT 5MB, KTM 2MB, Dok. Pendukung 10MB |
+| Supported format | PDF untuk semua dokumen utama; JPG/PNG untuk KTM (opsional) |
+| Database | SQLite untuk development dan production awal (sesuai resource server lab) |
+| Batch performance | Mampu memproses 240 dokumen tanpa timeout |
+| Availability | Local/VPS lab — target best-effort selama periode rekrutasi aktif |
 
 ---
 
-## 6. Non-Fungsional
+## 9. Perbedaan Teknis Dokumen Baru vs Capstone
 
-| Kategori | Phase 1 | Phase 2 |
-|---|---|---|
-| Data privacy | Data lokal | Data di server, enkripsi at-rest |
-| Auth security | — | JWT with expiry, bcrypt password hashing |
-| Output consistency | JSON terstruktur | JSON terstruktur |
-| NER accuracy | Miss rate ≤ 5% | Miss rate ≤ 5% |
-| Batch performance | 240 dokumen tanpa timeout | Async queue untuk scalability |
-| Availability | Local only | 99% uptime target (VPS) |
+### KHS Parser (D-02)
+- Input: PDF KHS/Transkrip dari Telkom University
+- Output: `{ "ipk": float, "total_sks": int, "relevant_courses": [{"name": str, "grade": str, "semester": int}] }`
+- Metode: PyMuPDF extraction + rule-based pattern matching (format KHS Telkom)
+- Digunakan: sebagai sinyal tambahan dalam RAG context (bukan skor terpisah)
+
+### KTM Validator (D-03)
+- Input: PDF/JPG KTM
+- Output: `{ "valid": bool, "nim": str, "name": str, "faculty": str, "major": str, "status": "aktif/tidak aktif" }`
+- Metode: Rule-based regex matching format NIM Telkom University
+- Digunakan: filter awal (mandatory pass), tidak masuk RAG
+
+### SWOT Highlight (D-05)
+- Input: PDF SWOT Analysis
+- Output: teks ter-ekstrak, ditampilkan sebagai panel highlight di halaman detail kandidat
+- Tidak di-score oleh AI — murni untuk dibaca rekruter sebagai bahan pertimbangan kualitatif
+
+### Dokumen Pendukung (D-06)
+- Input: 1 file PDF berisi kumpulan screenshot (follow IG, share broadcast, dll)
+- Output: checkbox boolean di dashboard rekruter (Verified / Not Verified)
+- Diverifikasi manual oleh rekruter — tidak diproses AI
+
+---
+
+## 10. UI/UX Reference
+
+Desain kandidat portal mengikuti mockup "Academic Luminary style" yang telah dibuat oleh anggota tim, mencakup:
+
+- **Dashboard Kandidat**: progress %, checklist dokumen, countdown deadline, status aplikasi
+- **Profile Page**: form Personal Info + Division Selection (card-based, single select)
+- **Document Upload Center**: multi-step dengan progress tracker (CV → Motivation Letter → Transcript → KTM → SWOT → Proof)
+- **Review & Finalize**: ringkasan profil + daftar dokumen + warning irreversible + final checklist
+- **Submission Confirmed**: status page dengan recruitment journey tracker
+- **Application Result** (Phase 2): AI Score Summary per dimensi + recruitment journey timeline
+
+Warna, tipografi, dan komponen mengikuti sistem yang sudah ada (Tailwind + shadcn/ui), disesuaikan dengan branding MBC Laboratory.

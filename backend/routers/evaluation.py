@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 
 from backend.database import get_db
 from backend.middleware.auth_middleware import require_role
-from backend.models.candidate import Candidate, Document
+from backend.models.candidate import Candidate, CandidateDocument
 from backend.models.rubric import Rubric
 from backend.models.user import UserRole
 from backend.services.rag_pipeline import evaluate_candidate
@@ -76,11 +76,11 @@ async def run_batch_evaluation(
     for candidate in candidates:
         # Get the candidate's CV document with anonymized text
         document = (
-            db.query(Document)
+            db.query(CandidateDocument)
             .filter(
-                Document.candidate_id == candidate.id,
-                Document.document_type == "cv",
-                Document.anonymized_text.isnot(None),
+                CandidateDocument.candidate_id == candidate.id,
+                CandidateDocument.document_type == "cv",
+                CandidateDocument.anonymized_text.isnot(None),
             )
             .first()
         )

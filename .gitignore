@@ -17,7 +17,8 @@ venv/
 data/raw_pdfs/
 data/extracted/
 data/anonymized/
-data/screenailab.db
+data/screenai_lab.db
+data/*.db
 
 # Vector store persistence
 backend/vectorstore/

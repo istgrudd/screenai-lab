@@ -68,9 +68,9 @@ export default function LoginPage() {
           <div className="mx-auto w-11 h-11 rounded-lg bg-primary flex items-center justify-center">
             <BarChart3 className="w-6 h-6 text-primary-foreground" />
           </div>
-          <CardTitle className="text-2xl">Sign in to ScreenAI</CardTitle>
+          <CardTitle className="text-2xl">Sign in to ScreenAI Lab</CardTitle>
           <CardDescription>
-            Access your recruitment screening dashboard.
+            Access the MBC Laboratory recruitment portal.
           </CardDescription>
         </CardHeader>
         <CardContent>

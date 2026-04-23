@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 from backend.config import settings
 from backend.database import get_db
 from backend.middleware.auth_middleware import get_current_user, require_role
-from backend.models.candidate import Candidate, Document
+from backend.models.candidate import Candidate, CandidateDocument
 from backend.models.user import User, UserRole
 from backend.services.extractor import (
     detect_certificate_type,
@@ -151,7 +151,7 @@ def upload_documents(
                 candidate.language_score = eprt_score
                 candidate.language_bonus = bonus
 
-            document = Document(
+            document = CandidateDocument(
                 candidate_id=candidate.id,
                 filename=filename,
                 file_path=save_path,
@@ -186,7 +186,7 @@ def upload_documents(
         normalization = normalize_and_segment(extraction["raw_text"])
         anonymization = anonymize_text(normalization["normalized_text"])
 
-        document = Document(
+        document = CandidateDocument(
             candidate_id=candidate.id,
             filename=filename,
             file_path=save_path,

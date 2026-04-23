@@ -7,8 +7,10 @@ Endpoints:
     GET  /api/auth/me        — Auth; return current user's profile.
 """
 
+import re
+
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
 from sqlalchemy.orm import Session
 
 from backend.database import get_db
@@ -20,6 +22,11 @@ from backend.utils.security import hash_password
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 
+# NIM format per CLAUDE.md Section 9 (KTM Validator): 13 digits starting
+# with "103". Enforced here so the DB only stores valid Telkom NIMs.
+_NIM_PATTERN = re.compile(r"^103\d{10}$")
+
+
 # ---------------------------------------------------------------------------
 # Pydantic schemas
 # ---------------------------------------------------------------------------
@@ -28,6 +35,20 @@ class RegisterRequest(BaseModel):
     email: EmailStr
     password: str = Field(..., min_length=8, max_length=72)
     full_name: str = Field(..., min_length=1, max_length=255)
+    nim: str = Field(..., min_length=13, max_length=13)
+    faculty: str = Field(..., min_length=1, max_length=255)
+    major: str = Field(..., min_length=1, max_length=255)
+    year: int = Field(..., ge=2000, le=2100)
+
+    @field_validator("nim")
+    @classmethod
+    def _validate_nim(cls, v: str) -> str:
+        v = v.strip()
+        if not _NIM_PATTERN.match(v):
+            raise ValueError(
+                "NIM must be 13 digits starting with '103' (Telkom University format)"
+            )
+        return v
 
 
 class LoginRequest(BaseModel):
@@ -39,6 +60,10 @@ class UserOut(BaseModel):
     id: int
     email: str
     full_name: str
+    nim: str | None
+    faculty: str | None
+    major: str | None
+    year: int | None
     role: str
     is_active: bool
 
@@ -48,6 +73,10 @@ class UserOut(BaseModel):
             id=user.id,
             email=user.email,
             full_name=user.full_name,
+            nim=user.nim,
+            faculty=user.faculty,
+            major=user.major,
+            year=user.year,
             role=user.role.value if hasattr(user.role, "value") else str(user.role),
             is_active=user.is_active,
         )
@@ -61,17 +90,25 @@ class UserOut(BaseModel):
 def register(payload: RegisterRequest, db: Session = Depends(get_db)):
     """Register a new candidate account. Role is always 'candidate'."""
     email = payload.email.lower()
-    existing = db.query(User).filter(User.email == email).first()
-    if existing:
+    if db.query(User).filter(User.email == email).first():
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Email is already registered",
+        )
+    if db.query(User).filter(User.nim == payload.nim).first():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="NIM is already registered",
         )
 
     user = User(
         email=email,
         password_hash=hash_password(payload.password),
         full_name=payload.full_name.strip(),
+        nim=payload.nim,
+        faculty=payload.faculty.strip(),
+        major=payload.major.strip(),
+        year=payload.year,
         role=UserRole.CANDIDATE,
         is_active=True,
     )

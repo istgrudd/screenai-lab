@@ -70,9 +70,9 @@ function Sidebar() {
         </div>
         <div>
           <h1 className="text-base font-semibold tracking-tight text-foreground">
-            ScreenAI
+            ScreenAI Lab
           </h1>
-          <p className="text-xs text-muted-foreground">Recruitment Screening</p>
+          <p className="text-xs text-muted-foreground">MBC Laboratory Recruitment</p>
         </div>
       </div>
 
@@ -121,7 +121,7 @@ function Sidebar() {
             Log out
           </Button>
           <p className="text-xs text-muted-foreground pt-1">
-            Capstone Design © 2026
+            MBC Laboratory © 2026
           </p>
         </div>
       )}
