@@ -1,14 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import {
-  CheckCircle2,
-  ClipboardCopy,
-  Loader2,
-  Sparkles,
-  Trophy,
-  UserCheck,
-} from "lucide-react";
+import { CheckCircle2, ClipboardCopy, Loader2 } from "lucide-react";
 
 import {
   Card,
@@ -20,84 +13,12 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 
+import RecruitmentJourney from "@/components/RecruitmentJourney";
 import { getMyApplication } from "@/lib/api";
-
-const JOURNEY = [
-  {
-    id: "submitted",
-    label: "Submitted",
-    description: "Your application has been received.",
-    icon: CheckCircle2,
-  },
-  {
-    id: "ai_screening",
-    label: "AI Screening",
-    description: "Our AI evaluates your documents against the rubric.",
-    icon: Sparkles,
-  },
-  {
-    id: "peer_review",
-    label: "Peer Review",
-    description: "Recruiters review the AI output and your SWOT + supporting docs.",
-    icon: UserCheck,
-  },
-  {
-    id: "final_decision",
-    label: "Final Decision",
-    description: "You'll see the announcement on your dashboard.",
-    icon: Trophy,
-  },
-];
-
-// Map application.status → which journey step is currently active.
-const STATUS_TO_STEP = {
-  submitted: "submitted",
-  screening: "ai_screening",
-  announced_pass: "final_decision",
-  announced_fail: "final_decision",
-};
 
 function referenceId(app) {
   if (!app) return "—";
   return `MBC-${String(app.id).padStart(5, "0")}-${app.division.slice(0, 3).toUpperCase()}`;
-}
-
-function JourneyStep({ step, active, done, isLast }) {
-  const Icon = step.icon;
-  return (
-    <div className="flex-1 flex flex-col items-center relative">
-      <div
-        className={`w-12 h-12 rounded-full flex items-center justify-center border-2 shrink-0 z-10 ${
-          active
-            ? "bg-primary text-primary-foreground border-primary shadow-md"
-            : done
-            ? "bg-emerald-500 text-white border-emerald-500"
-            : "bg-background text-muted-foreground border-border"
-        }`}
-      >
-        <Icon className="w-5 h-5" />
-      </div>
-      <div className="text-center mt-3 px-2">
-        <p
-          className={`text-sm font-medium ${
-            active || done ? "text-foreground" : "text-muted-foreground"
-          }`}
-        >
-          {step.label}
-        </p>
-        <p className="text-xs text-muted-foreground mt-1 max-w-[150px]">
-          {step.description}
-        </p>
-      </div>
-      {!isLast && (
-        <div
-          className={`absolute top-6 left-1/2 w-full h-0.5 ${
-            done ? "bg-emerald-500" : "bg-border"
-          }`}
-        />
-      )}
-    </div>
-  );
 }
 
 export default function SubmittedPage() {
@@ -128,9 +49,6 @@ export default function SubmittedPage() {
   }, [navigate]);
 
   const ref = referenceId(application);
-
-  const activeStepId = STATUS_TO_STEP[application?.status] || "submitted";
-  const activeIndex = JOURNEY.findIndex((s) => s.id === activeStepId);
 
   const copyRef = async () => {
     try {
@@ -211,17 +129,7 @@ export default function SubmittedPage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="pt-2">
-          <div className="flex items-start justify-between gap-2 relative">
-            {JOURNEY.map((step, idx) => (
-              <JourneyStep
-                key={step.id}
-                step={step}
-                active={idx === activeIndex}
-                done={idx < activeIndex}
-                isLast={idx === JOURNEY.length - 1}
-              />
-            ))}
-          </div>
+          <RecruitmentJourney status={application.status} />
         </CardContent>
       </Card>
 

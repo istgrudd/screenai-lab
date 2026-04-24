@@ -16,7 +16,11 @@ from sqlalchemy.orm import Session
 from backend.database import get_db
 from backend.middleware.auth_middleware import get_current_user
 from backend.models.user import User, UserRole
-from backend.services.auth_service import authenticate_user, create_access_token
+from backend.services.auth_service import (
+    AuthResult,
+    authenticate_user,
+    create_access_token,
+)
 from backend.utils.security import hash_password
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -130,14 +134,25 @@ def register(payload: RegisterRequest, db: Session = Depends(get_db)):
 
 @router.post("/login")
 def login(payload: LoginRequest, db: Session = Depends(get_db)):
-    """Authenticate a user and return a JWT."""
-    user = authenticate_user(db, payload.email, payload.password)
-    if not user:
+    """Authenticate a user and return a JWT.
+
+    Returns 401 for bad credentials and 403 for correct credentials against
+    a deactivated account — the latter is an explicit admin decision and
+    the candidate should know to contact support rather than retry.
+    """
+    result = authenticate_user(db, payload.email, payload.password)
+    if result == AuthResult.INVALID:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password",
         )
+    if result == AuthResult.DEACTIVATED:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account is deactivated",
+        )
 
+    user = result
     token = create_access_token(user)
     return {
         "success": True,

@@ -26,8 +26,10 @@ from sqlalchemy.orm import Session
 from backend.database import get_db
 from backend.middleware.auth_middleware import get_current_user, require_role
 from backend.models.application import Application, ApplicationStatus, Division
+from backend.models.candidate import Candidate
 from backend.models.document import Document, DocumentType
 from backend.models.user import User, UserRole
+from backend.services.extractor import extract_text_from_pdf
 
 router = APIRouter(prefix="/api/applications", tags=["applications"])
 recruiter_router = APIRouter(prefix="/api/recruiter", tags=["recruiter"])
@@ -150,6 +152,60 @@ def get_my_application(
     }
 
 
+@router.get("/{application_id}/swot-text")
+def get_swot_text(
+    application_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Return plain-text content of the application's uploaded SWOT PDF.
+
+    Extraction is deterministic (PyMuPDF); the text is not cached — SWOT
+    documents are small enough that re-extracting on demand is cheaper
+    than managing a cache invalidation path.
+    """
+    app = db.query(Application).filter(Application.id == application_id).first()
+    if not app:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Application not found")
+    # Candidates can read their own; recruiters+ can read any.
+    if current_user.role == UserRole.CANDIDATE and app.user_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not your application")
+
+    swot_doc = (
+        db.query(Document)
+        .filter(
+            Document.application_id == application_id,
+            Document.doc_type == DocumentType.SWOT,
+        )
+        .first()
+    )
+    if not swot_doc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No SWOT document uploaded for this application",
+        )
+
+    try:
+        result = extract_text_from_pdf(swot_doc.file_path)
+    except (FileNotFoundError, ValueError) as e:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Failed to extract SWOT text: {e}",
+        )
+
+    return {
+        "success": True,
+        "data": {
+            "application_id": application_id,
+            "document_id": swot_doc.id,
+            "file_name": swot_doc.file_name,
+            "text": (result.get("raw_text") or "").strip(),
+            "page_count": result.get("metadata", {}).get("page_count"),
+        },
+        "error": None,
+    }
+
+
 @router.post(
     "/{application_id}/submit",
     dependencies=[Depends(_candidate_only)],
@@ -244,9 +300,24 @@ def list_submitted_applications(
     for app in rows:
         user = db.query(User).filter(User.id == app.user_id).first()
         count = _count_documents(db, app.id)
+
+        # Cross-link to the Capstone evaluation record (if one exists yet).
+        # In Phase 1 this is always None — the Phase-2 eval pipeline populates
+        # ``candidates`` with user_id set, at which point the recruiter
+        # dashboard ranking columns light up automatically.
+        scored = (
+            db.query(Candidate)
+            .filter(Candidate.user_id == app.user_id)
+            .order_by(Candidate.created_at.desc())
+            .first()
+            if user
+            else None
+        )
+
         data.append(
             {
                 **ApplicationOut.from_application(app, count).model_dump(),
+                "doc_completeness_pct": int(round((count / len(DocumentType)) * 100)),
                 "candidate": {
                     "user_id": user.id if user else None,
                     "full_name": user.full_name if user else None,
@@ -256,6 +327,14 @@ def list_submitted_applications(
                     "major": user.major if user else None,
                     "year": user.year if user else None,
                 } if user else None,
+                "evaluation": {
+                    "candidate_id": scored.id,
+                    "anonymous_id": scored.anonymous_id,
+                    "composite_score": scored.composite_score,
+                    "language_score": scored.language_score,
+                    "language_bonus": scored.language_bonus,
+                    "status": scored.status,
+                } if scored else None,
             }
         )
     return {"success": True, "data": data, "error": None}

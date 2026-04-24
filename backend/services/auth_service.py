@@ -41,11 +41,31 @@ def decode_access_token(token: str) -> dict | None:
         return None
 
 
-def authenticate_user(db: Session, email: str, password: str) -> User | None:
-    """Look up user by email and verify password. Returns User or None."""
+class AuthResult:
+    """Discriminated result from ``authenticate_user``.
+
+    Lets the router distinguish invalid credentials (401) from a valid login
+    against a deactivated account (403) without coupling service-layer code
+    to FastAPI response types.
+    """
+
+    INVALID = "invalid"
+    DEACTIVATED = "deactivated"
+
+
+def authenticate_user(
+    db: Session, email: str, password: str
+) -> User | str:
+    """Verify credentials and return the User, or a sentinel describing why not.
+
+    Returns:
+        User          — credentials match and the account is active
+        "invalid"     — email unknown OR password mismatch
+        "deactivated" — credentials match, but User.is_active == False
+    """
     user = db.query(User).filter(User.email == email.lower()).first()
-    if not user or not user.is_active:
-        return None
-    if not verify_password(password, user.password_hash):
-        return None
+    if not user or not verify_password(password, user.password_hash):
+        return AuthResult.INVALID
+    if not user.is_active:
+        return AuthResult.DEACTIVATED
     return user

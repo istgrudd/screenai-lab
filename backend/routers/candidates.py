@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from backend.database import get_db
 from backend.middleware.auth_middleware import get_current_user, require_role
+from backend.models.application import Application
 from backend.models.candidate import Candidate, CandidateDocument, DimensionScore
 from backend.models.rubric import Dimension, Rubric
 from backend.models.user import User, UserRole
@@ -153,6 +154,20 @@ def get_candidate(candidate_id: int, db: Session = Depends(get_db)):
             "override_reason": s.override_reason,
         })
 
+    # Cross-link to the candidate's Phase-1 Application (and its user row).
+    # Lets the recruiter detail view show uploaded-document completeness and
+    # reveal identity without a second round-trip.
+    app = None
+    user = None
+    if candidate.user_id:
+        user = db.query(User).filter(User.id == candidate.user_id).first()
+        app = (
+            db.query(Application)
+            .filter(Application.user_id == candidate.user_id)
+            .order_by(Application.created_at.desc())
+            .first()
+        )
+
     cefr_level, _ = cefr_from_score(candidate.language_score)
     cert_doc = next(
         (d for d in documents if d.document_type == "certificate"), None
@@ -172,6 +187,7 @@ def get_candidate(candidate_id: int, db: Session = Depends(get_db)):
         "data": {
             "candidate_id": candidate.id,
             "anonymous_id": candidate.anonymous_id,
+            "user_id": candidate.user_id,
             "status": candidate.status,
             "composite_score": candidate.composite_score,
             "language_score": candidate.language_score,
@@ -180,6 +196,20 @@ def get_candidate(candidate_id: int, db: Session = Depends(get_db)):
             "language_certificate": language_certificate,
             "profile_summary": candidate.profile_summary,
             "created_at": candidate.created_at.isoformat() if candidate.created_at else None,
+            "application": {
+                "id": app.id,
+                "division": app.division.value if hasattr(app.division, "value") else str(app.division),
+                "status": app.status.value if hasattr(app.status, "value") else str(app.status),
+                "submitted_at": app.submitted_at.isoformat() if app.submitted_at else None,
+            } if app else None,
+            "user_profile": {
+                "full_name": user.full_name,
+                "email": user.email,
+                "nim": user.nim,
+                "faculty": user.faculty,
+                "major": user.major,
+                "year": user.year,
+            } if user else None,
             "documents": [
                 {
                     "id": d.id,

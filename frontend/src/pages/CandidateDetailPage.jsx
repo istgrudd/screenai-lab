@@ -6,13 +6,15 @@ import {
   Loader2,
   User,
   FileText,
-  Quote,
   Pencil,
   ShieldCheck,
   AlertTriangle,
   Eye,
   EyeOff,
   Languages,
+  ClipboardList,
+  CheckCircle2,
+  XCircle,
 } from "lucide-react";
 import {
   RadarChart,
@@ -33,9 +35,16 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { getCandidate, overrideScore as apiOverrideScore } from "@/lib/api";
+import {
+  getCandidate,
+  listApplicationDocuments,
+  overrideScore as apiOverrideScore,
+  verifyDocument,
+} from "@/lib/api";
 import OverrideDialog from "@/components/OverrideDialog";
 import JustificationCard from "@/components/JustificationCard";
+import DocumentPreviewDialog from "@/components/DocumentPreviewDialog";
+import SwotHighlightPanel from "@/components/SwotHighlightPanel";
 
 const CHART_COLORS = [
   "hsl(210, 80%, 55%)",
@@ -118,12 +127,26 @@ export default function CandidateDetailPage() {
   const [loading, setLoading] = useState(true);
   const [overrideTarget, setOverrideTarget] = useState(null);
   const [identityRevealed, setIdentityRevealed] = useState(false);
+  const [appDocuments, setAppDocuments] = useState([]);
+  const [previewDoc, setPreviewDoc] = useState(null);
+  const [verifyingDocId, setVerifyingDocId] = useState(null);
 
   const fetchCandidate = async () => {
     setLoading(true);
     try {
       const data = await getCandidate(id);
       setCandidate(data);
+      if (data.application?.id) {
+        try {
+          const { documents } = await listApplicationDocuments(data.application.id);
+          setAppDocuments(documents);
+        } catch (err) {
+          console.warn("Could not load application documents:", err.message);
+          setAppDocuments([]);
+        }
+      } else {
+        setAppDocuments([]);
+      }
     } catch (err) {
       toast.error(`Failed to load candidate: ${err.message}`);
     } finally {
@@ -131,8 +154,26 @@ export default function CandidateDetailPage() {
     }
   };
 
+  const handleVerify = async (docId, next) => {
+    setVerifyingDocId(docId);
+    try {
+      const updated = await verifyDocument(docId, next);
+      setAppDocuments((prev) =>
+        prev.map((d) => (d.id === docId ? { ...d, is_verified: updated.is_verified } : d))
+      );
+      toast.success(
+        `Dokumen Pendukung marked as ${updated.is_verified ? "verified" : "not verified"}.`
+      );
+    } catch (err) {
+      toast.error(`Verification failed: ${err.message}`);
+    } finally {
+      setVerifyingDocId(null);
+    }
+  };
+
   useEffect(() => {
     fetchCandidate();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
   const handleOverride = async (score, reason) => {
@@ -221,7 +262,21 @@ export default function CandidateDetailPage() {
         </div>
       </div>
 
-      {/* Language certificate */}
+      {/* Phase-1 application documents */}
+      <ApplicationDocumentsCard
+        application={candidate.application}
+        documents={appDocuments}
+        onPreview={setPreviewDoc}
+        onVerifyToggle={handleVerify}
+        verifyingDocId={verifyingDocId}
+      />
+
+      {/* SWOT highlight (read-only, not AI-scored) */}
+      {candidate.application?.id && (
+        <SwotHighlightPanel applicationId={candidate.application.id} />
+      )}
+
+      {/* Language certificate (Capstone) */}
       <LanguageCertificateCard candidate={candidate} />
 
       {/* Profile summary */}
@@ -481,6 +536,146 @@ export default function CandidateDetailPage() {
         dimScore={overrideTarget}
         onSubmit={handleOverride}
       />
+
+      {/* Document preview dialog (Blob-based fetch, auth header attached) */}
+      <DocumentPreviewDialog
+        open={!!previewDoc}
+        onClose={() => setPreviewDoc(null)}
+        document={previewDoc}
+      />
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Application Documents card
+// ---------------------------------------------------------------------------
+
+const APP_DOC_LABELS = {
+  cv: "Curriculum Vitae",
+  motivation_letter: "Motivation Letter",
+  khs: "KHS / Transcript",
+  ktm: "KTM / Student ID",
+  swot: "SWOT Analysis",
+  supporting_docs: "Dokumen Pendukung",
+};
+const APP_DOC_ORDER = [
+  "cv",
+  "motivation_letter",
+  "khs",
+  "ktm",
+  "swot",
+  "supporting_docs",
+];
+
+function ApplicationDocumentsCard({
+  application,
+  documents,
+  onPreview,
+  onVerifyToggle,
+  verifyingDocId,
+}) {
+  const byType = new Map(documents.map((d) => [d.doc_type, d]));
+  const uploadedCount = documents.length;
+  const pct = Math.round((uploadedCount / APP_DOC_ORDER.length) * 100);
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <div className="flex items-start justify-between gap-3 flex-wrap">
+          <div>
+            <CardTitle className="text-base flex items-center gap-2">
+              <ClipboardList className="w-4 h-4" />
+              Application Documents
+            </CardTitle>
+            <CardDescription>
+              {application
+                ? `The six documents uploaded by the candidate (${uploadedCount}/${APP_DOC_ORDER.length}, ${pct}%).`
+                : "This candidate has no associated Phase-1 application yet."}
+            </CardDescription>
+          </div>
+          {application && (
+            <Badge variant="outline" className="capitalize">
+              {application.division?.replace("_", " ")} · {application.status}
+            </Badge>
+          )}
+        </div>
+      </CardHeader>
+      <CardContent className="divide-y">
+        {!application && (
+          <p className="text-sm text-muted-foreground py-4">
+            Candidate wasn't uploaded via the candidate portal — no application
+            document list available.
+          </p>
+        )}
+        {application &&
+          APP_DOC_ORDER.map((type) => {
+            const doc = byType.get(type);
+            const isSupporting = type === "supporting_docs";
+            return (
+              <div
+                key={type}
+                className="py-3 flex items-center justify-between gap-3 flex-wrap"
+              >
+                <div className="flex items-center gap-3 min-w-0">
+                  <div
+                    className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${
+                      doc
+                        ? "bg-emerald-500/15 text-emerald-700"
+                        : "bg-muted text-muted-foreground"
+                    }`}
+                  >
+                    {doc ? (
+                      <CheckCircle2 className="w-4 h-4" />
+                    ) : (
+                      <XCircle className="w-4 h-4" />
+                    )}
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium">
+                      {APP_DOC_LABELS[type]}
+                    </p>
+                    <p className="text-xs text-muted-foreground truncate">
+                      {doc
+                        ? `${doc.file_name} · ${(doc.file_size / 1024).toFixed(1)} KB`
+                        : "Missing"}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  {isSupporting && doc && (
+                    <label className="flex items-center gap-2 rounded-md border px-2 py-1 text-xs cursor-pointer hover:bg-muted/40">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(doc.is_verified)}
+                        disabled={verifyingDocId === doc.id}
+                        onChange={(e) => onVerifyToggle(doc.id, e.target.checked)}
+                        className="h-3.5 w-3.5 accent-primary"
+                      />
+                      Verified
+                    </label>
+                  )}
+                  {doc ? (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => onPreview(doc)}
+                      className="gap-2"
+                    >
+                      <Eye className="w-3.5 h-3.5" />
+                      Preview
+                    </Button>
+                  ) : (
+                    <Badge variant="destructive" className="text-[10px] uppercase">
+                      Missing
+                    </Badge>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+      </CardContent>
+    </Card>
   );
 }

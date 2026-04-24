@@ -150,6 +150,81 @@ export function documentFileUrl(docId) {
   return `${BASE_URL}/documents/${docId}/file`;
 }
 
+/**
+ * Fetch a document with the auth header attached, returning a Blob URL.
+ * Callers must revoke the URL when done: URL.revokeObjectURL(url).
+ * Resolves to { url, mime, filename } so the caller can render in a
+ * <iframe>/<img> or trigger a download without exposing the raw endpoint.
+ */
+export async function fetchDocumentBlob(docId) {
+  const token = getToken();
+  const res = await fetch(`${BASE_URL}/documents/${docId}/file`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (res.status === 401) {
+    removeToken();
+    if (!window.location.pathname.startsWith("/login")) {
+      window.location.assign("/login");
+    }
+    throw new Error("Unauthorized");
+  }
+  if (!res.ok) throw new Error(`Failed to load document (HTTP ${res.status})`);
+  const mime = res.headers.get("content-type") || "application/octet-stream";
+  const disposition = res.headers.get("content-disposition") || "";
+  const match = /filename\*?="?([^";]+)"?/i.exec(disposition);
+  const filename = match ? decodeURIComponent(match[1]) : `document-${docId}`;
+  const blob = await res.blob();
+  return { url: URL.createObjectURL(blob), mime, filename };
+}
+
+export async function verifyDocument(docId, isVerified) {
+  return request(`/documents/${docId}/verify`, {
+    method: "PUT",
+    body: JSON.stringify({ is_verified: isVerified }),
+  });
+}
+
+export async function getSwotText(applicationId) {
+  return request(`/applications/${applicationId}/swot-text`);
+}
+
+// ── Recruiter: applications list ────────────────────────────────────────────
+
+export async function listRecruiterApplications({ division, status } = {}) {
+  const params = new URLSearchParams();
+  if (division) params.set("division", division);
+  if (status) params.set("status", status);
+  const qs = params.toString();
+  return request(`/recruiter/applications${qs ? `?${qs}` : ""}`);
+}
+
+// ── Super Admin: users management ───────────────────────────────────────────
+
+export async function listUsers({ page = 1, limit = 20, role, q } = {}) {
+  const params = new URLSearchParams({
+    page: String(page),
+    limit: String(limit),
+  });
+  if (role) params.set("role", role);
+  if (q) params.set("q", q);
+  return request(`/users?${params.toString()}`);
+}
+
+export async function updateUserRole(userId, role) {
+  return request(`/users/${userId}/role`, {
+    method: "PUT",
+    body: JSON.stringify({ role }),
+  });
+}
+
+export async function deactivateUser(userId) {
+  return request(`/users/${userId}/deactivate`, { method: "PUT" });
+}
+
+export async function reactivateUser(userId) {
+  return request(`/users/${userId}/reactivate`, { method: "PUT" });
+}
+
 // ── Upload ──────────────────────────────────────────────────────────────────
 
 /**
