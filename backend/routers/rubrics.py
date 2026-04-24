@@ -8,12 +8,13 @@ Endpoints:
     DELETE /api/rubrics/{id}    — Delete rubric (cascades to dimensions)
 """
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from backend.database import get_db
 from backend.middleware.auth_middleware import require_role
+from backend.models.application import Division
 from backend.models.rubric import Rubric, Dimension
 from backend.models.user import UserRole
 
@@ -36,6 +37,7 @@ class DimensionCreate(BaseModel):
 class RubricCreate(BaseModel):
     name: str
     position: str
+    division: Division | None = None
     description: str | None = None
     dimensions: list[DimensionCreate]
 
@@ -51,6 +53,7 @@ class DimensionUpdate(BaseModel):
 class RubricUpdate(BaseModel):
     name: str
     position: str
+    division: Division | None = None
     description: str | None = None
     dimensions: list[DimensionUpdate]
 
@@ -65,6 +68,7 @@ def _rubric_to_dict(rubric: Rubric) -> dict:
         "id": rubric.id,
         "name": rubric.name,
         "position": rubric.position,
+        "division": rubric.division,
         "description": rubric.description,
         "created_at": rubric.created_at.isoformat() if rubric.created_at else None,
         "updated_at": rubric.updated_at.isoformat() if rubric.updated_at else None,
@@ -82,13 +86,26 @@ def _rubric_to_dict(rubric: Rubric) -> dict:
 
 
 def _validate_weights(dimensions: list) -> None:
-    """Ensure dimension weights sum to approximately 1.0."""
+    """Ensure dimension weights sum to approximately 1.0.
+
+    Empty rubrics (no dimensions yet) are permitted — the division-seeded
+    defaults start empty and the recruiter fills them in later.
+    """
+    if not dimensions:
+        return
     total = sum(d.weight for d in dimensions)
     if abs(total - 1.0) > 0.01:
         raise HTTPException(
             status_code=400,
             detail=f"Dimension weights must sum to 1.0, got {total:.2f}",
         )
+
+
+def _division_value(value) -> str | None:
+    """Unwrap either a Division enum or a raw string to the persisted string."""
+    if value is None:
+        return None
+    return value.value if hasattr(value, "value") else str(value)
 
 
 # ---------------------------------------------------------------------------
@@ -103,6 +120,7 @@ def create_rubric(payload: RubricCreate, db: Session = Depends(get_db)):
     rubric = Rubric(
         name=payload.name,
         position=payload.position,
+        division=_division_value(payload.division),
         description=payload.description,
     )
     db.add(rubric)
@@ -129,9 +147,22 @@ def create_rubric(payload: RubricCreate, db: Session = Depends(get_db)):
 
 
 @router.get("", dependencies=[Depends(_recruiter_or_admin)])
-def list_rubrics(db: Session = Depends(get_db)):
-    """List all rubrics (without full dimension details)."""
-    rubrics = db.query(Rubric).all()
+def list_rubrics(
+    division: Division | None = Query(
+        None, description="Filter rubrics by MBC division"
+    ),
+    db: Session = Depends(get_db),
+):
+    """List all rubrics (without full dimension details).
+
+    Pass ``?division=big_data`` (etc.) to fetch the rubric for a specific
+    MBC Laboratory division — used by the evaluation flow to pick the
+    right rubric for a candidate based on their application.
+    """
+    query = db.query(Rubric)
+    if division is not None:
+        query = query.filter(Rubric.division == division.value)
+    rubrics = query.all()
     return {
         "success": True,
         "data": [
@@ -139,6 +170,7 @@ def list_rubrics(db: Session = Depends(get_db)):
                 "id": r.id,
                 "name": r.name,
                 "position": r.position,
+                "division": r.division,
                 "description": r.description,
                 "dimension_count": len(r.dimensions),
                 "created_at": r.created_at.isoformat() if r.created_at else None,
@@ -176,6 +208,7 @@ def update_rubric(
 
     rubric.name = payload.name
     rubric.position = payload.position
+    rubric.division = _division_value(payload.division)
     rubric.description = payload.description
 
     # Delete old dimensions and recreate

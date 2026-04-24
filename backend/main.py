@@ -10,7 +10,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.config import settings
-from backend.database import init_db
+from backend.database import SessionLocal, init_db
 from backend.routers.auth import router as auth_router
 from backend.routers.upload import router as upload_router
 from backend.routers.rubrics import router as rubrics_router
@@ -44,6 +44,20 @@ async def lifespan(app: FastAPI):
     init_db()
     print("[OK] Database initialized")
     print("[OK] Data directories ready")
+
+    # Idempotent seed: one empty rubric per MBC Laboratory division.
+    from backend.services.rubric_seeding import seed_division_rubrics
+
+    db = SessionLocal()
+    try:
+        created = seed_division_rubrics(db)
+        if created:
+            print(f"[OK] Seeded division rubrics: {', '.join(created)}")
+        else:
+            print("[OK] Division rubrics already present")
+    finally:
+        db.close()
+
     print(f"[OK] Server running on port {settings.app_port}")
 
     yield
