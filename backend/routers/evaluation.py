@@ -3,6 +3,14 @@
 Endpoints:
     POST /api/evaluate          — Trigger batch evaluation for a rubric
     GET  /api/evaluate/status   — Check latest evaluation status
+
+The evaluation flow has two stages:
+1. **Screening bridge** — converts submitted portal applications
+   (``applications`` + ``documents`` tables) into AI pipeline candidates
+   (``candidates`` + ``candidate_documents`` tables) by extracting,
+   normalising, and anonymising the candidate's CV and Motivation Letter.
+2. **RAG evaluation** — scores each anonymised candidate against the
+   selected rubric using LLM inference.
 """
 
 import asyncio
@@ -37,6 +45,12 @@ async def run_batch_evaluation(
 ):
     """Evaluate all candidates with anonymized text against a rubric.
 
+    Two-stage pipeline:
+    1. **Bridge** — portal submissions (applications + documents) are
+       converted into AI pipeline candidates with anonymised text.
+    2. **RAG evaluation** — each anonymised candidate is scored by the
+       LLM against the rubric's competency dimensions.
+
     Processes candidates sequentially (MVP — no async worker queue).
     Only processes candidates with status 'anonymized' (not yet scored)
     or re-evaluates candidates already scored with a different rubric.
@@ -48,6 +62,30 @@ async def run_batch_evaluation(
             status_code=404,
             detail=f"Rubric {payload.rubric_id} not found",
         )
+
+    if not rubric.dimensions:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Rubric '{rubric.name}' has no competency dimensions. "
+                "Add dimensions and weights before running evaluation."
+            ),
+        )
+
+    # --- Bridge: convert submitted portal applications → pipeline candidates ---
+    from backend.services.screening_bridge import prepare_candidates_for_evaluation
+
+    try:
+        new_ids = prepare_candidates_for_evaluation(payload.rubric_id, db)
+        if new_ids:
+            print(
+                f"[BRIDGE] Prepared {len(new_ids)} new candidate(s) "
+                f"from portal submissions"
+            )
+    except Exception as exc:
+        # Non-fatal: existing candidates can still be evaluated.
+        print(f"[BRIDGE] Warning: bridge failed — {exc}")
+        traceback.print_exc()
 
     # --- Find candidates with status 'anonymized' for this rubric ---
     candidates = (
@@ -74,18 +112,25 @@ async def run_batch_evaluation(
     errors = []
 
     for candidate in candidates:
-        # Get the candidate's CV document with anonymized text
-        document = (
+        # Collect all anonymized documents (CV + Motivation Letter)
+        all_docs = (
             db.query(CandidateDocument)
             .filter(
                 CandidateDocument.candidate_id == candidate.id,
-                CandidateDocument.document_type == "cv",
                 CandidateDocument.anonymized_text.isnot(None),
             )
-            .first()
+            .all()
         )
 
-        if not document:
+        cv_doc = next(
+            (d for d in all_docs if d.document_type == "cv"), None
+        )
+        ml_doc = next(
+            (d for d in all_docs if d.document_type == "motivation_letter"),
+            None,
+        )
+
+        if not cv_doc:
             errors.append({
                 "candidate_id": candidate.id,
                 "anonymous_id": candidate.anonymous_id,
@@ -96,9 +141,19 @@ async def run_batch_evaluation(
         try:
             print(f"[EVAL] Evaluating candidate {candidate.anonymous_id}...")
 
-            # Build the anonymized_cv dict
+            # Build the combined anonymized text (CV + Motivation Letter)
+            combined_text = cv_doc.anonymized_text
+            if ml_doc and ml_doc.anonymized_text:
+                combined_text += (
+                    "\n\n"
+                    "========================================\n"
+                    "MOTIVATION LETTER KANDIDAT (SUDAH DIANONIMISASI):\n"
+                    "========================================\n\n"
+                    + ml_doc.anonymized_text
+                )
+
             anonymized_cv = {
-                "anonymized_text": document.anonymized_text,
+                "anonymized_text": combined_text,
             }
 
             # Certificates are intentionally NOT passed to the RAG pipeline.

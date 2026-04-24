@@ -1,11 +1,12 @@
 """RAG pipeline orchestration service.
 
-Evaluates a candidate's anonymized CV against a rubric using:
+Evaluates a candidate's anonymized documents (CV + Motivation Letter)
+against a rubric using:
 1. Rubric context retrieval (dimensions + indicators)
-2. Prompt augmentation with CV text + rubric context
+2. Prompt augmentation with document text + rubric context
 3. LLM inference via DeepSeek V3 for structured scoring
 
-The pipeline is designed for Indonesian-language CVs and produces
+The pipeline is designed for Indonesian-language documents and produces
 evidence-based scoring with justifications.
 """
 
@@ -19,21 +20,22 @@ from backend.utils.llm_client import call_llm_json
 # System prompt — instructs the LLM on its role, rules, and output format
 # ---------------------------------------------------------------------------
 
-SYSTEM_PROMPT = """Kamu adalah sistem evaluasi CV otomatis untuk proses rekrutasi.
+SYSTEM_PROMPT = """Kamu adalah sistem evaluasi dokumen otomatis untuk proses rekrutasi.
 
 PERAN:
-Kamu mengevaluasi CV kandidat terhadap rubrik kualifikasi yang diberikan rekruter. Kamu memberikan skor objektif per dimensi kompetensi berdasarkan HANYA bukti yang ditemukan dalam teks CV.
+Kamu mengevaluasi dokumen kandidat (CV dan Motivation Letter) terhadap rubrik kualifikasi yang diberikan rekruter. Kamu memberikan skor objektif per dimensi kompetensi berdasarkan HANYA bukti yang ditemukan dalam teks dokumen.
 
 ATURAN KETAT:
-1. Evaluasi HANYA berdasarkan teks CV yang diberikan. JANGAN mengarang atau mengasumsikan informasi yang tidak ada dalam CV.
-2. Setiap skor HARUS disertai justifikasi yang mengutip bukti langsung dari teks CV.
-3. Jika tidak ada bukti untuk suatu indikator, berikan skor rendah untuk indikator tersebut dan jelaskan bahwa bukti tidak ditemukan.
+1. Evaluasi HANYA berdasarkan teks dokumen (CV dan Motivation Letter) yang diberikan. JANGAN mengarang atau mengasumsikan informasi yang tidak ada dalam dokumen.
+2. Setiap skor HARUS disertai justifikasi yang mengutip bukti langsung dari teks dokumen.
+3. Jika tidak ada bukti untuk suatu indikator di CV maupun Motivation Letter, berikan skor rendah untuk indikator tersebut dan jelaskan bahwa bukti tidak ditemukan.
 4. Skor menggunakan skala 0-100 per dimensi.
-5. Evidence harus berupa kutipan langsung atau parafrase dekat dari teks CV.
-6. CV mungkin dalam Bahasa Indonesia — evaluasi sesuai bahasa aslinya.
+5. Evidence harus berupa kutipan langsung atau parafrase dekat dari teks dokumen.
+6. Dokumen mungkin dalam Bahasa Indonesia — evaluasi sesuai bahasa aslinya.
 7. Kandidat adalah fresh graduate / entry-level — proyek akademik, tugas kuliah, skripsi, dan peran organisasi adalah bukti valid.
-8. Teks CV sudah dianonimisasi — abaikan token seperti [PERSON_1], [ORG_1], [LOC_1], dll.
+8. Teks dokumen sudah dianonimisasi — abaikan token seperti [PERSON_1], [ORG_1], [LOC_1], dll.
 9. Profile summary HARUS ditulis dalam Bahasa Indonesia.
+10. Pertimbangkan CV untuk menilai kompetensi teknis dan pengalaman; Motivation Letter untuk menilai motivasi, kesesuaian minat, dan pemahaman terhadap posisi.
 
 FORMAT OUTPUT:
 Kamu HARUS merespons dalam format JSON yang valid (tanpa markdown code fence). Struktur JSON:
@@ -44,14 +46,14 @@ Kamu HARUS merespons dalam format JSON yang valid (tanpa markdown code fence). S
       "dimension": "<nama dimensi yang tepat>",
       "score": <angka 0-100>,
       "justification": "<penjelasan mengapa skor ini diberikan, dalam Bahasa Indonesia>",
-      "evidence": ["<kutipan 1 dari CV>", "<kutipan 2 dari CV>"]
+      "evidence": ["<kutipan 1 dari dokumen>", "<kutipan 2 dari dokumen>"]
     }
   ],
   "profile_summary": "<ringkasan profil kandidat dalam 2-3 paragraf, dalam Bahasa Indonesia>"
 }
 
 PANDUAN SKOR:
-- 0-20: Tidak ada bukti relevan ditemukan dalam CV
+- 0-20: Tidak ada bukti relevan ditemukan dalam dokumen
 - 21-40: Bukti minimal atau sangat terbatas
 - 41-60: Bukti cukup, menunjukkan kompetensi dasar
 - 61-80: Bukti kuat, menunjukkan kompetensi yang baik
@@ -80,19 +82,20 @@ def _build_rubric_context(rubric: Rubric) -> str:
 
 
 def _build_user_prompt(anonymized_cv: str, rubric_context: str) -> str:
-    """Build the user prompt with CV text and rubric context."""
+    """Build the user prompt with document text and rubric context."""
     return f"""{rubric_context}
 
 ========================================
-TEKS CV KANDIDAT (SUDAH DIANONIMISASI):
+TEKS DOKUMEN KANDIDAT (CV + MOTIVATION LETTER — SUDAH DIANONIMISASI):
 ========================================
 
 {anonymized_cv}
 
 ========================================
 
-Evaluasi CV kandidat ini terhadap semua dimensi dalam rubrik di atas.
+Evaluasi dokumen kandidat ini (CV dan Motivation Letter) terhadap semua dimensi dalam rubrik di atas.
 Berikan skor, justifikasi, dan bukti kutipan untuk setiap dimensi.
+Pertimbangkan CV untuk kompetensi teknis dan pengalaman; Motivation Letter untuk motivasi dan kesesuaian minat.
 Tulis profile_summary dalam Bahasa Indonesia.
 Respons dalam format JSON yang valid."""
 
@@ -103,10 +106,12 @@ async def evaluate_candidate(
     db: Session,
     certificate_data: dict | None = None,
 ) -> dict:
-    """Evaluate a candidate's CV against a rubric using the RAG pipeline.
+    """Evaluate a candidate's documents against a rubric using the RAG pipeline.
 
     Args:
         anonymized_cv: Dict with at minimum "anonymized_text" key.
+                       The text may include both CV and Motivation Letter
+                       content (already anonymised).
         rubric_id: ID of the rubric to evaluate against.
         db: Database session.
         certificate_data: Optional certificate info (EPrT score, etc.)

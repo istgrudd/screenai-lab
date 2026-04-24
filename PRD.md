@@ -85,10 +85,10 @@ ScreenAI Lab adalah fork dari ScreenAI (Capstone) yang diadaptasi untuk kebutuha
 
 | ID | Dokumen | Wajib | Diproses AI | Keterangan |
 |---|---|---|---|---|
-| D-01 | CV (PDF) | ✅ | ✅ RAG + NER | Sama seperti Capstone |
+| D-01 | CV (PDF) | ✅ | ✅ RAG + NER | Sama seperti Capstone. Dianonimisasi (blind screening) lalu dievaluasi bersama Motivation Letter |
 | D-02 | KHS / Transkrip Nilai (PDF) | ✅ | ✅ Parser khusus | Ekstrak IPK + mata kuliah relevan |
 | D-03 | KTM / Student ID (PDF/JPG) | ✅ | ✅ Rule-based validator | Verifikasi NIM, status aktif, prodi |
-| D-04 | Motivation Letter (PDF) | ✅ | ✅ RAG | Evaluasi kesesuaian motivasi dengan visi lab |
+| D-04 | Motivation Letter (PDF) | ✅ | ✅ NER + RAG | Dianonimisasi (blind screening) lalu dievaluasi bersama CV melalui RAG pipeline |
 | D-05 | Analisis SWOT Diri Sendiri (PDF) | ✅ | ⚠️ Highlight only | Tidak dijadikan skor — ditampilkan sebagai highlight untuk dibaca rekruter |
 | D-06 | Dokumen Pendukung (PDF) | ✅ | ❌ Manual checklist | Kumpulan screenshot bukti follow IG, share broadcast, dll dalam 1 PDF — diverifikasi manual rekruter |
 
@@ -151,7 +151,7 @@ ScreenAI Lab adalah fork dari ScreenAI (Capstone) yang diadaptasi untuk kebutuha
 
 | ID | Fitur | Role | Prioritas |
 |---|---|---|---|
-| F-50 | Jalankan pipeline evaluasi AI (NER + RAG + LLM) per batch | Recruiter | Must Have |
+| F-50 | Jalankan pipeline evaluasi AI (NER + RAG + LLM) per batch — termasuk screening bridge dari Candidate Portal ke AI Pipeline, dengan CV + Motivation Letter dianonimisasi (blind screening) sebelum evaluasi | Recruiter | Must Have |
 | F-51 | KHS Parser: ekstrak IPK + mata kuliah relevan | System | Must Have |
 | F-52 | KTM Validator: verifikasi NIM + status aktif (rule-based) | System | Must Have |
 | F-53 | SWOT Highlight: tampilkan SWOT kandidat sebagai panel highlight | Recruiter | Must Have |
@@ -214,10 +214,12 @@ Recruiter: Login
 Recruiter: Login
     → Dashboard → Filter per divisi
     → Run Evaluation (batch)
+        → Screening Bridge: convert submitted portal applications
+          ke AI pipeline candidates (idempotent)
         → KTM Validator (rule-based)
         → KHS Parser (IPK + mata kuliah)
-        → NER Anonymization (CV + Motivation Letter)
-        → RAG Pipeline (CV + Motivation Letter + KHS → rubrik)
+        → NER Anonymization (CV + Motivation Letter) ← BLIND SCREENING
+        → RAG Pipeline (Anonymized CV + Motivation Letter + KHS → rubrik)
         → LLM Inference (DeepSeek V3)
         → SWOT ditampilkan sebagai highlight (tidak di-score)
         → Dokumen Pendukung: checklist manual rekruter

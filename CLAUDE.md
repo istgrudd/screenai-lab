@@ -4,7 +4,7 @@
 > **Source:** [PRD.md](./PRD.md)
 > **Forked from:** https://github.com/istgrudd/screenai
 > **Repository:** https://github.com/istgrudd/screenai-lab
-> **Last Updated:** 2026-04-24
+> **Last Updated:** 2026-04-25
 
 ---
 
@@ -294,8 +294,34 @@ frontend/src/
 | 6.1 | `khs_parser.py` | PyMuPDF extraction + regex pattern matching format KHS Telkom University. Output: `{ ipk, total_sks, relevant_courses[] }` |
 | 6.2 | `ktm_validator.py` | Regex matching NIM Telkom (`103XXXXXXXXXXX`), ekstrak nama + prodi. Output: `{ valid, nim, name, faculty, major }` |
 | 6.3 | `swot_extractor.py` | PyMuPDF text extraction dari PDF SWOT. Output: plain text untuk ditampilkan sebagai highlight |
-| 6.4 | Integrasi ke RAG pipeline | KHS data (IPK + mata kuliah) ditambahkan ke context CV sebelum masuk RAG |
+| 6.4 | Integrasi ke RAG pipeline | KHS data (IPK + mata kuliah) ditambahkan ke context CV + Motivation Letter sebelum masuk RAG |
 | 6.5 | `SwotHighlightPanel.jsx` | Panel read-only di CandidateDetail, tampilkan teks SWOT yang diekstrak |
+
+---
+
+### Task 7.5 — Screening Bridge: Portal → Pipeline (Week 5)
+
+Menghubungkan data dari Candidate Portal (tabel `applications` + `documents`) ke AI Pipeline (tabel `candidates` + `candidate_documents`). Tanpa bridge ini, kandidat yang submit melalui portal tidak terdeteksi oleh evaluation pipeline.
+
+| # | Task | Detail |
+|---|------|--------|
+| 6.6 | `screening_bridge.py` | Service bridge yang dijalankan sebagai pre-processing saat recruiter klik "Run Evaluation". Memetakan `application.division` → `rubric.id`, membuat record `Candidate` + `CandidateDocument` |
+| 6.7 | CV processing | Extract (PyMuPDF) → Normalize → Anonymize (IndoBERT NER + regex) → simpan `anonymized_text` ke `candidate_documents` (doc_type="cv") |
+| 6.8 | Motivation Letter processing | Extract → Normalize → Anonymize → simpan `anonymized_text` ke `candidate_documents` (doc_type="motivation_letter") |
+| 6.9 | Idempotency | Cek existing `Candidate(user_id, rubric_id)` agar tidak duplikasi jika "Run Evaluation" diklik ulang |
+| 6.10 | Status update | Setelah bridge berhasil, update `application.status` → `SCREENING` |
+
+**Pipeline blind screening:**
+```
+CV (PDF) ──→ extract → normalize → anonymize_text() → [PERSON_1], [ORG_1], [LOC_1]
+Motiv. Letter (PDF) ──→ extract → normalize → anonymize_text() → [PERSON_1], [ORG_1]
+                                                    ↓
+                              candidate_documents.anonymized_text
+                                                    ↓
+                              RAG Pipeline (hanya terima teks anonim)
+```
+
+**Milestone:** Recruiter klik "Run Evaluation" → kandidat portal otomatis ter-bridge → evaluasi jalan.
 
 ---
 
@@ -303,9 +329,9 @@ frontend/src/
 
 | # | Task | Detail |
 |---|------|--------|
-| 7.1 | `POST /api/recruiter/evaluate/batch` | Jalankan full pipeline untuk semua submitted applications per divisi |
-| 7.2 | Update pipeline | Tambah KTM validation + KHS parsing sebelum NER anonymization |
-| 7.3 | Update prompt | Sertakan data KHS (IPK + mata kuliah relevan) dalam context RAG prompt |
+| 7.1 | `POST /api/evaluate` | Bridge (Task 7.5) + jalankan RAG pipeline untuk semua candidates status "anonymized" per rubric |
+| 7.2 | Multi-doc evaluation | Gabungkan anonymized CV + Motivation Letter sebagai satu context untuk RAG |
+| 7.3 | Update pipeline prompt | Instruksikan LLM mengevaluasi CV **dan** Motivation Letter. Sertakan data KHS (IPK + mata kuliah relevan) sebagai konteks tambahan |
 | 7.4 | Update result schema | Tambah field `khs_summary`, `ktm_valid`, `swot_text` ke result JSON |
 | 7.5 | `ResultPage.jsx` | AI Score Summary per dimensi (progress bar), recruitment journey timeline, schedule interview button |
 
