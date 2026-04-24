@@ -12,6 +12,7 @@ import {
   GraduationCap,
   ShieldCheck,
   CheckCircle2,
+  UserCog,
 } from "lucide-react";
 
 import DashboardPage from "@/pages/DashboardPage";
@@ -22,10 +23,12 @@ import LoginPage from "@/pages/LoginPage";
 import RegisterPage from "@/pages/RegisterPage";
 import MyApplicationsPage from "@/pages/MyApplicationsPage";
 
+import CandidateDashboardPage from "@/pages/candidate/DashboardPage";
 import ProfilePage from "@/pages/candidate/ProfilePage";
 import DocumentsPage from "@/pages/candidate/DocumentsPage";
 import ReviewPage from "@/pages/candidate/ReviewPage";
 import SubmittedPage from "@/pages/candidate/SubmittedPage";
+import AdminPage from "@/pages/admin/AdminPage";
 
 import ProtectedRoute from "@/components/ProtectedRoute";
 import {
@@ -51,6 +54,7 @@ const ROLE_BADGE_VARIANT = {
 function navLinksForRole(role) {
   if (role === ROLES.CANDIDATE) {
     return [
+      { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
       { to: "/profile", label: "Profile", icon: GraduationCap },
       { to: "/documents", label: "Documents", icon: ClipboardList },
       { to: "/review", label: "Review", icon: ShieldCheck },
@@ -59,10 +63,14 @@ function navLinksForRole(role) {
     ];
   }
   if (role === ROLES.RECRUITER || role === ROLES.SUPER_ADMIN) {
-    return [
+    const links = [
       { to: "/", label: "Dashboard", icon: LayoutDashboard },
       { to: "/rubrics", label: "Rubrics", icon: FileText },
     ];
+    if (role === ROLES.SUPER_ADMIN) {
+      links.push({ to: "/admin/users", label: "Admin Panel", icon: UserCog });
+    }
+    return links;
   }
   return [];
 }
@@ -194,6 +202,16 @@ export default function App() {
 
           {/* Candidate routes (Phase 1) */}
           <Route
+            path="/dashboard"
+            element={
+              <AuthenticatedShell>
+                <ProtectedRoute roles={[ROLES.CANDIDATE]}>
+                  <CandidateDashboardPage />
+                </ProtectedRoute>
+              </AuthenticatedShell>
+            }
+          />
+          <Route
             path="/profile"
             element={
               <AuthenticatedShell>
@@ -273,6 +291,16 @@ export default function App() {
               <AuthenticatedShell>
                 <ProtectedRoute roles={[ROLES.RECRUITER, ROLES.SUPER_ADMIN]}>
                   <CandidateDetailPage />
+                </ProtectedRoute>
+              </AuthenticatedShell>
+            }
+          />
+          <Route
+            path="/admin/users"
+            element={
+              <AuthenticatedShell>
+                <ProtectedRoute roles={[ROLES.SUPER_ADMIN]}>
+                  <AdminPage />
                 </ProtectedRoute>
               </AuthenticatedShell>
             }
