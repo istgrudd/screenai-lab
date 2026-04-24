@@ -57,6 +57,11 @@ class Settings(BaseSettings):
     extracted_dir: str = "./data/extracted"
     anonymized_dir: str = "./data/anonymized"
 
+    # --- Candidate uploads (Phase 1) ---
+    # Root directory for candidate-submitted application documents.
+    # Files are stored at {upload_dir}/{application_id}/{doc_type}.{ext}.
+    upload_dir: str = "./uploads"
+
     model_config = {
         "env_file": ".env",
         "env_file_encoding": "utf-8",
@@ -64,7 +69,12 @@ class Settings(BaseSettings):
 
     def ensure_data_dirs(self) -> None:
         """Create data directories if they don't exist."""
-        for dir_path in [self.raw_pdfs_dir, self.extracted_dir, self.anonymized_dir]:
+        for dir_path in [
+            self.raw_pdfs_dir,
+            self.extracted_dir,
+            self.anonymized_dir,
+            self.upload_dir,
+        ]:
             Path(dir_path).mkdir(parents=True, exist_ok=True)
         Path(self.chroma_persist_dir).mkdir(parents=True, exist_ok=True)
 

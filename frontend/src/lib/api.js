@@ -64,10 +64,30 @@ export async function login(email, password) {
   });
 }
 
-export async function register(email, password, fullName) {
+/**
+ * Register a new candidate. All fields are required — Telkom-specific
+ * student info is validated server-side (nim must match /^103\d{10}$/).
+ */
+export async function register({
+  email,
+  password,
+  fullName,
+  nim,
+  faculty,
+  major,
+  year,
+}) {
   return request("/auth/register", {
     method: "POST",
-    body: JSON.stringify({ email, password, full_name: fullName }),
+    body: JSON.stringify({
+      email,
+      password,
+      full_name: fullName,
+      nim,
+      faculty,
+      major,
+      year: Number(year),
+    }),
   });
 }
 
@@ -81,6 +101,53 @@ export async function getMe() {
 
 export async function listMyApplications() {
   return request("/my-applications");
+}
+
+// ── Application (Phase 1 candidate portal) ──────────────────────────────────
+
+export async function createApplication(division) {
+  return request("/applications", {
+    method: "POST",
+    body: JSON.stringify({ division }),
+  });
+}
+
+export async function getMyApplication() {
+  return request("/applications/my");
+}
+
+export async function submitApplication(applicationId) {
+  return request(`/applications/${applicationId}/submit`, { method: "POST" });
+}
+
+// ── Documents (Phase 1 candidate portal) ────────────────────────────────────
+
+export async function uploadApplicationDocument(docType, file) {
+  const formData = new FormData();
+  formData.append("file", file);
+  return request(`/documents/upload/${docType}`, {
+    method: "POST",
+    body: formData,
+  });
+}
+
+export async function replaceApplicationDocument(docId, file) {
+  const formData = new FormData();
+  formData.append("file", file);
+  return request(`/documents/${docId}/replace`, {
+    method: "PUT",
+    body: formData,
+  });
+}
+
+export async function listApplicationDocuments(applicationId) {
+  return request(`/documents/${applicationId}`);
+}
+
+export function documentFileUrl(docId) {
+  // File download needs the Authorization header; callers fetch it
+  // manually where the auth interceptor runs. Exposed for <a href> fallbacks.
+  return `${BASE_URL}/documents/${docId}/file`;
 }
 
 // ── Upload ──────────────────────────────────────────────────────────────────

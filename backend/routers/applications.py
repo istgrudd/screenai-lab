@@ -1,0 +1,261 @@
+"""Applications router — candidate application CRUD + final submit.
+
+Endpoints:
+    POST /api/applications                 — Candidate; create a new application
+    GET  /api/applications/my              — Candidate; fetch my active application
+    POST /api/applications/{id}/submit     — Candidate; final submit (irreversible)
+    GET  /api/recruiter/applications       — Recruiter+; list submitted applications
+
+Rules:
+    * One application per user for the current period. The candidate sees a
+      409 if they try to POST a second one.
+    * Submission requires one Document per DocumentType (D-01 … D-06). The
+      endpoint returns the list of missing doc_types on failure.
+    * After submission, status transitions out of ``draft`` and the document
+      router refuses any further mutations (see documents.py).
+"""
+
+from __future__ import annotations
+
+from datetime import datetime, timezone
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
+
+from backend.database import get_db
+from backend.middleware.auth_middleware import get_current_user, require_role
+from backend.models.application import Application, ApplicationStatus, Division
+from backend.models.document import Document, DocumentType
+from backend.models.user import User, UserRole
+
+router = APIRouter(prefix="/api/applications", tags=["applications"])
+recruiter_router = APIRouter(prefix="/api/recruiter", tags=["recruiter"])
+
+_candidate_only = require_role(UserRole.CANDIDATE)
+_recruiter_or_admin = require_role(UserRole.RECRUITER, UserRole.SUPER_ADMIN)
+
+
+# ---------------------------------------------------------------------------
+# Pydantic schemas
+# ---------------------------------------------------------------------------
+
+class ApplicationCreate(BaseModel):
+    division: Division
+
+
+class ApplicationOut(BaseModel):
+    id: int
+    user_id: int
+    division: str
+    status: str
+    submitted_at: str | None
+    created_at: str | None
+    documents_count: int
+
+    @classmethod
+    def from_application(cls, app: Application, documents_count: int) -> "ApplicationOut":
+        return cls(
+            id=app.id,
+            user_id=app.user_id,
+            division=app.division.value if hasattr(app.division, "value") else str(app.division),
+            status=app.status.value if hasattr(app.status, "value") else str(app.status),
+            submitted_at=app.submitted_at.isoformat() if app.submitted_at else None,
+            created_at=app.created_at.isoformat() if app.created_at else None,
+            documents_count=documents_count,
+        )
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _count_documents(db: Session, application_id: int) -> int:
+    return db.query(Document).filter(Document.application_id == application_id).count()
+
+
+def _get_my_application_or_404(db: Session, user: User) -> Application:
+    app = (
+        db.query(Application)
+        .filter(Application.user_id == user.id)
+        .order_by(Application.created_at.desc())
+        .first()
+    )
+    if not app:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No application found for this user",
+        )
+    return app
+
+
+# ---------------------------------------------------------------------------
+# Candidate endpoints
+# ---------------------------------------------------------------------------
+
+@router.post(
+    "",
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(_candidate_only)],
+)
+def create_application(
+    payload: ApplicationCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Create a new application. One per candidate per active period."""
+    existing = (
+        db.query(Application).filter(Application.user_id == current_user.id).first()
+    )
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "message": "You already have an active application",
+                "application_id": existing.id,
+                "status": existing.status.value
+                if hasattr(existing.status, "value")
+                else str(existing.status),
+            },
+        )
+
+    app = Application(
+        user_id=current_user.id,
+        division=payload.division,
+        status=ApplicationStatus.DRAFT,
+    )
+    db.add(app)
+    db.commit()
+    db.refresh(app)
+
+    return {
+        "success": True,
+        "data": ApplicationOut.from_application(app, 0).model_dump(),
+        "error": None,
+    }
+
+
+@router.get("/my", dependencies=[Depends(_candidate_only)])
+def get_my_application(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Fetch the current candidate's application (404 if none)."""
+    app = _get_my_application_or_404(db, current_user)
+    count = _count_documents(db, app.id)
+    return {
+        "success": True,
+        "data": ApplicationOut.from_application(app, count).model_dump(),
+        "error": None,
+    }
+
+
+@router.post(
+    "/{application_id}/submit",
+    dependencies=[Depends(_candidate_only)],
+)
+def submit_application(
+    application_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Final-submit an application.
+
+    Validates that every DocumentType (D-01 … D-06) has a Document, sets
+    status to ``submitted``, stamps ``submitted_at``, and locks the
+    documents (the document router rejects edits once status != draft).
+    """
+    app = db.query(Application).filter(Application.id == application_id).first()
+    if not app:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Application not found")
+    if app.user_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not your application")
+    if app.status != ApplicationStatus.DRAFT:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "message": "Application has already been submitted",
+                "status": app.status.value
+                if hasattr(app.status, "value")
+                else str(app.status),
+            },
+        )
+
+    uploaded_types: set[str] = {
+        (d.doc_type.value if hasattr(d.doc_type, "value") else str(d.doc_type))
+        for d in db.query(Document).filter(Document.application_id == app.id).all()
+    }
+    required_types = [dt.value for dt in DocumentType]
+    missing = [dt for dt in required_types if dt not in uploaded_types]
+
+    if missing:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "message": "Cannot submit — required documents are missing",
+                "missing": missing,
+                "required": required_types,
+            },
+        )
+
+    app.status = ApplicationStatus.SUBMITTED
+    app.submitted_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(app)
+
+    return {
+        "success": True,
+        "data": ApplicationOut.from_application(app, len(required_types)).model_dump(),
+        "error": None,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Recruiter endpoints
+# ---------------------------------------------------------------------------
+
+@recruiter_router.get(
+    "/applications",
+    dependencies=[Depends(_recruiter_or_admin)],
+)
+def list_submitted_applications(
+    division: Division | None = Query(None, description="Filter by division"),
+    status_filter: ApplicationStatus | None = Query(
+        None, alias="status", description="Filter by application status"
+    ),
+    db: Session = Depends(get_db),
+):
+    """List applications for the recruiter dashboard.
+
+    By default returns every application whose status has moved past
+    ``draft``. Can be narrowed with ``division`` and ``status`` query
+    params (Task 6 will consume these).
+    """
+    q = db.query(Application)
+    if status_filter is None:
+        q = q.filter(Application.status != ApplicationStatus.DRAFT)
+    else:
+        q = q.filter(Application.status == status_filter)
+    if division is not None:
+        q = q.filter(Application.division == division)
+
+    rows = q.order_by(Application.submitted_at.desc().nullslast()).all()
+    data = []
+    for app in rows:
+        user = db.query(User).filter(User.id == app.user_id).first()
+        count = _count_documents(db, app.id)
+        data.append(
+            {
+                **ApplicationOut.from_application(app, count).model_dump(),
+                "candidate": {
+                    "user_id": user.id if user else None,
+                    "full_name": user.full_name if user else None,
+                    "email": user.email if user else None,
+                    "nim": user.nim if user else None,
+                    "faculty": user.faculty if user else None,
+                    "major": user.major if user else None,
+                    "year": user.year if user else None,
+                } if user else None,
+            }
+        )
+    return {"success": True, "data": data, "error": None}

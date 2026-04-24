@@ -76,7 +76,7 @@ export const ROLES = {
 
 /** Default landing path after login based on role. */
 export function defaultPathForRole(role) {
-  if (role === ROLES.CANDIDATE) return "/upload";
+  if (role === ROLES.CANDIDATE) return "/profile";
   if (role === ROLES.RECRUITER || role === ROLES.SUPER_ADMIN) return "/";
   return "/login";
 }

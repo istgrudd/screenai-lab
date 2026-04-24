@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { toast } from "sonner";
-import { BarChart3, Loader2, UserPlus } from "lucide-react";
+import { GraduationCap, Loader2, UserPlus } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -21,11 +21,18 @@ import {
   defaultPathForRole,
 } from "@/lib/auth";
 
+const NIM_PATTERN = /^103\d{10}$/;
+const CURRENT_YEAR = new Date().getFullYear();
+
 export default function RegisterPage() {
   const navigate = useNavigate();
   const [fullName, setFullName] = useState("");
+  const [nim, setNim] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [faculty, setFaculty] = useState("");
+  const [major, setMajor] = useState("");
+  const [year, setYear] = useState(String(CURRENT_YEAR));
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
@@ -37,17 +44,49 @@ export default function RegisterPage() {
 
   const onSubmit = async (e) => {
     e.preventDefault();
-    if (!fullName.trim() || !email || !password) {
+    const trimmed = {
+      fullName: fullName.trim(),
+      nim: nim.trim(),
+      email: email.trim(),
+      faculty: faculty.trim(),
+      major: major.trim(),
+    };
+    if (
+      !trimmed.fullName ||
+      !trimmed.nim ||
+      !trimmed.email ||
+      !password ||
+      !trimmed.faculty ||
+      !trimmed.major ||
+      !year
+    ) {
       toast.error("All fields are required.");
+      return;
+    }
+    if (!NIM_PATTERN.test(trimmed.nim)) {
+      toast.error("NIM must be 13 digits starting with '103'.");
       return;
     }
     if (password.length < 8) {
       toast.error("Password must be at least 8 characters.");
       return;
     }
+    const yearNum = Number(year);
+    if (!Number.isInteger(yearNum) || yearNum < 2000 || yearNum > 2100) {
+      toast.error("Please enter a valid year.");
+      return;
+    }
     setSubmitting(true);
     try {
-      await registerApi(email.trim(), password, fullName.trim());
+      await registerApi({
+        email: trimmed.email,
+        password,
+        fullName: trimmed.fullName,
+        nim: trimmed.nim,
+        faculty: trimmed.faculty,
+        major: trimmed.major,
+        year: yearNum,
+      });
       navigate("/login", { replace: true, state: { registered: true } });
     } catch (err) {
       toast.error(err.message || "Registration failed");
@@ -58,62 +97,119 @@ export default function RegisterPage() {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-background p-6">
-      <Card className="w-full max-w-md">
+      <Card className="w-full max-w-lg">
         <CardHeader className="space-y-3 text-center">
           <div className="mx-auto w-11 h-11 rounded-lg bg-primary flex items-center justify-center">
-            <BarChart3 className="w-6 h-6 text-primary-foreground" />
+            <GraduationCap className="w-6 h-6 text-primary-foreground" />
           </div>
-          <CardTitle className="text-2xl">Create a candidate account</CardTitle>
+          <CardTitle className="text-2xl">Create your candidate account</CardTitle>
           <CardDescription>
-            Register to apply for open positions.
+            Register to apply to an MBC Laboratory division.
           </CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={onSubmit} className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="full_name">Full name</Label>
-              <Input
-                id="full_name"
-                type="text"
-                autoComplete="name"
-                required
-                value={fullName}
-                onChange={(e) => setFullName(e.target.value)}
-                placeholder="Jane Doe"
-              />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2 md:col-span-2">
+                <Label htmlFor="full_name">Full name</Label>
+                <Input
+                  id="full_name"
+                  type="text"
+                  autoComplete="name"
+                  required
+                  value={fullName}
+                  onChange={(e) => setFullName(e.target.value)}
+                  placeholder="Full legal name"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="nim">NIM</Label>
+                <Input
+                  id="nim"
+                  type="text"
+                  inputMode="numeric"
+                  pattern="^103\d{10}$"
+                  maxLength={13}
+                  required
+                  value={nim}
+                  onChange={(e) => setNim(e.target.value.replace(/[^0-9]/g, ""))}
+                  placeholder="103XXXXXXXXXX"
+                />
+                <p className="text-xs text-muted-foreground">
+                  13 digits, starts with 103.
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="year">Angkatan</Label>
+                <Input
+                  id="year"
+                  type="number"
+                  min={2000}
+                  max={2100}
+                  required
+                  value={year}
+                  onChange={(e) => setYear(e.target.value)}
+                  placeholder="2023"
+                />
+              </div>
+
+              <div className="space-y-2 md:col-span-2">
+                <Label htmlFor="email">Email</Label>
+                <Input
+                  id="email"
+                  type="email"
+                  autoComplete="email"
+                  required
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="you@student.telkomuniversity.ac.id"
+                />
+              </div>
+
+              <div className="space-y-2 md:col-span-2">
+                <Label htmlFor="password">Password</Label>
+                <Input
+                  id="password"
+                  type="password"
+                  autoComplete="new-password"
+                  minLength={8}
+                  required
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Minimum 8 characters.
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="faculty">Fakultas</Label>
+                <Input
+                  id="faculty"
+                  type="text"
+                  required
+                  value={faculty}
+                  onChange={(e) => setFaculty(e.target.value)}
+                  placeholder="Fakultas Informatika"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="major">Jurusan</Label>
+                <Input
+                  id="major"
+                  type="text"
+                  required
+                  value={major}
+                  onChange={(e) => setMajor(e.target.value)}
+                  placeholder="Data Science"
+                />
+              </div>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
-              <Input
-                id="email"
-                type="email"
-                autoComplete="email"
-                required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="you@example.com"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
-              <Input
-                id="password"
-                type="password"
-                autoComplete="new-password"
-                minLength={8}
-                required
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-              />
-              <p className="text-xs text-muted-foreground">
-                Minimum 8 characters.
-              </p>
-            </div>
-            <Button
-              type="submit"
-              className="w-full"
-              disabled={submitting}
-            >
+
+            <Button type="submit" className="w-full" disabled={submitting}>
               {submitting ? (
                 <>
                   <Loader2 className="w-4 h-4 animate-spin" />
@@ -126,6 +222,7 @@ export default function RegisterPage() {
                 </>
               )}
             </Button>
+
             <p className="text-sm text-muted-foreground text-center">
               Already have an account?{" "}
               <Link

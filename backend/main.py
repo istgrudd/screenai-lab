@@ -19,6 +19,11 @@ from backend.routers.candidates import (
     router as candidates_router,
     my_applications_router,
 )
+from backend.routers.applications import (
+    router as applications_router,
+    recruiter_router as applications_recruiter_router,
+)
+from backend.routers.documents import router as documents_router
 
 
 @asynccontextmanager
@@ -69,6 +74,9 @@ app.include_router(rubrics_router)
 app.include_router(evaluation_router)
 app.include_router(candidates_router)
 app.include_router(my_applications_router)
+app.include_router(applications_router)
+app.include_router(applications_recruiter_router)
+app.include_router(documents_router)
 
 
 # --- Health Check ---

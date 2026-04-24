@@ -5,11 +5,13 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
   LayoutDashboard,
-  Upload,
   FileText,
   BarChart3,
   LogOut,
   ClipboardList,
+  GraduationCap,
+  ShieldCheck,
+  CheckCircle2,
 } from "lucide-react";
 
 import DashboardPage from "@/pages/DashboardPage";
@@ -19,6 +21,11 @@ import CandidateDetailPage from "@/pages/CandidateDetailPage";
 import LoginPage from "@/pages/LoginPage";
 import RegisterPage from "@/pages/RegisterPage";
 import MyApplicationsPage from "@/pages/MyApplicationsPage";
+
+import ProfilePage from "@/pages/candidate/ProfilePage";
+import DocumentsPage from "@/pages/candidate/DocumentsPage";
+import ReviewPage from "@/pages/candidate/ReviewPage";
+import SubmittedPage from "@/pages/candidate/SubmittedPage";
 
 import ProtectedRoute from "@/components/ProtectedRoute";
 import {
@@ -44,8 +51,11 @@ const ROLE_BADGE_VARIANT = {
 function navLinksForRole(role) {
   if (role === ROLES.CANDIDATE) {
     return [
-      { to: "/upload", label: "Upload", icon: Upload },
-      { to: "/my-applications", label: "My Applications", icon: ClipboardList },
+      { to: "/profile", label: "Profile", icon: GraduationCap },
+      { to: "/documents", label: "Documents", icon: ClipboardList },
+      { to: "/review", label: "Review", icon: ShieldCheck },
+      { to: "/submitted", label: "Status", icon: CheckCircle2 },
+      { to: "/my-applications", label: "History", icon: FileText },
     ];
   }
   if (role === ROLES.RECRUITER || role === ROLES.SUPER_ADMIN) {
@@ -181,12 +191,44 @@ export default function App() {
               </AuthenticatedShell>
             }
           />
+
+          {/* Candidate routes (Phase 1) */}
           <Route
-            path="/upload"
+            path="/profile"
             element={
               <AuthenticatedShell>
                 <ProtectedRoute roles={[ROLES.CANDIDATE]}>
-                  <UploadPage />
+                  <ProfilePage />
+                </ProtectedRoute>
+              </AuthenticatedShell>
+            }
+          />
+          <Route
+            path="/documents"
+            element={
+              <AuthenticatedShell>
+                <ProtectedRoute roles={[ROLES.CANDIDATE]}>
+                  <DocumentsPage />
+                </ProtectedRoute>
+              </AuthenticatedShell>
+            }
+          />
+          <Route
+            path="/review"
+            element={
+              <AuthenticatedShell>
+                <ProtectedRoute roles={[ROLES.CANDIDATE]}>
+                  <ReviewPage />
+                </ProtectedRoute>
+              </AuthenticatedShell>
+            }
+          />
+          <Route
+            path="/submitted"
+            element={
+              <AuthenticatedShell>
+                <ProtectedRoute roles={[ROLES.CANDIDATE]}>
+                  <SubmittedPage />
                 </ProtectedRoute>
               </AuthenticatedShell>
             }
@@ -201,6 +243,20 @@ export default function App() {
               </AuthenticatedShell>
             }
           />
+
+          {/* Legacy Capstone CV upload — off-nav, candidate-only (matches backend). */}
+          <Route
+            path="/upload"
+            element={
+              <AuthenticatedShell>
+                <ProtectedRoute roles={[ROLES.CANDIDATE]}>
+                  <UploadPage />
+                </ProtectedRoute>
+              </AuthenticatedShell>
+            }
+          />
+
+          {/* Recruiter / Admin routes */}
           <Route
             path="/rubrics"
             element={
