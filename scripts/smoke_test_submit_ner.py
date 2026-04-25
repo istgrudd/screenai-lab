@@ -27,6 +27,8 @@ import fitz
 
 from fastapi.testclient import TestClient
 
+from datetime import datetime, timedelta, timezone
+
 from backend.config import settings
 from backend.database import SessionLocal
 from backend.main import app as fastapi_app
@@ -34,6 +36,7 @@ from backend.models.application import Application, ApplicationStatus, Division
 from backend.models.audit import AuditLog
 from backend.models.candidate import Candidate, CandidateDocument, DimensionScore
 from backend.models.document import Document, DocumentType
+from backend.models.period import RecruitmentPeriod
 from backend.models.rubric import Dimension, Rubric
 from backend.models.user import User, UserRole
 from backend.utils.file_storage import purge_application_dir
@@ -47,6 +50,7 @@ REC_EMAIL = "smoke+ner_recruiter@example.com"
 CAND_EMAIL = "smoke+ner_candidate@example.com"
 CAND_NIM = "1039876500099"
 TEST_PASSWORD = "hunter2secure"
+PERIOD_NAME = "smoke+ner period"
 
 # Enable logging so we can verify cache hit/miss messages
 logging.basicConfig(level=logging.INFO, format="%(name)s: %(message)s")
@@ -101,8 +105,42 @@ def _cleanup() -> None:
                     | (AuditLog.candidate_id == u.id)
                 ).delete(synchronize_session=False)
 
+                # Periods owned by this user (RESTRICT FK).
+                db.query(RecruitmentPeriod).filter(
+                    RecruitmentPeriod.created_by == u.id
+                ).delete(synchronize_session=False)
+
                 db.delete(u)
 
+        # Drop any leftover periods named for this smoke test.
+        db.query(RecruitmentPeriod).filter(
+            RecruitmentPeriod.name == PERIOD_NAME
+        ).delete(synchronize_session=False)
+
+        db.commit()
+    finally:
+        db.close()
+
+
+def _seed_active_period(admin_user_id: int) -> None:
+    """Insert an active RecruitmentPeriod owned by the recruiter user (ok — FK is users.id)."""
+    db = SessionLocal()
+    try:
+        db.query(RecruitmentPeriod).filter(
+            RecruitmentPeriod.is_active == True  # noqa: E712
+        ).update(
+            {RecruitmentPeriod.is_active: False}, synchronize_session=False
+        )
+        now = datetime.now(timezone.utc)
+        period = RecruitmentPeriod(
+            name=PERIOD_NAME,
+            start_date=now - timedelta(hours=1),
+            end_date=now + timedelta(days=7),
+            is_active=True,
+            threshold_n=10,
+            created_by=admin_user_id,
+        )
+        db.add(period)
         db.commit()
     finally:
         db.close()
@@ -127,7 +165,11 @@ def main() -> int:
     db.add(rec_user)
     db.commit()
     db.refresh(rec_user)
+    rec_user_id = rec_user.id
     db.close()
+
+    # Seed an active recruitment period — required for submit() to succeed.
+    _seed_active_period(rec_user_id)
 
     # Login recruiter
     r = client.post(

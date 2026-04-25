@@ -28,6 +28,7 @@ from backend.middleware.auth_middleware import get_current_user, require_role
 from backend.models.application import Application, ApplicationStatus, Division
 from backend.models.candidate import Candidate
 from backend.models.document import Document, DocumentType
+from backend.models.period import RecruitmentPeriod
 from backend.models.user import User, UserRole
 from backend.services.extractor import extract_text_from_pdf
 from backend.services.submit_anonymization import run_submit_anonymization
@@ -239,6 +240,18 @@ def submit_application(
             },
         )
 
+    # Phase 2B (Task 11.7): submission requires an active recruitment period.
+    active_period = (
+        db.query(RecruitmentPeriod)
+        .filter(RecruitmentPeriod.is_active == True)  # noqa: E712
+        .first()
+    )
+    if not active_period:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Tidak ada periode rekrutasi yang aktif saat ini.",
+        )
+
     uploaded_types: set[str] = {
         (d.doc_type.value if hasattr(d.doc_type, "value") else str(d.doc_type))
         for d in db.query(Document).filter(Document.application_id == app.id).all()
@@ -258,6 +271,7 @@ def submit_application(
 
     app.status = ApplicationStatus.SUBMITTED
     app.submitted_at = datetime.now(timezone.utc)
+    app.period_id = active_period.id
     db.commit()
     db.refresh(app)
 
