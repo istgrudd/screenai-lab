@@ -313,7 +313,7 @@ export async function deleteRubric(rubricId) {
 // ── Evaluation ──────────────────────────────────────────────────────────────
 
 /**
- * Trigger batch evaluation for a rubric.
+ * Trigger batch evaluation for a rubric (legacy Capstone).
  * @param {number} rubricId
  */
 export async function runEvaluation(rubricId) {
@@ -321,6 +321,55 @@ export async function runEvaluation(rubricId) {
     method: "POST",
     body: JSON.stringify({ rubric_id: rubricId }),
   });
+}
+
+/**
+ * Trigger batch evaluation for a division (Task 8.1).
+ * @param {string} division  — e.g. "big_data"
+ * @param {number[]|null} applicationIds — specific IDs, or null for all
+ */
+export async function evaluateBatch(division, applicationIds = null) {
+  return request("/recruiter/evaluate/batch", {
+    method: "POST",
+    body: JSON.stringify({
+      division,
+      application_ids: applicationIds,
+    }),
+  });
+}
+
+/**
+ * Get evaluation result for an application (Task 8.3).
+ * @param {number} applicationId
+ */
+export async function getEvaluationResult(applicationId) {
+  return request(`/recruiter/results/${applicationId}`);
+}
+
+// ── Announcements ───────────────────────────────────────────────────────────
+
+/**
+ * Publish pass/fail announcement for a candidate (Task 9.1).
+ * @param {number} applicationId
+ * @param {"pass"|"fail"} result
+ * @param {string|null} notes
+ */
+export async function createAnnouncement(applicationId, result, notes = null) {
+  return request("/announcements", {
+    method: "POST",
+    body: JSON.stringify({
+      application_id: applicationId,
+      result,
+      notes,
+    }),
+  });
+}
+
+/**
+ * Get the candidate's own announcement status (Task 9.2).
+ */
+export async function getMyAnnouncement() {
+  return request("/announcements/my");
 }
 
 // ── Health ───────────────────────────────────────────────────────────────────

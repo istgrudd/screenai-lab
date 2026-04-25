@@ -30,17 +30,17 @@ def get_llm_client() -> OpenAI:
 def call_llm(
     system_prompt: str,
     user_prompt: str,
-    model: str = "deepseek-chat",
+    model: str = "deepseek-v4-flash",
     temperature: float = 0.1,
     max_tokens: int = 4096,
     max_retries: int = 3,
 ) -> str:
-    """Call the DeepSeek V3 LLM and return the response text.
+    """Call the DeepSeek V4 Flash LLM and return the response text.
 
     Args:
         system_prompt: System-level instruction.
         user_prompt: User message (CV + rubric context).
-        model: Model name (default: deepseek-chat).
+        model: Model name (default: deepseek-v4-flash).
         temperature: Low for deterministic scoring output.
         max_tokens: Maximum response length.
         max_retries: Number of retries on failure.

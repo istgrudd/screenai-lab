@@ -15,7 +15,7 @@ from backend.models.user import User
 
 
 TEST_EMAIL = "smoke+candidate@example.com"
-TEST_NIM = "1031234567890"  # 103 + 10 digits = 13 digits (Telkom format)
+TEST_NIM = "1031234567890"  # 13 digits — valid under relaxed regex (10+ digits)
 
 
 def _cleanup() -> None:

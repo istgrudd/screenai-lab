@@ -19,12 +19,13 @@ from typing import TypedDict
 import fitz  # PyMuPDF
 
 
-# Telkom University NIM: 13 digits starting with 103 (per PRD §9).
-_TELKOM_NIM_RE = re.compile(r"\b(103\d{10})\b")
+# NIM: any numeric string of 10 or more digits.
+# Relaxed from the original 103-prefix 13-digit Telkom format.
+_TELKOM_NIM_RE = re.compile(r"\b(\d{10,})\b")
 
 # Narrower patterns if the KTM labels fields explicitly.
 _NAMED_NIM_RE = re.compile(
-    r"(?:NIM|N\.I\.M\.)\s*[:\-]?\s*(\d{13})",
+    r"(?:NIM|N\.I\.M\.)\s*[:\-]?\s*(\d{10,})",
     re.IGNORECASE,
 )
 _NAME_RE = re.compile(
@@ -120,7 +121,7 @@ def validate_ktm(file_path: str, expected_nim: str | None = None) -> KtmResult:
             "name": _find_first(text, _NAME_RE),
             "faculty": _find_first(text, _FACULTY_RE),
             "major": _find_first(text, _MAJOR_RE),
-            "error": "NIM not found or not in Telkom format (103XXXXXXXXXX)",
+            "error": "NIM not found (expected 10+ digit numeric string)",
         }
 
     result: KtmResult = {
@@ -155,9 +156,9 @@ def _extract_pdf_text(file_path: str) -> str:
 
 
 def _find_nim(text: str) -> str | None:
-    """Prefer the labelled "NIM: …" match; fall back to any 103-prefixed 13-digit run."""
+    """Prefer the labelled "NIM: …" match; fall back to any 10+-digit run."""
     m = _NAMED_NIM_RE.search(text)
-    if m and m.group(1).startswith("103"):
+    if m:
         return m.group(1)
     m = _TELKOM_NIM_RE.search(text)
     return m.group(1) if m else None

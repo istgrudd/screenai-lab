@@ -28,6 +28,7 @@ import ProfilePage from "@/pages/candidate/ProfilePage";
 import DocumentsPage from "@/pages/candidate/DocumentsPage";
 import ReviewPage from "@/pages/candidate/ReviewPage";
 import SubmittedPage from "@/pages/candidate/SubmittedPage";
+import ResultPage from "@/pages/candidate/ResultPage";
 import AdminPage from "@/pages/admin/AdminPage";
 
 import ProtectedRoute from "@/components/ProtectedRoute";
@@ -59,6 +60,7 @@ function navLinksForRole(role) {
       { to: "/documents", label: "Documents", icon: ClipboardList },
       { to: "/review", label: "Review", icon: ShieldCheck },
       { to: "/submitted", label: "Status", icon: CheckCircle2 },
+      { to: "/result", label: "Result", icon: BarChart3 },
       { to: "/my-applications", label: "History", icon: FileText },
     ];
   }
@@ -257,6 +259,16 @@ export default function App() {
               <AuthenticatedShell>
                 <ProtectedRoute roles={[ROLES.CANDIDATE]}>
                   <MyApplicationsPage />
+                </ProtectedRoute>
+              </AuthenticatedShell>
+            }
+          />
+          <Route
+            path="/result"
+            element={
+              <AuthenticatedShell>
+                <ProtectedRoute roles={[ROLES.CANDIDATE]}>
+                  <ResultPage />
                 </ProtectedRoute>
               </AuthenticatedShell>
             }

@@ -26,9 +26,10 @@ from backend.utils.security import hash_password
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 
-# NIM format per CLAUDE.md Section 9 (KTM Validator): 13 digits starting
-# with "103". Enforced here so the DB only stores valid Telkom NIMs.
-_NIM_PATTERN = re.compile(r"^103\d{10}$")
+# NIM format: any numeric string of 10 or more digits.
+# Relaxed from the original 103-prefix 13-digit Telkom format to support
+# NIMs from different faculties/years.
+_NIM_PATTERN = re.compile(r"^\d{10,}$")
 
 
 # ---------------------------------------------------------------------------
@@ -39,7 +40,7 @@ class RegisterRequest(BaseModel):
     email: EmailStr
     password: str = Field(..., min_length=8, max_length=72)
     full_name: str = Field(..., min_length=1, max_length=255)
-    nim: str = Field(..., min_length=13, max_length=13)
+    nim: str = Field(..., min_length=10, max_length=20)
     faculty: str = Field(..., min_length=1, max_length=255)
     major: str = Field(..., min_length=1, max_length=255)
     year: int = Field(..., ge=2000, le=2100)
@@ -50,7 +51,7 @@ class RegisterRequest(BaseModel):
         v = v.strip()
         if not _NIM_PATTERN.match(v):
             raise ValueError(
-                "NIM must be 13 digits starting with '103' (Telkom University format)"
+                "NIM must be a numeric string of at least 10 digits"
             )
         return v
 

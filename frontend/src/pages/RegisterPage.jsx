@@ -21,7 +21,7 @@ import {
   defaultPathForRole,
 } from "@/lib/auth";
 
-const NIM_PATTERN = /^103\d{10}$/;
+const NIM_PATTERN = /^\d{10,}$/;
 const CURRENT_YEAR = new Date().getFullYear();
 
 export default function RegisterPage() {
@@ -129,7 +129,7 @@ export default function RegisterPage() {
                   id="nim"
                   type="text"
                   inputMode="numeric"
-                  pattern="^103\d{10}$"
+                  pattern="^\d{10,}$"
                   maxLength={13}
                   required
                   value={nim}

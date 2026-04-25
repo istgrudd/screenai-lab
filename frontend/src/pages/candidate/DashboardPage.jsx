@@ -10,6 +10,7 @@ import {
   GraduationCap,
   Loader2,
   Sparkles,
+  XCircle,
 } from "lucide-react";
 
 import {
@@ -28,6 +29,7 @@ import {
   getMe,
   getMyApplication,
   listApplicationDocuments,
+  getMyAnnouncement,
 } from "@/lib/api";
 
 const DOC_CHECKLIST = [
@@ -186,6 +188,7 @@ export default function DashboardPage() {
   const [user, setUser] = useState(null);
   const [application, setApplication] = useState(null);
   const [documents, setDocuments] = useState([]);
+  const [announcement, setAnnouncement] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -201,6 +204,14 @@ export default function DashboardPage() {
           setApplication(app);
           const { documents: docs } = await listApplicationDocuments(app.id);
           if (!cancelled) setDocuments(docs);
+
+          // Load announcement if submitted
+          if (app.status !== "draft") {
+            try {
+              const ann = await getMyAnnouncement();
+              if (!cancelled) setAnnouncement(ann);
+            } catch { /* no announcement yet */ }
+          }
         } catch (err) {
           // 404 is fine — user hasn't started yet.
           if (!err.message?.toLowerCase().includes("not found")) {
@@ -256,6 +267,38 @@ export default function DashboardPage() {
         <NoApplicationCard />
       ) : (
         <>
+          {/* Announcement banner */}
+          {application.status === "announced_pass" && (
+            <div className="rounded-xl border-2 bg-emerald-500/10 border-emerald-500/30 p-6">
+              <div className="flex items-center gap-4">
+                <div className="w-14 h-14 rounded-2xl bg-emerald-500/20 text-emerald-600 flex items-center justify-center">
+                  <CheckCircle2 className="w-8 h-8" />
+                </div>
+                <div>
+                  <h2 className="text-2xl font-bold text-emerald-700 dark:text-emerald-400">LOLOS</h2>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    Selamat! Kamu lolos seleksi administrasi. Pantau informasi tahap selanjutnya.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+          {application.status === "announced_fail" && (
+            <div className="rounded-xl border-2 bg-destructive/10 border-destructive/30 p-6">
+              <div className="flex items-center gap-4">
+                <div className="w-14 h-14 rounded-2xl bg-destructive/20 text-destructive flex items-center justify-center">
+                  <XCircle className="w-8 h-8" />
+                </div>
+                <div>
+                  <h2 className="text-2xl font-bold text-destructive">TIDAK LOLOS</h2>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    Terima kasih telah mendaftar. Kamu belum lolos seleksi administrasi.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Progress overview */}
           <Card>
             <CardHeader className="pb-3">
