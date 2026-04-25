@@ -16,18 +16,24 @@ import sys
 
 from fastapi.testclient import TestClient
 
+from datetime import datetime, timedelta, timezone
+
 from backend.config import settings
 from backend.database import SessionLocal
 from backend.main import app as fastapi_app
 from backend.models.application import Application
 from backend.models.document import Document, DocumentType
-from backend.models.user import User
+from backend.models.period import RecruitmentPeriod
+from backend.models.user import User, UserRole
 from backend.utils.file_storage import purge_application_dir
+from backend.utils.security import hash_password
 
 
 TEST_EMAIL = "smoke+apps@example.com"
 TEST_NIM = "1039876543210"
 TEST_PASSWORD = "hunter2secure"
+PERIOD_NAME = "smoke+apps period"
+PERIOD_ADMIN_EMAIL = "smoke+apps_admin@example.com"
 
 
 def _minimal_pdf(size_bytes: int = 0) -> bytes:
@@ -49,7 +55,11 @@ def _cleanup_user() -> None:
     try:
         users = (
             db.query(User)
-            .filter((User.email == TEST_EMAIL) | (User.nim == TEST_NIM))
+            .filter(
+                (User.email == TEST_EMAIL)
+                | (User.email == PERIOD_ADMIN_EMAIL)
+                | (User.nim == TEST_NIM)
+            )
             .all()
         )
         for u in users:
@@ -60,7 +70,52 @@ def _cleanup_user() -> None:
                 )
                 purge_application_dir(a.id)
                 db.delete(a)
+            # Periods owned by this admin (RESTRICT FK — must drop apps first).
+            db.query(RecruitmentPeriod).filter(
+                RecruitmentPeriod.created_by == u.id
+            ).delete(synchronize_session=False)
             db.delete(u)
+        # Also drop any leftover periods named for this smoke test.
+        db.query(RecruitmentPeriod).filter(
+            RecruitmentPeriod.name == PERIOD_NAME
+        ).delete(synchronize_session=False)
+        db.commit()
+    finally:
+        db.close()
+
+
+def _seed_active_period() -> None:
+    """Insert an active RecruitmentPeriod so submit() is not 403'd."""
+    db = SessionLocal()
+    try:
+        admin = User(
+            email=PERIOD_ADMIN_EMAIL,
+            password_hash=hash_password(TEST_PASSWORD),
+            full_name="Smoke Apps Admin",
+            role=UserRole.SUPER_ADMIN,
+            is_active=True,
+        )
+        db.add(admin)
+        db.commit()
+        db.refresh(admin)
+
+        # Deactivate any pre-existing active periods so we own the invariant.
+        db.query(RecruitmentPeriod).filter(
+            RecruitmentPeriod.is_active == True  # noqa: E712
+        ).update(
+            {RecruitmentPeriod.is_active: False}, synchronize_session=False
+        )
+
+        now = datetime.now(timezone.utc)
+        period = RecruitmentPeriod(
+            name=PERIOD_NAME,
+            start_date=now - timedelta(hours=1),
+            end_date=now + timedelta(days=7),
+            is_active=True,
+            threshold_n=None,
+            created_by=admin.id,
+        )
+        db.add(period)
         db.commit()
     finally:
         db.close()
@@ -68,6 +123,7 @@ def _cleanup_user() -> None:
 
 def main() -> int:
     _cleanup_user()
+    _seed_active_period()
     client = TestClient(fastapi_app)
 
     # --- Register + login ---

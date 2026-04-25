@@ -30,6 +30,7 @@ import {
   getMyApplication,
   listApplicationDocuments,
   getMyAnnouncement,
+  getActivePeriod,
 } from "@/lib/api";
 
 const DOC_CHECKLIST = [
@@ -41,11 +42,11 @@ const DOC_CHECKLIST = [
   { doc_type: "supporting_docs", label: "Dokumen Pendukung" },
 ];
 
-const DEADLINE_ISO =
-  import.meta.env.VITE_RECRUITMENT_DEADLINE || "2026-05-31T23:59:59";
-
 function useCountdown(isoDate) {
-  const deadline = useMemo(() => new Date(isoDate), [isoDate]);
+  const deadline = useMemo(
+    () => (isoDate ? new Date(isoDate) : null),
+    [isoDate]
+  );
   const [now, setNow] = useState(() => new Date());
 
   useEffect(() => {
@@ -53,8 +54,12 @@ function useCountdown(isoDate) {
     return () => clearInterval(t);
   }, []);
 
+  if (!deadline || Number.isNaN(deadline.getTime())) {
+    return { expired: false, days: 0, hours: 0, minutes: 0, deadline: null };
+  }
+
   const msLeft = deadline.getTime() - now.getTime();
-  const expired = msLeft <= 0 || Number.isNaN(msLeft);
+  const expired = msLeft <= 0;
   const abs = Math.max(msLeft, 0);
   const days = Math.floor(abs / (24 * 60 * 60 * 1000));
   const hours = Math.floor((abs % (24 * 60 * 60 * 1000)) / (60 * 60 * 1000));
@@ -63,8 +68,49 @@ function useCountdown(isoDate) {
   return { expired, days, hours, minutes, deadline };
 }
 
-function CountdownCard() {
-  const { expired, days, hours, minutes, deadline } = useCountdown(DEADLINE_ISO);
+function CountdownCard({ period, loading }) {
+  const { expired, days, hours, minutes, deadline } = useCountdown(
+    period?.end_date || null
+  );
+
+  if (loading) {
+    return (
+      <Card>
+        <CardContent className="py-5 flex items-center gap-4">
+          <div className="w-11 h-11 rounded-lg bg-muted flex items-center justify-center">
+            <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+          </div>
+          <p className="text-sm text-muted-foreground">
+            Memuat informasi periode…
+          </p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (!period) {
+    return (
+      <Card className="border-muted">
+        <CardContent className="py-5 flex items-center gap-4">
+          <div className="w-11 h-11 rounded-lg bg-muted text-muted-foreground flex items-center justify-center shrink-0">
+            <CalendarClock className="w-5 h-5" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-xs uppercase tracking-wide text-muted-foreground">
+              Periode Rekrutasi
+            </p>
+            <p className="text-lg font-semibold">
+              Tidak ada periode rekrutasi aktif
+            </p>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Pendaftaran akan dibuka oleh Super Admin.
+            </p>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
   return (
     <Card className={expired ? "border-destructive/40 bg-destructive/5" : ""}>
       <CardContent className="py-5 flex items-center gap-4">
@@ -77,20 +123,22 @@ function CountdownCard() {
         </div>
         <div className="flex-1 min-w-0">
           <p className="text-xs uppercase tracking-wide text-muted-foreground">
-            Recruitment Deadline
+            {period.name}
           </p>
           {expired ? (
             <p className="text-lg font-semibold text-destructive">
-              Deadline has passed
+              Periode telah ditutup
             </p>
           ) : (
             <p className="text-lg font-semibold tabular-nums">
-              {days}d {hours}h {minutes}m remaining
+              {days}d {hours}h {minutes}m tersisa
             </p>
           )}
-          <p className="text-xs text-muted-foreground mt-0.5">
-            Closes {deadline.toLocaleString()}
-          </p>
+          {deadline && (
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Tutup {deadline.toLocaleString()}
+            </p>
+          )}
         </div>
       </CardContent>
     </Card>
@@ -189,11 +237,24 @@ export default function DashboardPage() {
   const [application, setApplication] = useState(null);
   const [documents, setDocuments] = useState([]);
   const [announcement, setAnnouncement] = useState(null);
+  const [activePeriod, setActivePeriod] = useState(null);
+  const [periodLoading, setPeriodLoading] = useState(true);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      // Active period — independent of application; 404 is expected when
+      // no period is active and should not raise a toast.
+      try {
+        const p = await getActivePeriod();
+        if (!cancelled) setActivePeriod(p);
+      } catch {
+        if (!cancelled) setActivePeriod(null);
+      } finally {
+        if (!cancelled) setPeriodLoading(false);
+      }
+
       try {
         const me = await getMe();
         if (!cancelled) setUser(me);
@@ -261,7 +322,7 @@ export default function DashboardPage() {
         )}
       </div>
 
-      <CountdownCard />
+      <CountdownCard period={activePeriod} loading={periodLoading} />
 
       {!application ? (
         <NoApplicationCard />

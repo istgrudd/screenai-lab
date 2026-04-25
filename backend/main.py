@@ -27,6 +27,7 @@ from backend.routers.applications import (
 )
 from backend.routers.documents import router as documents_router
 from backend.routers.users import router as users_router
+from backend.routers.periods import router as periods_router
 
 
 @asynccontextmanager
@@ -97,6 +98,7 @@ app.include_router(applications_router)
 app.include_router(applications_recruiter_router)
 app.include_router(documents_router)
 app.include_router(users_router)
+app.include_router(periods_router)
 
 
 # --- Health Check ---

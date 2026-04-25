@@ -372,6 +372,48 @@ export async function getMyAnnouncement() {
   return request("/announcements/my");
 }
 
+// ── Recruitment Periods (Phase 2B) ───────────────────────────────────────────
+
+/**
+ * Get the active recruitment period.
+ * Throws if there is no active period (404).
+ */
+export async function getActivePeriod() {
+  return request("/periods/active");
+}
+
+/** Super Admin only — list all periods (with application_count). */
+export async function listPeriods() {
+  return request("/periods");
+}
+
+/**
+ * Super Admin only — create a new period (auto-active, deactivates others).
+ * @param {{name:string, start_date:string, end_date:string, threshold_n:number|null}} payload
+ */
+export async function createPeriod(payload) {
+  return request("/periods", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+/**
+ * Super Admin only — update a period.
+ * Editable: name, end_date, threshold_n, is_active.
+ */
+export async function updatePeriod(periodId, payload) {
+  return request(`/periods/${periodId}`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+/** Super Admin only — close a period early. */
+export async function closePeriod(periodId) {
+  return request(`/periods/${periodId}/close`, { method: "PUT" });
+}
+
 // ── Health ───────────────────────────────────────────────────────────────────
 
 export async function healthCheck() {

@@ -13,6 +13,7 @@ import {
   ShieldCheck,
   CheckCircle2,
   UserCog,
+  CalendarClock,
 } from "lucide-react";
 
 import DashboardPage from "@/pages/DashboardPage";
@@ -30,6 +31,7 @@ import ReviewPage from "@/pages/candidate/ReviewPage";
 import SubmittedPage from "@/pages/candidate/SubmittedPage";
 import ResultPage from "@/pages/candidate/ResultPage";
 import AdminPage from "@/pages/admin/AdminPage";
+import RecruitmentPeriodPage from "@/pages/admin/RecruitmentPeriodPage";
 
 import ProtectedRoute from "@/components/ProtectedRoute";
 import {
@@ -71,6 +73,7 @@ function navLinksForRole(role) {
     ];
     if (role === ROLES.SUPER_ADMIN) {
       links.push({ to: "/admin/users", label: "Admin Panel", icon: UserCog });
+      links.push({ to: "/admin/periods", label: "Periode Rekrutasi", icon: CalendarClock });
     }
     return links;
   }
@@ -313,6 +316,16 @@ export default function App() {
               <AuthenticatedShell>
                 <ProtectedRoute roles={[ROLES.SUPER_ADMIN]}>
                   <AdminPage />
+                </ProtectedRoute>
+              </AuthenticatedShell>
+            }
+          />
+          <Route
+            path="/admin/periods"
+            element={
+              <AuthenticatedShell>
+                <ProtectedRoute roles={[ROLES.SUPER_ADMIN]}>
+                  <RecruitmentPeriodPage />
                 </ProtectedRoute>
               </AuthenticatedShell>
             }

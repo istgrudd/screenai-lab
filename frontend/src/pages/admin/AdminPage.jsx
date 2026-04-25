@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import {
+  CalendarClock,
   ChevronLeft,
   ChevronRight,
   Loader2,
@@ -133,14 +135,22 @@ export default function AdminPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
-          <UserCog className="w-6 h-6 text-primary" />
-          User Management
-        </h1>
-        <p className="text-muted-foreground mt-1">
-          Promote users, change roles, and deactivate accounts.
-        </p>
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
+            <UserCog className="w-6 h-6 text-primary" />
+            User Management
+          </h1>
+          <p className="text-muted-foreground mt-1">
+            Promote users, change roles, and deactivate accounts.
+          </p>
+        </div>
+        <Button asChild variant="outline" className="gap-2">
+          <Link to="/admin/periods">
+            <CalendarClock className="w-4 h-4" />
+            Kelola Periode Rekrutasi
+          </Link>
+        </Button>
       </div>
 
       {/* Filters */}
