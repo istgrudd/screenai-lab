@@ -27,12 +27,32 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   listRubrics,
   getRubric,
   createRubric,
   updateRubric,
   deleteRubric,
 } from "@/lib/api";
+
+const DIVISION_OPTIONS = [
+  { value: "big_data", label: "Big Data" },
+  { value: "cyber_security", label: "Cyber Security" },
+  { value: "game_tech", label: "Game Tech" },
+  { value: "gis", label: "GIS" },
+];
+
+const DIVISION_LABEL = Object.fromEntries(
+  DIVISION_OPTIONS.map((d) => [d.value, d.label])
+);
+
+const NO_DIVISION = "__none__";
 
 const emptyDimension = () => ({
   name: "",
@@ -44,6 +64,7 @@ const emptyDimension = () => ({
 const emptyForm = () => ({
   name: "",
   position: "",
+  division: null,
   description: "",
   dimensions: [emptyDimension()],
 });
@@ -89,6 +110,7 @@ export default function RubricConfigPage() {
       setForm({
         name: data.name,
         position: data.position,
+        division: data.division || null,
         description: data.description || "",
         dimensions: data.dimensions.map((d) => ({
           id: d.id,
@@ -122,6 +144,7 @@ export default function RubricConfigPage() {
     const payload = {
       name: form.name.trim(),
       position: form.position.trim(),
+      division: form.division || null,
       description: form.description.trim() || null,
       dimensions: form.dimensions.map((d) => ({
         ...(d.id ? { id: d.id } : {}),
@@ -248,7 +271,7 @@ export default function RubricConfigPage() {
             <CardTitle className="text-base">Rubric Details</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-3 gap-4">
               <div className="space-y-2">
                 <Label>Rubric Name</Label>
                 <Input
@@ -268,6 +291,32 @@ export default function RubricConfigPage() {
                     setForm((p) => ({ ...p, position: e.target.value }))
                   }
                 />
+              </div>
+              <div className="space-y-2">
+                <Label>Division</Label>
+                <Select
+                  value={form.division ?? NO_DIVISION}
+                  onValueChange={(v) =>
+                    setForm((p) => ({
+                      ...p,
+                      division: v === NO_DIVISION ? null : v,
+                    }))
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select division…" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={NO_DIVISION}>
+                      <span className="text-muted-foreground">Unassigned</span>
+                    </SelectItem>
+                    {DIVISION_OPTIONS.map((d) => (
+                      <SelectItem key={d.value} value={d.value}>
+                        {d.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
             </div>
             <div className="space-y-2">
@@ -474,6 +523,18 @@ export default function RubricConfigPage() {
                     <Badge variant="secondary" className="text-xs">
                       {r.position}
                     </Badge>
+                    {r.division ? (
+                      <Badge variant="outline" className="text-xs">
+                        {DIVISION_LABEL[r.division] ?? r.division}
+                      </Badge>
+                    ) : (
+                      <Badge
+                        variant="outline"
+                        className="text-xs text-muted-foreground"
+                      >
+                        Unassigned
+                      </Badge>
+                    )}
                   </div>
                   <p className="text-xs text-muted-foreground">
                     {r.dimension_count} dimension(s) ·{" "}

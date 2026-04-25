@@ -287,7 +287,7 @@ export async function getRubric(rubricId) {
 
 /**
  * Create a rubric.
- * @param {{ name: string, position: string, description?: string, dimensions: Array }} payload
+ * @param {{ name: string, position: string, description?: string, dimensions: Array, division: name }} payload
  */
 export async function createRubric(payload) {
   return request("/rubrics", {
