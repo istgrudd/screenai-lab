@@ -10,6 +10,7 @@ Capstone pipeline models (Candidate / CandidateDocument).
 
 from __future__ import annotations
 
+import logging
 import os
 import traceback
 import uuid
@@ -29,6 +30,8 @@ from backend.services.normalizer import normalize_and_segment
 from backend.services.anonymizer import anonymize_text
 from backend.services.rag_pipeline import evaluate_candidate
 from backend.services.scoring import store_evaluation_results
+
+logger = logging.getLogger(__name__)
 
 
 def _utcnow() -> datetime:
@@ -154,31 +157,77 @@ async def _evaluate_one(
         }
         result["khs_warning"] = None
 
-    # --- Extract + normalise + anonymize CV ---
-    cv_doc = _get_doc(app.id, DocumentType.CV, db)
-    if not cv_doc:
-        raise ValueError(f"No CV document found for application {app.id}")
+    # --- Task 10.3/10.4: Ensure Candidate exists (moved up for cache check) ---
+    candidate = _ensure_candidate(app, rubric, user, db)
 
-    extraction = extract_text_from_pdf(cv_doc.file_path)
-    raw_text = extraction.get("raw_text", "")
-    normalised = normalize_and_segment(raw_text)
-    anonymised = anonymize_text(normalised["normalized_text"])
+    # --- Task 10.3: Check NER cache from submit-time anonymization ---
+    cached_cv = (
+        db.query(CandidateDocument)
+        .filter(
+            CandidateDocument.candidate_id == candidate.id,
+            CandidateDocument.document_type == "cv",
+            CandidateDocument.anonymized_text != None,  # noqa: E711
+        )
+        .first()
+    )
 
-    # --- Also anonymize motivation letter if present ---
-    ml_doc = _get_doc(app.id, DocumentType.MOTIVATION_LETTER, db)
-    ml_anon_text = ""
-    if ml_doc and os.path.exists(ml_doc.file_path):
-        try:
-            ml_extraction = extract_text_from_pdf(ml_doc.file_path)
-            ml_norm = normalize_and_segment(ml_extraction.get("raw_text", ""))
-            ml_anonymised = anonymize_text(ml_norm["normalized_text"])
-            ml_anon_text = ml_anonymised.get("anonymized_text", "")
-        except Exception:
-            pass  # graceful fallback — ML is bonus context
+    if cached_cv and cached_cv.anonymized_text:
+        # Cache hit — use pre-computed anonymized text
+        logger.info(
+            "NER cache hit for application %d, skipping anonymization", app.id
+        )
+        full_text = cached_cv.anonymized_text
 
-    # --- Build anonymized text with KHS + ML blocks ---
-    full_text = anonymised.get("anonymized_text", "")
+        # Also check for cached motivation letter
+        cached_ml = (
+            db.query(CandidateDocument)
+            .filter(
+                CandidateDocument.candidate_id == candidate.id,
+                CandidateDocument.document_type == "motivation_letter",
+                CandidateDocument.anonymized_text != None,  # noqa: E711
+            )
+            .first()
+        )
+        ml_anon_text = cached_ml.anonymized_text if cached_ml else ""
 
+        # We still need raw_text for _ensure_candidate_document bookkeeping
+        cv_doc = _get_doc(app.id, DocumentType.CV, db)
+        raw_text = cached_cv.raw_text or ""
+        normalised = {"normalized_text": cached_cv.normalized_text or ""}
+        anonymised = {
+            "anonymized_text": cached_cv.anonymized_text,
+            "entities_found": cached_cv.entities_json or [],
+        }
+    else:
+        # Cache miss — run inline NER as fallback
+        logger.info(
+            "NER cache miss for application %d, running inline anonymization",
+            app.id,
+        )
+
+        cv_doc = _get_doc(app.id, DocumentType.CV, db)
+        if not cv_doc:
+            raise ValueError(f"No CV document found for application {app.id}")
+
+        extraction = extract_text_from_pdf(cv_doc.file_path)
+        raw_text = extraction.get("raw_text", "")
+        normalised = normalize_and_segment(raw_text)
+        anonymised = anonymize_text(normalised["normalized_text"])
+        full_text = anonymised.get("anonymized_text", "")
+
+        # Also anonymize motivation letter if present
+        ml_doc = _get_doc(app.id, DocumentType.MOTIVATION_LETTER, db)
+        ml_anon_text = ""
+        if ml_doc and os.path.exists(ml_doc.file_path):
+            try:
+                ml_extraction = extract_text_from_pdf(ml_doc.file_path)
+                ml_norm = normalize_and_segment(ml_extraction.get("raw_text", ""))
+                ml_anonymised = anonymize_text(ml_norm["normalized_text"])
+                ml_anon_text = ml_anonymised.get("anonymized_text", "")
+            except Exception:
+                pass  # graceful fallback — ML is bonus context
+
+    # --- Build full anonymized text with ML + KHS blocks ---
     if ml_anon_text:
         full_text += (
             "\n\n=== SURAT MOTIVASI ===\n"
@@ -198,8 +247,7 @@ async def _evaluate_one(
             + full_text
         )
 
-    # --- Bridge: create/update Candidate + CandidateDocument ---
-    candidate = _ensure_candidate(app, rubric, user, db)
+    # --- Bridge: update CandidateDocument ---
     cand_doc = _ensure_candidate_document(candidate, cv_doc, raw_text, normalised, anonymised, db)
 
     # --- RAG evaluation ---
@@ -289,18 +337,23 @@ def _extract_swot(app: Application, db: Session) -> str | None:
 
 def _ensure_candidate(
     app: Application,
-    rubric: Rubric,
+    rubric: Rubric | None,
     user: User | None,
     db: Session,
 ) -> Candidate:
-    """Find or create a Candidate pipeline record linked to this application."""
+    """Find or create a Candidate pipeline record linked to this application.
+
+    Task 10.4: rubric is optional.  At submit-time the Candidate is created
+    with rubric_id=None; the rubric_id is set when evaluation actually runs.
+    """
     existing = (
         db.query(Candidate)
         .filter(Candidate.user_id == app.user_id)
         .first()
     )
     if existing:
-        existing.rubric_id = rubric.id
+        if rubric is not None:
+            existing.rubric_id = rubric.id
         existing.status = "anonymized"
         db.flush()
         return existing
@@ -308,7 +361,7 @@ def _ensure_candidate(
     candidate = Candidate(
         anonymous_id=_generate_anon_id(),
         user_id=app.user_id,
-        rubric_id=rubric.id,
+        rubric_id=rubric.id if rubric else None,
         status="anonymized",
     )
     db.add(candidate)

@@ -37,3 +37,18 @@ Thumbs.db
 # Node / Frontend
 frontend/node_modules/
 frontend/dist/
+# Added by code-review-graph
+.code-review-graph/
+.mcp.json
+.opencode.json
+.claude/skills/debug-issue.md
+.claude/skills/explore-codebase.md
+.claude/skills/refactor-safely.md
+.claude/skills/review-changes.md
+.cursorrules
+.windsurfrules
+AGENTS.md
+GEMINI.md
+.claude/settings.json
+.kiro/steering/code-review-graph.md
+analysis.md

@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -30,6 +30,7 @@ from backend.models.candidate import Candidate
 from backend.models.document import Document, DocumentType
 from backend.models.user import User, UserRole
 from backend.services.extractor import extract_text_from_pdf
+from backend.services.submit_anonymization import run_submit_anonymization
 
 router = APIRouter(prefix="/api/applications", tags=["applications"])
 recruiter_router = APIRouter(prefix="/api/recruiter", tags=["recruiter"])
@@ -212,6 +213,7 @@ def get_swot_text(
 )
 def submit_application(
     application_id: int,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -258,6 +260,13 @@ def submit_application(
     app.submitted_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(app)
+
+    # Task 10.2: trigger NER anonymization in the background.
+    # Pass a NEW db session — the request-scoped session will be closed
+    # by the time the background task runs.
+    background_tasks.add_task(
+        run_submit_anonymization, app.id, next(get_db())
+    )
 
     return {
         "success": True,
