@@ -38,8 +38,7 @@ import {
 import { Progress } from "@/components/ui/progress";
 import {
   listRecruiterApplications,
-  listRubrics,
-  runEvaluation,
+  evaluateBatch,
 } from "@/lib/api";
 
 const DIVISIONS = [
@@ -113,8 +112,7 @@ function CompletenessCell({ pct }) {
 export default function DashboardPage() {
   const navigate = useNavigate();
   const [applications, setApplications] = useState([]);
-  const [rubrics, setRubrics] = useState([]);
-  const [selectedRubric, setSelectedRubric] = useState("all");
+  const [selectedDivision, setSelectedDivision] = useState("big_data");
   const [divisionFilter, setDivisionFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [loading, setLoading] = useState(true);
@@ -123,15 +121,11 @@ export default function DashboardPage() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [apps, rub] = await Promise.all([
-        listRecruiterApplications({
-          division: divisionFilter !== "all" ? divisionFilter : undefined,
-          status: statusFilter !== "all" ? statusFilter : undefined,
-        }),
-        listRubrics(),
-      ]);
+      const apps = await listRecruiterApplications({
+        division: divisionFilter !== "all" ? divisionFilter : undefined,
+        status: statusFilter !== "all" ? statusFilter : undefined,
+      });
       setApplications(apps);
-      setRubrics(rub);
     } catch (err) {
       toast.error(`Failed to load data: ${err.message}`);
     } finally {
@@ -145,18 +139,18 @@ export default function DashboardPage() {
   }, [divisionFilter, statusFilter]);
 
   const handleEvaluate = async () => {
-    if (selectedRubric === "all") {
-      toast.error("Please select a rubric first.");
+    if (!selectedDivision) {
+      toast.error("Please select a division first.");
       return;
     }
     setEvaluating(true);
     try {
-      const result = await runEvaluation(Number(selectedRubric));
+      const result = await evaluateBatch(selectedDivision);
       toast.success(
-        `Evaluation complete: ${result.evaluated_count} candidate(s) scored.`
+        `Evaluation complete: ${result.results.length} candidate(s) scored.`
       );
-      if (result.error_count > 0) {
-        toast.warning(`${result.error_count} candidate(s) had errors.`);
+      if (result.errors.length > 0) {
+        toast.warning(`${result.errors.length} application(s) had errors.`);
       }
       fetchData();
     } catch (err) {
@@ -186,25 +180,24 @@ export default function DashboardPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Select value={selectedRubric} onValueChange={setSelectedRubric}>
+          <Select value={selectedDivision} onValueChange={setSelectedDivision}>
             <SelectTrigger className="w-52">
-              <SelectValue placeholder="Pick a rubric to evaluate" />
+              <SelectValue placeholder="Pick a division to evaluate" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">— rubric for eval —</SelectItem>
-              {rubrics.map((r) => (
-                <SelectItem key={r.id} value={String(r.id)}>
-                  {r.name}
+              {DIVISIONS.filter((d) => d.id !== "all").map((d) => (
+                <SelectItem key={d.id} value={d.id}>
+                  {d.label}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
           <Tooltip>
             <TooltipTrigger asChild>
-              <span tabIndex={selectedRubric === "all" ? 0 : -1}>
+              <span tabIndex={!selectedDivision ? 0 : -1}>
                 <Button
                   onClick={handleEvaluate}
-                  disabled={evaluating || selectedRubric === "all"}
+                  disabled={evaluating || !selectedDivision}
                 >
                   {evaluating ? (
                     <>
@@ -220,8 +213,8 @@ export default function DashboardPage() {
                 </Button>
               </span>
             </TooltipTrigger>
-            {selectedRubric === "all" && (
-              <TooltipContent>Select a rubric first</TooltipContent>
+            {!selectedDivision && (
+              <TooltipContent>Select a division first</TooltipContent>
             )}
           </Tooltip>
         </div>

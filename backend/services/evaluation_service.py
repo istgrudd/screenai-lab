@@ -79,8 +79,17 @@ async def run_evaluation_pipeline(
         )
 
     # --- 2. Find target applications ---
+    # Application.division is stored as the enum name ("BIG_DATA") via
+    # SQLAlchemy's Enum(..., native_enum=False); rubric.division uses the
+    # enum value ("big_data"). Coerce the incoming value-string to the
+    # Division enum so the WHERE clause emits the stored name correctly.
+    try:
+        division_enum = Division(division)
+    except ValueError:
+        raise ValueError(f"Invalid division '{division}'")
+
     q = db.query(Application).filter(
-        Application.division == division,
+        Application.division == division_enum,
         Application.status.in_([
             ApplicationStatus.SUBMITTED,
             ApplicationStatus.SCREENING,
