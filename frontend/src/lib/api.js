@@ -372,6 +372,21 @@ export async function getMyAnnouncement() {
   return request("/announcements/my");
 }
 
+/**
+ * Bulk-announce per division + period (Task 12.4).
+ * @param {{ division: string, periodId: number, passedApplicationIds: number[] }}
+ */
+export async function bulkAnnounce({ division, periodId, passedApplicationIds }) {
+  return request("/announcements/bulk", {
+    method: "POST",
+    body: JSON.stringify({
+      division,
+      period_id: periodId,
+      passed_application_ids: passedApplicationIds,
+    }),
+  });
+}
+
 // ── Recruitment Periods (Phase 2B) ───────────────────────────────────────────
 
 /**

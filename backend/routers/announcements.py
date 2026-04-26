@@ -1,7 +1,8 @@
-"""Announcements router — Task 9.1 & 9.2.
+"""Announcements router — Task 9.1, 9.2 & Task 12.4.
 
 Endpoints:
     POST /api/announcements       — Recruiter publishes pass/fail for a candidate
+    POST /api/announcements/bulk  — Recruiter bulk-announces a whole division
     GET  /api/announcements/my    — Candidate checks their announcement status
 """
 
@@ -15,14 +16,22 @@ from sqlalchemy.orm import Session
 
 from backend.database import get_db
 from backend.middleware.auth_middleware import get_current_user, require_role
-from backend.models.application import Application, ApplicationStatus
+from backend.models.application import Application, ApplicationStatus, Division
 from backend.models.audit import AuditLog
+from backend.models.period import RecruitmentPeriod
 from backend.models.user import User, UserRole
 
 router = APIRouter(prefix="/api/announcements", tags=["announcements"])
 
 _recruiter_or_admin = require_role(UserRole.RECRUITER, UserRole.SUPER_ADMIN)
 _candidate_only = require_role(UserRole.CANDIDATE)
+
+# Statuses that count as "evaluated" — only these are touched by bulk announce.
+_EVALUATED_STATUSES = (
+    ApplicationStatus.SCREENING,
+    ApplicationStatus.ANNOUNCED_PASS,
+    ApplicationStatus.ANNOUNCED_FAIL,
+)
 
 
 def _utcnow() -> datetime:
@@ -37,6 +46,12 @@ class AnnouncementRequest(BaseModel):
     application_id: int
     result: str  # "pass" or "fail"
     notes: str | None = None
+
+
+class BulkAnnounceRequest(BaseModel):
+    division: Division
+    period_id: int
+    passed_application_ids: list[int]
 
 
 # ---------------------------------------------------------------------------
@@ -111,6 +126,105 @@ def create_announcement(
             "result": payload.result,
             "notes": payload.notes,
             "announced_at": _utcnow().isoformat(),
+        },
+        "error": None,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Recruiter: bulk announce per division (Task 12.4)
+# ---------------------------------------------------------------------------
+
+@router.post("/bulk")
+def bulk_announce(
+    payload: BulkAnnounceRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(_recruiter_or_admin),
+):
+    """Bulk-publish pass/fail for an entire (division, period) cohort.
+
+    Logic:
+      * Scope = applications WHERE division = X AND period_id = Y AND status
+        in (screening, announced_pass, announced_fail). SUBMITTED is never
+        touched (those still need evaluation).
+      * Every id in ``passed_application_ids`` must belong to that scope —
+        otherwise 400.
+      * Within scope: id ∈ passed → announced_pass; else → announced_fail.
+      * One audit_log entry per *actual* status change.
+      * Single ``db.commit()`` at the end (transactional).
+    """
+    period = (
+        db.query(RecruitmentPeriod)
+        .filter(RecruitmentPeriod.id == payload.period_id)
+        .first()
+    )
+    if not period:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"RecruitmentPeriod {payload.period_id} not found",
+        )
+
+    scope = (
+        db.query(Application)
+        .filter(
+            Application.division == payload.division,
+            Application.period_id == payload.period_id,
+            Application.status.in_(_EVALUATED_STATUSES),
+        )
+        .all()
+    )
+    scope_ids = {app.id for app in scope}
+
+    invalid_ids = [aid for aid in payload.passed_application_ids if aid not in scope_ids]
+    if invalid_ids:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"Application(s) {invalid_ids} do not belong to division "
+                f"'{payload.division.value}' / period {payload.period_id} or are "
+                f"not yet evaluated"
+            ),
+        )
+
+    passed_set = set(payload.passed_application_ids)
+    pass_count = 0
+    fail_count = 0
+
+    for app in scope:
+        new_status = (
+            ApplicationStatus.ANNOUNCED_PASS
+            if app.id in passed_set
+            else ApplicationStatus.ANNOUNCED_FAIL
+        )
+        old_status = app.status.value if hasattr(app.status, "value") else str(app.status)
+
+        if app.status != new_status:
+            app.status = new_status
+            db.add(
+                AuditLog(
+                    recruiter_id=current_user.id,
+                    candidate_id=app.user_id,
+                    action_type="bulk_announcement",
+                    old_value=old_status,
+                    new_value=new_status.value,
+                    reason=None,
+                )
+            )
+
+        if new_status == ApplicationStatus.ANNOUNCED_PASS:
+            pass_count += 1
+        else:
+            fail_count += 1
+
+    db.commit()
+
+    return {
+        "success": True,
+        "data": {
+            "announced_pass": pass_count,
+            "announced_fail": fail_count,
+            "division": payload.division.value,
+            "period_id": payload.period_id,
         },
         "error": None,
     }

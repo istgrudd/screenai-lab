@@ -309,6 +309,11 @@ def list_submitted_applications(
     By default returns every application whose status has moved past
     ``draft``. Can be narrowed with ``division`` and ``status`` query
     params (Task 6 will consume these).
+
+    Task 12.5: each row carries ``rank`` (1-based, by composite_score DESC
+    within its division across all submitted apps; None if not evaluated)
+    and ``is_recommended`` (True iff active period has ``threshold_n`` and
+    ``rank <= threshold_n``). Both are computed at query time.
     """
     q = db.query(Application)
     if status_filter is None:
@@ -319,28 +324,63 @@ def list_submitted_applications(
         q = q.filter(Application.division == division)
 
     rows = q.order_by(Application.submitted_at.desc().nullslast()).all()
+
+    # ---- Task 12.5: per-division rank from composite_score --------------
+    # Build (app_id -> composite_score) for every row whose user has a
+    # Candidate eval record, then rank within division. We rank across the
+    # *filtered* result set so the recruiter sees ranks consistent with
+    # whatever they're currently viewing.
+    user_ids = [app.user_id for app in rows]
+    scored_by_user: dict[int, Candidate] = {}
+    if user_ids:
+        for c in (
+            db.query(Candidate)
+            .filter(Candidate.user_id.in_(user_ids))
+            .order_by(Candidate.created_at.desc())
+            .all()
+        ):
+            # Keep the newest per user (sorted DESC, so first-write wins).
+            scored_by_user.setdefault(c.user_id, c)
+
+    by_division: dict[str, list[tuple[int, float]]] = {}
+    for app in rows:
+        scored = scored_by_user.get(app.user_id)
+        if scored is None or scored.composite_score is None:
+            continue
+        div_key = app.division.value if hasattr(app.division, "value") else str(app.division)
+        by_division.setdefault(div_key, []).append((app.id, scored.composite_score))
+
+    rank_by_app_id: dict[int, int] = {}
+    for div_key, items in by_division.items():
+        items.sort(key=lambda t: t[1], reverse=True)
+        for idx, (app_id, _score) in enumerate(items, start=1):
+            rank_by_app_id[app_id] = idx
+
+    active_period = (
+        db.query(RecruitmentPeriod)
+        .filter(RecruitmentPeriod.is_active == True)  # noqa: E712
+        .order_by(RecruitmentPeriod.created_at.desc())
+        .first()
+    )
+    threshold_n = active_period.threshold_n if active_period else None
+
     data = []
     for app in rows:
         user = db.query(User).filter(User.id == app.user_id).first()
         count = _count_documents(db, app.id)
+        scored = scored_by_user.get(app.user_id) if user else None
 
-        # Cross-link to the Capstone evaluation record (if one exists yet).
-        # In Phase 1 this is always None — the Phase-2 eval pipeline populates
-        # ``candidates`` with user_id set, at which point the recruiter
-        # dashboard ranking columns light up automatically.
-        scored = (
-            db.query(Candidate)
-            .filter(Candidate.user_id == app.user_id)
-            .order_by(Candidate.created_at.desc())
-            .first()
-            if user
-            else None
+        rank = rank_by_app_id.get(app.id)
+        is_recommended = bool(
+            rank is not None and threshold_n is not None and rank <= threshold_n
         )
 
         data.append(
             {
                 **ApplicationOut.from_application(app, count).model_dump(),
                 "doc_completeness_pct": int(round((count / len(DocumentType)) * 100)),
+                "rank": rank,
+                "is_recommended": is_recommended,
                 "candidate": {
                     "user_id": user.id if user else None,
                     "full_name": user.full_name if user else None,

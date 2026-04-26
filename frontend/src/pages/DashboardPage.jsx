@@ -8,7 +8,9 @@ import {
   Filter,
   Inbox,
   Loader2,
+  Megaphone,
   Play,
+  Sparkles,
   Trophy,
   Users,
 } from "lucide-react";
@@ -36,9 +38,22 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { Progress } from "@/components/ui/progress";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import {
   listRecruiterApplications,
   evaluateBatch,
+  getActivePeriod,
+  bulkAnnounce,
 } from "@/lib/api";
 
 const DIVISIONS = [
@@ -109,6 +124,14 @@ function CompletenessCell({ pct }) {
   );
 }
 
+// Statuses that count as "evaluated" — only these can be checked / counted in
+// the bulk-announce confirmation. Mirrors backend _EVALUATED_STATUSES.
+const EVALUATED_STATUSES = new Set([
+  "screening",
+  "announced_pass",
+  "announced_fail",
+]);
+
 export default function DashboardPage() {
   const navigate = useNavigate();
   const [applications, setApplications] = useState([]);
@@ -118,6 +141,16 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [evaluating, setEvaluating] = useState(false);
 
+  // Task 12.1 — active recruitment period (for threshold_n + period_id).
+  const [activePeriod, setActivePeriod] = useState(null);
+
+  // Task 12.2 — local checkbox state: { [application_id]: bool }.
+  const [checked, setChecked] = useState({});
+
+  // Task 12.3 — publish confirmation + in-flight state.
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [publishing, setPublishing] = useState(false);
+
   const fetchData = async () => {
     setLoading(true);
     try {
@@ -126,12 +159,33 @@ export default function DashboardPage() {
         status: statusFilter !== "all" ? statusFilter : undefined,
       });
       setApplications(apps);
+      // Pre-check candidates already announced_pass so the recruiter sees the
+      // current state — Task 12.2.
+      const initial = {};
+      for (const a of apps) {
+        if (a.status === "announced_pass") initial[a.id] = true;
+      }
+      setChecked(initial);
     } catch (err) {
       toast.error(`Failed to load data: ${err.message}`);
     } finally {
       setLoading(false);
     }
   };
+
+  const fetchActivePeriod = async () => {
+    try {
+      const p = await getActivePeriod();
+      setActivePeriod(p);
+    } catch {
+      // 404 = no active period — that's a legitimate state, not an error.
+      setActivePeriod(null);
+    }
+  };
+
+  useEffect(() => {
+    fetchActivePeriod();
+  }, []);
 
   useEffect(() => {
     fetchData();
@@ -168,6 +222,46 @@ export default function DashboardPage() {
     .map((a) => a.evaluation?.composite_score)
     .filter((s) => s != null)
     .sort((a, b) => b - a)[0];
+
+  // ── Task 12.3 — bulk-publish derived state ─────────────────────────────
+  const checkedIds = applications
+    .filter((a) => checked[a.id] && EVALUATED_STATUSES.has(a.status))
+    .map((a) => a.id);
+  const checkedCount = checkedIds.length;
+  const evaluatedInView = applications.filter((a) =>
+    EVALUATED_STATUSES.has(a.status)
+  );
+  // Bulk publish targets the divisionFilter — must be a single division.
+  const canPublish =
+    checkedCount > 0 &&
+    divisionFilter !== "all" &&
+    activePeriod != null;
+  // Y = evaluated apps in the targeted division MINUS checked count.
+  const evaluatedInDivision = evaluatedInView.filter(
+    (a) => divisionFilter === "all" || a.division === divisionFilter
+  );
+  const failCount = Math.max(evaluatedInDivision.length - checkedCount, 0);
+
+  const handleConfirmPublish = async () => {
+    if (!canPublish) return;
+    setPublishing(true);
+    try {
+      const data = await bulkAnnounce({
+        division: divisionFilter,
+        periodId: activePeriod.id,
+        passedApplicationIds: checkedIds,
+      });
+      toast.success(
+        `Publikasi berhasil — ${data.announced_pass} lolos, ${data.announced_fail} tidak lolos.`
+      );
+      setConfirmOpen(false);
+      fetchData();
+    } catch (err) {
+      toast.error(`Gagal publikasi: ${err.message}`);
+    } finally {
+      setPublishing(false);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -259,7 +353,7 @@ export default function DashboardPage() {
         </Card>
       </div>
 
-      {/* Filters */}
+      {/* Filters + bulk publish */}
       <Card>
         <CardContent className="py-4 flex flex-wrap items-center gap-3">
           <span className="text-sm text-muted-foreground inline-flex items-center gap-1.5">
@@ -302,6 +396,38 @@ export default function DashboardPage() {
               Reset
             </Button>
           )}
+
+          {/* Task 12.3 — Publish Hasil button */}
+          {checkedCount > 0 && (
+            <div className="ml-auto flex items-center gap-2">
+              {divisionFilter === "all" && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className="text-xs text-muted-foreground inline-flex items-center gap-1">
+                      <AlertCircle className="w-3.5 h-3.5" />
+                      Filter ke satu divisi
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    Pilih satu divisi pada filter sebelum publish hasil.
+                  </TooltipContent>
+                </Tooltip>
+              )}
+              {divisionFilter !== "all" && activePeriod == null && (
+                <span className="text-xs text-destructive inline-flex items-center gap-1">
+                  <AlertCircle className="w-3.5 h-3.5" />
+                  Tidak ada periode aktif
+                </span>
+              )}
+              <Button
+                onClick={() => setConfirmOpen(true)}
+                disabled={!canPublish}
+              >
+                <Megaphone className="w-4 h-4 mr-2" />
+                Publish Hasil ({checkedCount})
+              </Button>
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -329,6 +455,7 @@ export default function DashboardPage() {
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead className="w-10" />
                   <TableHead>Candidate</TableHead>
                   <TableHead>NIM</TableHead>
                   <TableHead>Division</TableHead>
@@ -343,10 +470,44 @@ export default function DashboardPage() {
                 {applications.map((a) => {
                   const cevalId = a.evaluation?.candidate_id;
                   const canOpen = Boolean(cevalId);
+                  const isEvaluated = EVALUATED_STATUSES.has(a.status);
+                  const isRecommended = a.is_recommended === true;
+                  const isChecked = Boolean(checked[a.id]);
+
+                  // Task 12.1 — green highlight when threshold-recommended.
+                  const rowHighlight = isRecommended
+                    ? "bg-green-50/60 dark:bg-green-900/10 border-l-4 border-l-green-500"
+                    : "";
+
+                  const checkboxNode = isEvaluated ? (
+                    <Checkbox
+                      checked={isChecked}
+                      onCheckedChange={(v) =>
+                        setChecked((prev) => ({ ...prev, [a.id]: Boolean(v) }))
+                      }
+                      onClick={(e) => e.stopPropagation()}
+                      aria-label={`Select ${a.candidate?.full_name || "candidate"}`}
+                    />
+                  ) : (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span
+                          className="inline-flex"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <Checkbox checked={false} disabled />
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        Jalankan evaluasi terlebih dahulu
+                      </TooltipContent>
+                    </Tooltip>
+                  );
+
                   return (
                     <TableRow
                       key={a.id}
-                      className={`transition-colors ${
+                      className={`transition-colors ${rowHighlight} ${
                         canOpen
                           ? "cursor-pointer hover:bg-muted/50"
                           : "opacity-90"
@@ -355,11 +516,25 @@ export default function DashboardPage() {
                         canOpen && navigate(`/candidates/${cevalId}`)
                       }
                     >
+                      <TableCell onClick={(e) => e.stopPropagation()}>
+                        {checkboxNode}
+                      </TableCell>
                       <TableCell>
                         <div className="flex flex-col">
-                          <span className="text-sm font-medium">
-                            {a.candidate?.full_name || "—"}
-                          </span>
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-medium">
+                              {a.candidate?.full_name || "—"}
+                            </span>
+                            {isRecommended && (
+                              <Badge
+                                variant="outline"
+                                className="text-[10px] uppercase border-green-500/50 bg-green-500/10 text-green-700 dark:text-green-400"
+                              >
+                                <Sparkles className="w-3 h-3 mr-1" />
+                                Rekomendasi
+                              </Badge>
+                            )}
+                          </div>
                           <span className="text-xs text-muted-foreground">
                             {a.candidate?.email || ""}
                           </span>
@@ -379,6 +554,11 @@ export default function DashboardPage() {
                       </TableCell>
                       <TableCell className="text-right">
                         <div className="inline-flex items-center gap-1.5 justify-end">
+                          {a.rank != null && (
+                            <span className="text-[10px] text-muted-foreground tabular-nums">
+                              #{a.rank}
+                            </span>
+                          )}
                           <ScoreBadge score={a.evaluation?.composite_score} />
                         </div>
                       </TableCell>
@@ -411,6 +591,72 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
       )}
+
+      {/* Task 12.1 — info-text below the table */}
+      {!loading && applications.length > 0 && activePeriod?.threshold_n != null && (
+        <p className="text-xs text-muted-foreground inline-flex items-center gap-1.5">
+          <Sparkles className="w-3.5 h-3.5 text-green-600" />
+          Threshold aktif: Top {activePeriod.threshold_n} per divisi
+        </p>
+      )}
+
+      {/* Task 12.3 — Publish confirmation */}
+      <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Konfirmasi Publikasi Hasil</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-3 pt-1">
+                <p>
+                  Tindakan ini akan mempublikasikan hasil seleksi untuk divisi{" "}
+                  <span className="font-medium text-foreground">
+                    {divisionFilter !== "all" ? divisionFilter.replace("_", " ") : "—"}
+                  </span>
+                  .
+                </p>
+                <div className="rounded-md border bg-muted/40 p-3 text-sm space-y-1">
+                  <p>
+                    <span className="text-green-600 font-medium">✅ Lolos:</span>{" "}
+                    {checkedCount} kandidat
+                  </p>
+                  <p>
+                    <span className="text-destructive font-medium">❌ Tidak Lolos:</span>{" "}
+                    {failCount} kandidat
+                  </p>
+                </div>
+                <p className="text-xs">
+                  Kandidat yang tidak lolos adalah semua kandidat yang sudah
+                  dievaluasi namun tidak dicentang.
+                </p>
+                <p className="text-xs font-medium text-destructive">
+                  Tindakan ini tidak dapat dibatalkan.
+                </p>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={publishing}>Batal</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                // AlertDialogAction auto-closes; we want the async flow to
+                // control closing so the dialog stays open while publishing.
+                e.preventDefault();
+                handleConfirmPublish();
+              }}
+              disabled={publishing || !canPublish}
+            >
+              {publishing ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Mempublikasikan…
+                </>
+              ) : (
+                "Publikasikan"
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
