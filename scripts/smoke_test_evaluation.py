@@ -1,11 +1,11 @@
 """Smoke test for Task 8 & 9: evaluation batch + announcements.
 
 Covers:
-  * POST /api/recruiter/evaluate/batch with empty rubric → 400
-  * POST /api/recruiter/evaluate/batch with configured rubric → 200
+  * POST /api/recruiter/evaluate/batch with empty rubric -> 400
+  * POST /api/recruiter/evaluate/batch with configured rubric -> 200
   * Result contains khs_summary, ktm_valid fields
-  * POST /api/announcements (pass) → 200
-  * GET  /api/announcements/my → result visible
+  * POST /api/announcements (pass) -> 200
+  * GET  /api/announcements/my -> result visible
   * Candidate status updated to announced_pass
 
 Uses FastAPI's TestClient so no live server is needed.
@@ -20,6 +20,7 @@ import io
 import os
 import sys
 import tempfile
+from datetime import datetime, timedelta, timezone
 
 import fitz
 
@@ -32,6 +33,7 @@ from backend.models.application import Application, ApplicationStatus, Division
 from backend.models.audit import AuditLog
 from backend.models.candidate import Candidate, CandidateDocument, DimensionScore
 from backend.models.document import Document, DocumentType
+from backend.models.period import RecruitmentPeriod
 from backend.models.rubric import Dimension, Rubric
 from backend.models.user import User, UserRole
 from backend.utils.file_storage import purge_application_dir
@@ -42,9 +44,11 @@ PASS = "[PASS]"
 FAIL = "[FAIL]"
 
 REC_EMAIL = "smoke+eval_recruiter@example.com"
+ADMIN_EMAIL = "smoke+eval_admin@example.com"
 CAND_EMAIL = "smoke+eval_candidate@example.com"
 CAND_NIM = "1039876500001"
 TEST_PASSWORD = "hunter2secure"
+PERIOD_NAME = "smoke+eval cycle"
 
 
 def _assert(cond: bool, msg: str) -> int:
@@ -68,7 +72,7 @@ def _cleanup() -> None:
     db = SessionLocal()
     try:
         # Clean users + cascades
-        for email in (REC_EMAIL, CAND_EMAIL):
+        for email in (REC_EMAIL, ADMIN_EMAIL, CAND_EMAIL):
             users = db.query(User).filter(User.email == email).all()
             for u in users:
                 # Clean candidates
@@ -97,7 +101,18 @@ def _cleanup() -> None:
                     | (AuditLog.candidate_id == u.id)
                 ).delete(synchronize_session=False)
 
+                # Clean periods created by this user.
+                db.query(RecruitmentPeriod).filter(
+                    RecruitmentPeriod.created_by == u.id
+                ).delete(synchronize_session=False)
+
                 db.delete(u)
+
+        # Drop any lingering periods by name (covers cases where the admin
+        # row was already gone but the period wasn't).
+        db.query(RecruitmentPeriod).filter(
+            RecruitmentPeriod.name == PERIOD_NAME
+        ).delete(synchronize_session=False)
 
         # Clean test rubric
         db.query(Rubric).filter(Rubric.name == "Smoke Eval Rubric").delete(
@@ -109,12 +124,27 @@ def _cleanup() -> None:
         db.close()
 
 
+def _deactivate_all_periods() -> None:
+    """Force every existing period inactive so we own the invariant."""
+    db = SessionLocal()
+    try:
+        db.query(RecruitmentPeriod).filter(
+            RecruitmentPeriod.is_active == True  # noqa: E712
+        ).update(
+            {RecruitmentPeriod.is_active: False}, synchronize_session=False
+        )
+        db.commit()
+    finally:
+        db.close()
+
+
 def main() -> int:
     _cleanup()
+    _deactivate_all_periods()
     failures = 0
     client = TestClient(fastapi_app)
 
-    # --- Setup: create recruiter (directly in DB) ---
+    # --- Setup: create recruiter + super admin (directly in DB) ---
     db = SessionLocal()
     rec_user = User(
         email=REC_EMAIL,
@@ -123,9 +153,17 @@ def main() -> int:
         role=UserRole.RECRUITER,
         is_active=True,
     )
-    db.add(rec_user)
+    admin_user = User(
+        email=ADMIN_EMAIL,
+        password_hash=hash_password(TEST_PASSWORD),
+        full_name="Smoke Eval Admin",
+        role=UserRole.SUPER_ADMIN,
+        is_active=True,
+    )
+    db.add_all([rec_user, admin_user])
     db.commit()
     db.refresh(rec_user)
+    db.refresh(admin_user)
     db.close()
 
     # Login recruiter
@@ -133,9 +171,35 @@ def main() -> int:
         "/api/auth/login",
         json={"email": REC_EMAIL, "password": TEST_PASSWORD},
     )
-    failures += _assert(r.status_code == 200, f"recruiter login → 200 (got {r.status_code})")
+    failures += _assert(r.status_code == 200, f"recruiter login -> 200 (got {r.status_code})")
     rec_token = r.json()["data"]["access_token"]
     rec_auth = {"Authorization": f"Bearer {rec_token}"}
+
+    # Login super admin (needed to create the active RecruitmentPeriod
+    # that gates submit since Task 11).
+    r = client.post(
+        "/api/auth/login",
+        json={"email": ADMIN_EMAIL, "password": TEST_PASSWORD},
+    )
+    failures += _assert(r.status_code == 200, f"admin login -> 200 (got {r.status_code})")
+    admin_auth = {"Authorization": f"Bearer {r.json()['data']['access_token']}"}
+
+    # --- Setup: open an active recruitment period so submit is allowed. ---
+    now = datetime.now(timezone.utc)
+    r = client.post(
+        "/api/periods",
+        headers=admin_auth,
+        json={
+            "name": PERIOD_NAME,
+            "start_date": (now + timedelta(seconds=5)).isoformat(),
+            "end_date": (now + timedelta(days=7)).isoformat(),
+            "threshold_n": None,
+        },
+    )
+    failures += _assert(
+        r.status_code == 201,
+        f"open active period -> 201 (got {r.status_code}: {r.text})",
+    )
 
     # --- Setup: register candidate ---
     r = client.post(
@@ -150,7 +214,7 @@ def main() -> int:
             "year": 2023,
         },
     )
-    failures += _assert(r.status_code == 201, f"candidate register → 201 (got {r.status_code})")
+    failures += _assert(r.status_code == 201, f"candidate register -> 201 (got {r.status_code})")
     cand_token = r.json()["data"]["access_token"]
     cand_auth = {"Authorization": f"Bearer {cand_token}"}
 
@@ -160,7 +224,7 @@ def main() -> int:
         headers=cand_auth,
         json={"division": "big_data"},
     )
-    failures += _assert(r.status_code == 201, f"create application → 201 (got {r.status_code})")
+    failures += _assert(r.status_code == 201, f"create application -> 201 (got {r.status_code})")
     app_id = r.json()["data"]["id"]
 
     # --- Upload all 6 documents ---
@@ -191,15 +255,15 @@ def main() -> int:
         )
         failures += _assert(
             r.status_code == 201,
-            f"upload {dt} → 201 (got {r.status_code})",
+            f"upload {dt} -> 201 (got {r.status_code})",
         )
 
     # --- Submit application ---
     r = client.post(f"/api/applications/{app_id}/submit", headers=cand_auth)
-    failures += _assert(r.status_code == 200, f"submit → 200 (got {r.status_code})")
+    failures += _assert(r.status_code == 200, f"submit -> 200 (got {r.status_code})")
 
     # =====================================================================
-    # TEST 1: Empty rubric → 400
+    # TEST 1: Empty rubric -> 400
     # =====================================================================
     # Ensure the big_data rubric has NO dimensions (may have been added
     # by a prior test run that didn't clean up fully).
@@ -228,7 +292,7 @@ def main() -> int:
         )
 
     # =====================================================================
-    # TEST 2: Configure rubric, then evaluate → 200
+    # TEST 2: Configure rubric, then evaluate -> 200
     # =====================================================================
     # Add dimensions to the big_data rubric
     db = SessionLocal()
@@ -291,14 +355,14 @@ def main() -> int:
                 len(data.get("errors", [])) >= 1,
                 "eval reports errors when LLM unavailable",
             )
-        print(f"     → eval returned {r.status_code} (may depend on LLM availability)")
+        print(f"     -> eval returned {r.status_code} (may depend on LLM availability)")
     else:
         # Non-400 error is acceptable (e.g. 422 from LLM unavailable)
         failures += _assert(
             r.status_code != 400,
             f"eval with dimensions should not be 400 (got {r.status_code})",
         )
-        print(f"     → eval returned {r.status_code} (LLM likely unavailable, acceptable)")
+        print(f"     -> eval returned {r.status_code} (LLM likely unavailable, acceptable)")
 
     # =====================================================================
     # TEST 3: Announcements
@@ -316,7 +380,7 @@ def main() -> int:
     )
     failures += _assert(
         r.status_code == 200,
-        f"announce pass → 200 (got {r.status_code}: {r.text})",
+        f"announce pass -> 200 (got {r.status_code}: {r.text})",
     )
     if r.status_code == 200:
         ann = r.json()["data"]
@@ -325,7 +389,7 @@ def main() -> int:
 
     # GET /announcements/my as candidate
     r = client.get("/api/announcements/my", headers=cand_auth)
-    failures += _assert(r.status_code == 200, f"GET /announcements/my → 200 (got {r.status_code})")
+    failures += _assert(r.status_code == 200, f"GET /announcements/my -> 200 (got {r.status_code})")
     if r.status_code == 200:
         my_ann = r.json()["data"]
         failures += _assert(
@@ -350,7 +414,7 @@ def main() -> int:
         )
 
     # =====================================================================
-    # TEST 4: Bad announcement result → 400
+    # TEST 4: Bad announcement result -> 400
     # =====================================================================
     r = client.post(
         "/api/announcements",
@@ -359,11 +423,11 @@ def main() -> int:
     )
     failures += _assert(
         r.status_code == 400,
-        f"bad announcement result → 400 (got {r.status_code})",
+        f"bad announcement result -> 400 (got {r.status_code})",
     )
 
     # =====================================================================
-    # TEST 5: Candidate cannot post announcement → 403
+    # TEST 5: Candidate cannot post announcement -> 403
     # =====================================================================
     r = client.post(
         "/api/announcements",
@@ -372,7 +436,7 @@ def main() -> int:
     )
     failures += _assert(
         r.status_code == 403,
-        f"candidate announcement → 403 (got {r.status_code})",
+        f"candidate announcement -> 403 (got {r.status_code})",
     )
 
     # =====================================================================

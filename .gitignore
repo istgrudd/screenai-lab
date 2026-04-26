@@ -19,6 +19,7 @@ data/extracted/
 data/anonymized/
 data/screenai_lab.db
 data/*.db
+uploads/
 
 # Vector store persistence
 backend/vectorstore/
