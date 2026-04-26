@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 from backend.database import get_db
 from backend.middleware.auth_middleware import get_current_user, require_role
 from backend.models.application import Application
+from backend.models.candidate import Candidate
 from backend.models.period import RecruitmentPeriod
 from backend.models.user import User, UserRole
 
@@ -158,6 +159,24 @@ def _count_applications(db: Session, period_id: int) -> int:
     )
 
 
+def _evaluated_count(db: Session, period_id: int) -> int:
+    """Count distinct applications in the period whose user has been evaluated.
+
+    "Evaluated" = has a Candidate row with a non-null ``composite_score``.
+    Used to drive the ``evaluation_prompt`` flag on GET /periods/active.
+    """
+    return (
+        db.query(Application.id)
+        .join(Candidate, Candidate.user_id == Application.user_id)
+        .filter(
+            Application.period_id == period_id,
+            Candidate.composite_score.isnot(None),
+        )
+        .distinct()
+        .count()
+    )
+
+
 def _validate_phase_order(
     start: datetime,
     submission_end: datetime | None,
@@ -269,7 +288,13 @@ def create_period(
 
 @router.get("/active")
 def get_active_period(db: Session = Depends(get_db)):
-    """Return the currently active period (public — used by candidate countdown)."""
+    """Return the currently active period (public — used by candidate countdown).
+
+    Task 13.2.5: also returns ``evaluation_prompt`` — True iff the period
+    is in the EVALUATION phase AND no candidate in this period has a
+    Candidate row with a composite_score yet. The RecruiterDashboard uses
+    this to surface the "submission ended, run evaluation now?" banner.
+    """
     period = (
         db.query(RecruitmentPeriod)
         .filter(RecruitmentPeriod.is_active == True)  # noqa: E712
@@ -281,13 +306,15 @@ def get_active_period(db: Session = Depends(get_db)):
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Tidak ada periode rekrutasi yang aktif",
         )
-    return {
-        "success": True,
-        "data": PeriodOut.from_period(
-            period, application_count=_count_applications(db, period.id)
-        ).model_dump(),
-        "error": None,
-    }
+
+    payload = PeriodOut.from_period(
+        period, application_count=_count_applications(db, period.id)
+    ).model_dump()
+    payload["evaluation_prompt"] = (
+        period.current_phase == "EVALUATION"
+        and _evaluated_count(db, period.id) == 0
+    )
+    return {"success": True, "data": payload, "error": None}
 
 
 @router.get("", dependencies=[Depends(_super_admin_only)])

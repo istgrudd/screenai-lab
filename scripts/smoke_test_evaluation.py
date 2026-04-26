@@ -185,21 +185,31 @@ def main() -> int:
     admin_auth = {"Authorization": f"Bearer {r.json()['data']['access_token']}"}
 
     # --- Setup: open an active recruitment period so submit is allowed. ---
-    now = datetime.now(timezone.utc)
-    r = client.post(
-        "/api/periods",
-        headers=admin_auth,
-        json={
-            "name": PERIOD_NAME,
-            "start_date": (now + timedelta(seconds=5)).isoformat(),
-            "end_date": (now + timedelta(days=7)).isoformat(),
-            "threshold_n": None,
-        },
-    )
-    failures += _assert(
-        r.status_code == 201,
-        f"open active period -> 201 (got {r.status_code}: {r.text})",
-    )
+    # Task 13.2.1 — submit is gated on current_phase == SUBMISSION, so the
+    # period must already have started (start_date in the past). We seed
+    # directly into the DB to bypass the POST API's "start_date in the
+    # future" rule.
+    db = SessionLocal()
+    try:
+        db.query(RecruitmentPeriod).filter(
+            RecruitmentPeriod.is_active == True  # noqa: E712
+        ).update(
+            {RecruitmentPeriod.is_active: False}, synchronize_session=False
+        )
+        admin_user = db.query(User).filter(User.email == ADMIN_EMAIL).first()
+        now = datetime.now(timezone.utc)
+        period = RecruitmentPeriod(
+            name=PERIOD_NAME,
+            start_date=now - timedelta(hours=1),
+            end_date=now + timedelta(days=7),
+            is_active=True,
+            threshold_n=None,
+            created_by=admin_user.id,
+        )
+        db.add(period)
+        db.commit()
+    finally:
+        db.close()
 
     # --- Setup: register candidate ---
     r = client.post(

@@ -20,6 +20,7 @@ from backend.models.application import Application, ApplicationStatus, Division
 from backend.models.audit import AuditLog
 from backend.models.period import RecruitmentPeriod
 from backend.models.user import User, UserRole
+from backend.utils.period_utils import get_current_phase
 
 router = APIRouter(prefix="/api/announcements", tags=["announcements"])
 
@@ -163,6 +164,17 @@ def bulk_announce(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"RecruitmentPeriod {payload.period_id} not found",
         )
+
+    # Task 13.2.3 — bulk publish is only allowed inside the ANNOUNCEMENT
+    # phase. Super Admins bypass this lock so they can manually correct
+    # results outside the official window.
+    if current_user.role != UserRole.SUPER_ADMIN:
+        phase = get_current_phase(period, datetime.now(timezone.utc))
+        if phase != "ANNOUNCEMENT":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Pengumuman hanya dapat dipublikasikan pada fase Pengumuman.",
+            )
 
     scope = (
         db.query(Application)

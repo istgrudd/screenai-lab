@@ -32,6 +32,7 @@ from backend.models.period import RecruitmentPeriod
 from backend.models.user import User, UserRole
 from backend.services.extractor import extract_text_from_pdf
 from backend.services.submit_anonymization import run_submit_anonymization
+from backend.utils.period_utils import get_current_phase
 
 router = APIRouter(prefix="/api/applications", tags=["applications"])
 recruiter_router = APIRouter(prefix="/api/recruiter", tags=["recruiter"])
@@ -240,7 +241,11 @@ def submit_application(
             },
         )
 
-    # Phase 2B (Task 11.7): submission requires an active recruitment period.
+    # Phase 2B (Task 11.7) + Task 13.2.1: submission requires an active
+    # recruitment period AND the period must currently be in the
+    # SUBMISSION phase. The phase is derived from the calendar; legacy
+    # periods (no submission_end_date) collapse to SUBMISSION while
+    # is_active is True, preserving back-compat.
     active_period = (
         db.query(RecruitmentPeriod)
         .filter(RecruitmentPeriod.is_active == True)  # noqa: E712
@@ -250,6 +255,19 @@ def submit_application(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Tidak ada periode rekrutasi yang aktif saat ini.",
+        )
+
+    phase = get_current_phase(active_period, datetime.now(timezone.utc))
+    if phase != "SUBMISSION":
+        phase_messages = {
+            "UPCOMING": "Periode rekrutasi belum dibuka.",
+            "EVALUATION": "Masa pendaftaran telah ditutup.",
+            "ANNOUNCEMENT": "Masa pendaftaran telah ditutup.",
+            "CLOSED": "Periode rekrutasi telah berakhir.",
+        }
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=phase_messages.get(phase, "Pendaftaran tidak diperbolehkan saat ini."),
         )
 
     uploaded_types: set[str] = {

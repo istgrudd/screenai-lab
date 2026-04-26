@@ -7,6 +7,8 @@ Endpoints:
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -15,9 +17,11 @@ from backend.database import get_db
 from backend.middleware.auth_middleware import get_current_user, require_role
 from backend.models.application import Application
 from backend.models.candidate import Candidate, DimensionScore
+from backend.models.period import RecruitmentPeriod
 from backend.models.rubric import Rubric
 from backend.models.user import User, UserRole
 from backend.services.evaluation_service import run_evaluation_pipeline
+from backend.utils.period_utils import get_current_phase
 
 router = APIRouter(prefix="/api/recruiter", tags=["evaluation"])
 
@@ -46,6 +50,11 @@ async def evaluate_batch(
 
     Precondition: the division's rubric must have at least one dimension.
     Returns 400 if the rubric has zero dimensions.
+
+    Task 13.2.2 — Soft phase warning: when no active period exists or the
+    active period is not currently in the EVALUATION phase, evaluation
+    still runs (the recruiter always retains override) but the response
+    carries a ``warning`` field so the frontend can flag the action.
     """
     try:
         result = await run_evaluation_pipeline(
@@ -70,11 +79,35 @@ async def evaluate_batch(
             detail=msg,
         )
 
+    warning = _phase_warning(db)
+
     return {
         "success": True,
         "data": result,
+        "warning": warning,
         "error": None,
     }
+
+
+def _phase_warning(db: Session) -> str | None:
+    """Return a soft-warn message if evaluation runs outside the EVALUATION phase.
+
+    Returns ``None`` when an active period exists and ``current_phase`` is
+    EVALUATION; otherwise returns the standard warning string. The message
+    is the same in both "no active period" and "wrong phase" cases —
+    Task 13.2.2 specifies a single soft-warn payload.
+    """
+    period = (
+        db.query(RecruitmentPeriod)
+        .filter(RecruitmentPeriod.is_active == True)  # noqa: E712
+        .first()
+    )
+    if period is None:
+        return "Evaluasi dijalankan di luar window evaluasi resmi."
+    phase = get_current_phase(period, datetime.now(timezone.utc))
+    if phase != "EVALUATION":
+        return "Evaluasi dijalankan di luar window evaluasi resmi."
+    return None
 
 
 @router.get(
