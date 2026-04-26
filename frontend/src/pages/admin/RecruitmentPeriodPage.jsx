@@ -51,13 +51,21 @@ function toLocalInputValue(iso) {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "";
   const pad = (n) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
 function toIsoFromInput(value) {
   if (!value) return null;
   const d = new Date(value);
   return Number.isNaN(d.getTime()) ? null : d.toISOString();
+}
+
+function formatDateTime(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
 function StatusBadge({ active }) {
@@ -114,11 +122,11 @@ function ActivePeriodCard({ period, onClosed }) {
           <div className="grid grid-cols-2 gap-3 text-sm">
             <div>
               <p className="text-xs text-muted-foreground uppercase">Mulai</p>
-              <p className="font-medium">{new Date(period.start_date).toLocaleString()}</p>
+              <p className="font-medium">{formatDateTime(period.start_date)}</p>
             </div>
             <div>
               <p className="text-xs text-muted-foreground uppercase">Tutup</p>
-              <p className="font-medium">{new Date(period.end_date).toLocaleString()}</p>
+              <p className="font-medium">{formatDateTime(period.end_date)}</p>
             </div>
             <div>
               <p className="text-xs text-muted-foreground uppercase">Threshold N</p>
@@ -238,6 +246,7 @@ function CreatePeriodForm({ onCreated }) {
             <Input
               id="start"
               type="datetime-local"
+              step={1}
               value={startDate}
               onChange={(e) => setStartDate(e.target.value)}
               disabled={busy}
@@ -248,6 +257,7 @@ function CreatePeriodForm({ onCreated }) {
             <Input
               id="end"
               type="datetime-local"
+              step={1}
               value={endDate}
               onChange={(e) => setEndDate(e.target.value)}
               disabled={busy}
@@ -311,11 +321,12 @@ function PeriodRow({ period, onChanged }) {
           <Input value={name} onChange={(e) => setName(e.target.value)} disabled={busy} />
         </TableCell>
         <TableCell className="text-xs whitespace-nowrap">
-          {new Date(period.start_date).toLocaleString()}
+          {formatDateTime(period.start_date)}
         </TableCell>
         <TableCell>
           <Input
             type="datetime-local"
+            step={1}
             value={endDate}
             onChange={(e) => setEndDate(e.target.value)}
             disabled={busy}
@@ -352,10 +363,10 @@ function PeriodRow({ period, onChanged }) {
     <TableRow>
       <TableCell className="font-medium">{period.name}</TableCell>
       <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
-        {new Date(period.start_date).toLocaleString()}
+        {formatDateTime(period.start_date)}
       </TableCell>
       <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
-        {new Date(period.end_date).toLocaleString()}
+        {formatDateTime(period.end_date)}
       </TableCell>
       <TableCell><StatusBadge active={period.is_active} /></TableCell>
       <TableCell>{period.threshold_n ?? "—"}</TableCell>
