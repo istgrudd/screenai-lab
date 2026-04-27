@@ -42,6 +42,7 @@ import {
 } from "@/components/ui/tooltip";
 import { Progress } from "@/components/ui/progress";
 import { Checkbox } from "@/components/ui/checkbox";
+import RecruitmentPhaseCard from "@/components/RecruitmentPhaseCard";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -148,6 +149,7 @@ export default function DashboardPage() {
 
   // Task 12.1 — active recruitment period (for threshold_n + period_id).
   const [activePeriod, setActivePeriod] = useState(null);
+  const [periodLoading, setPeriodLoading] = useState(true);
 
   // Task 12.2 — local checkbox state: { [application_id]: bool }.
   const [checked, setChecked] = useState({});
@@ -198,6 +200,8 @@ export default function DashboardPage() {
     } catch {
       // 404 = no active period — that's a legitimate state, not an error.
       setActivePeriod(null);
+    } finally {
+      setPeriodLoading(false);
     }
   };
 
@@ -387,6 +391,14 @@ export default function DashboardPage() {
           })()}
         </div>
       </div>
+
+      {/* Task 13.4.1 — phase timeline card at the top of the dashboard. */}
+      <RecruitmentPhaseCard
+        role="recruiter"
+        period={activePeriod}
+        loading={periodLoading}
+        submittedCount={applications.length}
+      />
 
       {/* Task 13.3.3 — evaluation prompt banner (dismissible, session-only). */}
       {activePeriod?.evaluation_prompt && !bannerDismissed && (

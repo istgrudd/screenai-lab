@@ -1,10 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import {
   AlertCircle,
   ArrowRight,
-  CalendarClock,
   CheckCircle2,
   ClipboardList,
   GraduationCap,
@@ -25,6 +24,7 @@ import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 
 import RecruitmentJourney from "@/components/RecruitmentJourney";
+import RecruitmentPhaseCard from "@/components/RecruitmentPhaseCard";
 import {
   getMe,
   getMyApplication,
@@ -41,144 +41,6 @@ const DOC_CHECKLIST = [
   { doc_type: "swot", label: "SWOT Analysis" },
   { doc_type: "supporting_docs", label: "Dokumen Pendukung" },
 ];
-
-function useCountdown(isoDate) {
-  const deadline = useMemo(
-    () => (isoDate ? new Date(isoDate) : null),
-    [isoDate]
-  );
-  const [now, setNow] = useState(() => new Date());
-
-  useEffect(() => {
-    const t = setInterval(() => setNow(new Date()), 60_000);
-    return () => clearInterval(t);
-  }, []);
-
-  if (!deadline || Number.isNaN(deadline.getTime())) {
-    return { expired: false, days: 0, hours: 0, minutes: 0, deadline: null };
-  }
-
-  const msLeft = deadline.getTime() - now.getTime();
-  const expired = msLeft <= 0;
-  const abs = Math.max(msLeft, 0);
-  const days = Math.floor(abs / (24 * 60 * 60 * 1000));
-  const hours = Math.floor((abs % (24 * 60 * 60 * 1000)) / (60 * 60 * 1000));
-  const minutes = Math.floor((abs % (60 * 60 * 1000)) / (60 * 1000));
-
-  return { expired, days, hours, minutes, deadline };
-}
-
-function CountdownCard({ period, loading }) {
-  // Task 13.3.1 — countdown target depends on phase:
-  //   SUBMISSION  → submission_end_date
-  //   UPCOMING    → no countdown (static info)
-  //   EVALUATION / ANNOUNCEMENT / CLOSED → no countdown
-  const countdownTarget =
-    period?.current_phase === "SUBMISSION"
-      ? period?.phases?.submission?.end || period?.submission_end_date || null
-      : null;
-  const { expired, days, hours, minutes, deadline } = useCountdown(countdownTarget);
-
-  if (loading) {
-    return (
-      <Card>
-        <CardContent className="py-5 flex items-center gap-4">
-          <div className="w-11 h-11 rounded-lg bg-muted flex items-center justify-center">
-            <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
-          </div>
-          <p className="text-sm text-muted-foreground">
-            Memuat informasi periode…
-          </p>
-        </CardContent>
-      </Card>
-    );
-  }
-
-  if (!period) {
-    return (
-      <Card className="border-muted">
-        <CardContent className="py-5 flex items-center gap-4">
-          <div className="w-11 h-11 rounded-lg bg-muted text-muted-foreground flex items-center justify-center shrink-0">
-            <CalendarClock className="w-5 h-5" />
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-xs uppercase tracking-wide text-muted-foreground">
-              Periode Rekrutasi
-            </p>
-            <p className="text-lg font-semibold">
-              Tidak ada periode rekrutasi aktif
-            </p>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Pendaftaran akan dibuka oleh Super Admin.
-            </p>
-          </div>
-        </CardContent>
-      </Card>
-    );
-  }
-
-  const phase = period.current_phase;
-  const startDate = period.start_date ? new Date(period.start_date) : null;
-  const isClosed = phase === "CLOSED";
-  const accentClass = isClosed
-    ? "bg-destructive/15 text-destructive"
-    : "bg-primary/10 text-primary";
-
-  let title;
-  let subtitle = null;
-  if (phase === "UPCOMING") {
-    title = "Pendaftaran belum dibuka";
-    subtitle = startDate
-      ? `Dibuka ${startDate.toLocaleString()}`
-      : null;
-  } else if (phase === "SUBMISSION") {
-    if (expired) {
-      title = "Masa pendaftaran telah berakhir";
-    } else {
-      title = `${days}d ${hours}h ${minutes}m tersisa`;
-    }
-    subtitle = deadline
-      ? `Sisa waktu pendaftaran — tutup ${deadline.toLocaleString()}`
-      : "Sisa waktu pendaftaran";
-  } else if (phase === "EVALUATION") {
-    title = "Sedang dalam tahap evaluasi AI";
-    subtitle = "Tim rekruter sedang memproses aplikasi.";
-  } else if (phase === "ANNOUNCEMENT") {
-    title = "Pengumuman sedang berlangsung";
-    subtitle = "Cek status lamaran kamu di bawah.";
-  } else if (phase === "CLOSED") {
-    title = "Periode rekrutasi telah berakhir";
-  } else {
-    title = period.name;
-  }
-
-  return (
-    <Card className={isClosed ? "border-destructive/40 bg-destructive/5" : ""}>
-      <CardContent className="py-5 flex items-center gap-4">
-        <div
-          className={`w-11 h-11 rounded-lg flex items-center justify-center shrink-0 ${accentClass}`}
-        >
-          <CalendarClock className="w-5 h-5" />
-        </div>
-        <div className="flex-1 min-w-0">
-          <p className="text-xs uppercase tracking-wide text-muted-foreground">
-            {period.name}
-          </p>
-          <p
-            className={`text-lg font-semibold ${
-              phase === "SUBMISSION" && !expired ? "tabular-nums" : ""
-            } ${isClosed ? "text-destructive" : ""}`}
-          >
-            {title}
-          </p>
-          {subtitle && (
-            <p className="text-xs text-muted-foreground mt-0.5">{subtitle}</p>
-          )}
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
 
 function ChecklistCard({ documents, applicationId, locked }) {
   const navigate = useNavigate();
@@ -357,7 +219,11 @@ export default function DashboardPage() {
         )}
       </div>
 
-      <CountdownCard period={activePeriod} loading={periodLoading} />
+      <RecruitmentPhaseCard
+        role="candidate"
+        period={activePeriod}
+        loading={periodLoading}
+      />
 
       {!application ? (
         <NoApplicationCard />

@@ -69,6 +69,7 @@ class UserOut(BaseModel):
     faculty: str | None
     major: str | None
     year: int | None
+    whatsapp: str | None
     role: str
     is_active: bool
 
@@ -82,6 +83,7 @@ class UserOut(BaseModel):
             faculty=user.faculty,
             major=user.major,
             year=user.year,
+            whatsapp=user.whatsapp,
             role=user.role.value if hasattr(user.role, "value") else str(user.role),
             is_active=user.is_active,
         )

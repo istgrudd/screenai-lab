@@ -40,11 +40,14 @@ import {
 
 import {
   deactivateUser,
+  getActivePeriod,
+  getActivePeriodStats,
   listUsers,
   reactivateUser,
   updateUserRole,
 } from "@/lib/api";
 import { getCurrentUser } from "@/lib/auth";
+import RecruitmentPhaseCard from "@/components/RecruitmentPhaseCard";
 
 const PAGE_SIZE = 20;
 
@@ -71,6 +74,35 @@ export default function AdminPage() {
   const [appliedQuery, setAppliedQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [busyUserId, setBusyUserId] = useState(null);
+
+  // Task 13.4.1 — phase card at the top of the admin panel.
+  const [activePeriod, setActivePeriod] = useState(null);
+  const [activeStats, setActiveStats] = useState(null);
+  const [periodLoading, setPeriodLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setPeriodLoading(true);
+      try {
+        const p = await getActivePeriod();
+        if (!cancelled) setActivePeriod(p);
+      } catch {
+        if (!cancelled) setActivePeriod(null);
+      }
+      try {
+        const s = await getActivePeriodStats();
+        if (!cancelled) setActiveStats(s);
+      } catch {
+        if (!cancelled) setActiveStats(null);
+      } finally {
+        if (!cancelled) setPeriodLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const fetchPage = useCallback(async () => {
     setLoading(true);
@@ -152,6 +184,14 @@ export default function AdminPage() {
           </Link>
         </Button>
       </div>
+
+      {/* Task 13.4.1 — phase timeline + stats. */}
+      <RecruitmentPhaseCard
+        role="super_admin"
+        period={activePeriod}
+        stats={activeStats}
+        loading={periodLoading}
+      />
 
       {/* Filters */}
       <Card>

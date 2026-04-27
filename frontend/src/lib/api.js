@@ -99,6 +99,27 @@ export async function getMe() {
   return request("/auth/me");
 }
 
+/**
+ * GET /api/users/me — enriched profile including division (from active app)
+ * and the current application_status (used by the candidate ProfilePage to
+ * decide which fields are locked).
+ */
+export async function getMyProfile() {
+  return request("/users/me");
+}
+
+/**
+ * PUT /api/users/me — partial update.
+ * Caller should omit (not send empty string) any field they don't want to
+ * change. Password is special: only sent when the user fills it in.
+ */
+export async function updateMyProfile(payload) {
+  return request("/users/me", {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
 export async function listMyApplications() {
   return request("/my-applications");
 }
@@ -424,6 +445,14 @@ export async function bulkAnnounce({ division, periodId, passedApplicationIds })
  */
 export async function getActivePeriod() {
   return request("/periods/active");
+}
+
+/**
+ * Recruiter+: submitted-application counts for the active period.
+ * Throws 404 when no period is active.
+ */
+export async function getActivePeriodStats() {
+  return request("/periods/active/stats");
 }
 
 /** Super Admin only — list all periods (with application_count). */

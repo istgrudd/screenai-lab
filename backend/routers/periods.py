@@ -22,7 +22,7 @@ from sqlalchemy.orm import Session
 
 from backend.database import get_db
 from backend.middleware.auth_middleware import get_current_user, require_role
-from backend.models.application import Application
+from backend.models.application import Application, ApplicationStatus, Division
 from backend.models.candidate import Candidate
 from backend.models.period import RecruitmentPeriod
 from backend.models.user import User, UserRole
@@ -30,6 +30,7 @@ from backend.models.user import User, UserRole
 router = APIRouter(prefix="/api/periods", tags=["periods"])
 
 _super_admin_only = require_role(UserRole.SUPER_ADMIN)
+_recruiter_or_admin = require_role(UserRole.RECRUITER, UserRole.SUPER_ADMIN)
 
 
 # ---------------------------------------------------------------------------
@@ -315,6 +316,52 @@ def get_active_period(db: Session = Depends(get_db)):
         and _evaluated_count(db, period.id) == 0
     )
     return {"success": True, "data": payload, "error": None}
+
+
+@router.get("/active/stats", dependencies=[Depends(_recruiter_or_admin)])
+def get_active_period_stats(db: Session = Depends(get_db)):
+    """Return submitted-application counts for the active period (Task 13.4.1).
+
+    Powers the super_admin RecruitmentPhaseCard stats block. Counts every
+    application whose status has moved past DRAFT and is stamped with the
+    active period_id, broken down by division.
+    """
+    period = (
+        db.query(RecruitmentPeriod)
+        .filter(RecruitmentPeriod.is_active == True)  # noqa: E712
+        .order_by(RecruitmentPeriod.created_at.desc())
+        .first()
+    )
+    if not period:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Tidak ada periode rekrutasi yang aktif",
+        )
+
+    rows = (
+        db.query(Application)
+        .filter(
+            Application.period_id == period.id,
+            Application.status != ApplicationStatus.DRAFT,
+        )
+        .all()
+    )
+    by_division: dict[str, int] = {d.value: 0 for d in Division}
+    for app in rows:
+        key = (
+            app.division.value if hasattr(app.division, "value") else str(app.division)
+        )
+        by_division[key] = by_division.get(key, 0) + 1
+
+    return {
+        "success": True,
+        "data": {
+            "period_id": period.id,
+            "total_submitted": len(rows),
+            "by_division": by_division,
+        },
+        "error": None,
+    }
 
 
 @router.get("", dependencies=[Depends(_super_admin_only)])
