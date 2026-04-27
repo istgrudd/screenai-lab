@@ -69,9 +69,15 @@ function useCountdown(isoDate) {
 }
 
 function CountdownCard({ period, loading }) {
-  const { expired, days, hours, minutes, deadline } = useCountdown(
-    period?.end_date || null
-  );
+  // Task 13.3.1 — countdown target depends on phase:
+  //   SUBMISSION  → submission_end_date
+  //   UPCOMING    → no countdown (static info)
+  //   EVALUATION / ANNOUNCEMENT / CLOSED → no countdown
+  const countdownTarget =
+    period?.current_phase === "SUBMISSION"
+      ? period?.phases?.submission?.end || period?.submission_end_date || null
+      : null;
+  const { expired, days, hours, minutes, deadline } = useCountdown(countdownTarget);
 
   if (loading) {
     return (
@@ -111,13 +117,46 @@ function CountdownCard({ period, loading }) {
     );
   }
 
+  const phase = period.current_phase;
+  const startDate = period.start_date ? new Date(period.start_date) : null;
+  const isClosed = phase === "CLOSED";
+  const accentClass = isClosed
+    ? "bg-destructive/15 text-destructive"
+    : "bg-primary/10 text-primary";
+
+  let title;
+  let subtitle = null;
+  if (phase === "UPCOMING") {
+    title = "Pendaftaran belum dibuka";
+    subtitle = startDate
+      ? `Dibuka ${startDate.toLocaleString()}`
+      : null;
+  } else if (phase === "SUBMISSION") {
+    if (expired) {
+      title = "Masa pendaftaran telah berakhir";
+    } else {
+      title = `${days}d ${hours}h ${minutes}m tersisa`;
+    }
+    subtitle = deadline
+      ? `Sisa waktu pendaftaran — tutup ${deadline.toLocaleString()}`
+      : "Sisa waktu pendaftaran";
+  } else if (phase === "EVALUATION") {
+    title = "Sedang dalam tahap evaluasi AI";
+    subtitle = "Tim rekruter sedang memproses aplikasi.";
+  } else if (phase === "ANNOUNCEMENT") {
+    title = "Pengumuman sedang berlangsung";
+    subtitle = "Cek status lamaran kamu di bawah.";
+  } else if (phase === "CLOSED") {
+    title = "Periode rekrutasi telah berakhir";
+  } else {
+    title = period.name;
+  }
+
   return (
-    <Card className={expired ? "border-destructive/40 bg-destructive/5" : ""}>
+    <Card className={isClosed ? "border-destructive/40 bg-destructive/5" : ""}>
       <CardContent className="py-5 flex items-center gap-4">
         <div
-          className={`w-11 h-11 rounded-lg flex items-center justify-center shrink-0 ${
-            expired ? "bg-destructive/15 text-destructive" : "bg-primary/10 text-primary"
-          }`}
+          className={`w-11 h-11 rounded-lg flex items-center justify-center shrink-0 ${accentClass}`}
         >
           <CalendarClock className="w-5 h-5" />
         </div>
@@ -125,19 +164,15 @@ function CountdownCard({ period, loading }) {
           <p className="text-xs uppercase tracking-wide text-muted-foreground">
             {period.name}
           </p>
-          {expired ? (
-            <p className="text-lg font-semibold text-destructive">
-              Periode telah ditutup
-            </p>
-          ) : (
-            <p className="text-lg font-semibold tabular-nums">
-              {days}d {hours}h {minutes}m tersisa
-            </p>
-          )}
-          {deadline && (
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Tutup {deadline.toLocaleString()}
-            </p>
+          <p
+            className={`text-lg font-semibold ${
+              phase === "SUBMISSION" && !expired ? "tabular-nums" : ""
+            } ${isClosed ? "text-destructive" : ""}`}
+          >
+            {title}
+          </p>
+          {subtitle && (
+            <p className="text-xs text-muted-foreground mt-0.5">{subtitle}</p>
           )}
         </div>
       </CardContent>
@@ -420,7 +455,10 @@ export default function DashboardPage() {
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <RecruitmentJourney status={application.status} />
+                <RecruitmentJourney
+                  status={application.status}
+                  currentPhase={activePeriod?.current_phase || null}
+                />
               </CardContent>
             </Card>
           )}

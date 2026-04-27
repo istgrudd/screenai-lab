@@ -325,17 +325,46 @@ export async function runEvaluation(rubricId) {
 
 /**
  * Trigger batch evaluation for a division (Task 8.1).
+ * Returns the `data` payload merged with `_warning` (top-level field added in
+ * Task 13.2.2 — non-null when evaluation runs outside the EVALUATION phase).
+ * The warning sits outside `data` in the envelope, so the generic request
+ * wrapper would drop it; this helper does its own fetch to surface it.
  * @param {string} division  — e.g. "big_data"
  * @param {number[]|null} applicationIds — specific IDs, or null for all
  */
 export async function evaluateBatch(division, applicationIds = null) {
-  return request("/recruiter/evaluate/batch", {
+  const token = getToken();
+  const res = await fetch(`${BASE_URL}/recruiter/evaluate/batch`, {
     method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
     body: JSON.stringify({
       division,
       application_ids: applicationIds,
     }),
   });
+  if (res.status === 401) {
+    removeToken();
+    if (!window.location.pathname.startsWith("/login")) {
+      window.location.assign("/login");
+    }
+    throw new Error("Unauthorized");
+  }
+  if (!res.ok) {
+    let detail = `HTTP ${res.status}`;
+    try {
+      const body = await res.json();
+      detail = body.detail || body.error || JSON.stringify(body);
+    } catch { /* ignore */ }
+    throw new Error(detail);
+  }
+  const json = await res.json();
+  if (json.success === false) {
+    throw new Error(json.error || "Unknown API error");
+  }
+  return { ...(json.data || {}), _warning: json.warning ?? null };
 }
 
 /**
@@ -404,7 +433,8 @@ export async function listPeriods() {
 
 /**
  * Super Admin only — create a new period (auto-active, deactivates others).
- * @param {{name:string, start_date:string, end_date:string, threshold_n:number|null}} payload
+ * @param {{name:string, start_date:string, submission_end_date:string,
+ *   evaluation_end_date:string, end_date:string, threshold_n:number|null}} payload
  */
 export async function createPeriod(payload) {
   return request("/periods", {
@@ -415,7 +445,8 @@ export async function createPeriod(payload) {
 
 /**
  * Super Admin only — update a period.
- * Editable: name, end_date, threshold_n, is_active.
+ * Editable: name, end_date, submission_end_date, evaluation_end_date,
+ * threshold_n, is_active.
  */
 export async function updatePeriod(periodId, payload) {
   return request(`/periods/${periodId}`, {

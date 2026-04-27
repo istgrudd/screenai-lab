@@ -1,9 +1,11 @@
-import { useState, useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import {
   AlertCircle,
+  AlertTriangle,
   BarChart3,
+  Bell,
   ExternalLink,
   Filter,
   Inbox,
@@ -13,6 +15,7 @@ import {
   Sparkles,
   Trophy,
   Users,
+  X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -55,6 +58,8 @@ import {
   getActivePeriod,
   bulkAnnounce,
 } from "@/lib/api";
+import { getCurrentUser, ROLES } from "@/lib/auth";
+import { PHASE_BADGE_CLASS, PHASE_LABEL } from "@/lib/phase";
 
 const DIVISIONS = [
   { id: "all", label: "All divisions" },
@@ -151,6 +156,19 @@ export default function DashboardPage() {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [publishing, setPublishing] = useState(false);
 
+  // Task 13.3.3 — evaluation prompt banner (session-only dismiss).
+  const [bannerDismissed, setBannerDismissed] = useState(false);
+  const evaluateButtonRef = useRef(null);
+
+  // Task 13.3.4 — last evaluate response carried `_warning` (non-null when
+  // run outside the EVALUATION phase). Sticky in state so the tooltip
+  // hint stays visible after the toast fades.
+  const [evaluateWarning, setEvaluateWarning] = useState(null);
+
+  const currentUser = getCurrentUser();
+  const isSuperAdmin = currentUser?.role === ROLES.SUPER_ADMIN;
+  const phase = activePeriod?.current_phase || null;
+
   const fetchData = async () => {
     setLoading(true);
     try {
@@ -206,7 +224,20 @@ export default function DashboardPage() {
       if (result.errors.length > 0) {
         toast.warning(`${result.errors.length} application(s) had errors.`);
       }
+      // Task 13.3.4 — surface the soft-warn from the backend (non-null when
+      // evaluation runs outside the EVALUATION phase). Persist in state so
+      // the Run Evaluation tooltip keeps reminding the recruiter.
+      if (result._warning) {
+        toast.warning(result._warning);
+        setEvaluateWarning(result._warning);
+      } else {
+        setEvaluateWarning(null);
+      }
+      // Successfully ran evaluation → dismiss the prompt banner for this view.
+      setBannerDismissed(true);
       fetchData();
+      // Active period may now report evaluation_prompt=false → refresh.
+      fetchActivePeriod();
     } catch (err) {
       toast.error(`Evaluation failed: ${err.message}`);
     } finally {
@@ -232,10 +263,14 @@ export default function DashboardPage() {
     EVALUATED_STATUSES.has(a.status)
   );
   // Bulk publish targets the divisionFilter — must be a single division.
+  // Task 13.3.4: phase must be ANNOUNCEMENT, unless the current user is a
+  // Super Admin (backend bypasses the lock for them).
+  const phaseAllowsPublish = phase === "ANNOUNCEMENT" || isSuperAdmin;
   const canPublish =
     checkedCount > 0 &&
     divisionFilter !== "all" &&
-    activePeriod != null;
+    activePeriod != null &&
+    phaseAllowsPublish;
   // Y = evaluated apps in the targeted division MINUS checked count.
   const evaluatedInDivision = evaluatedInView.filter(
     (a) => divisionFilter === "all" || a.division === divisionFilter
@@ -268,9 +303,26 @@ export default function DashboardPage() {
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Recruiter Dashboard</h1>
+          <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2 flex-wrap">
+            Recruiter Dashboard
+            {/* Task 13.3.4 — phase badge near header. */}
+            {activePeriod && phase && (
+              <Badge
+                variant="outline"
+                className={`text-[10px] uppercase tracking-wide ${PHASE_BADGE_CLASS[phase] || ""}`}
+                title={`Periode: ${activePeriod.name}`}
+              >
+                {PHASE_LABEL[phase] || phase}
+              </Badge>
+            )}
+          </h1>
           <p className="text-muted-foreground mt-1">
             Submitted applications, document completeness, and evaluation results.
+            {activePeriod && (
+              <span className="ml-1 text-xs">
+                · {activePeriod.name}
+              </span>
+            )}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -286,33 +338,96 @@ export default function DashboardPage() {
               ))}
             </SelectContent>
           </Select>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <span tabIndex={!selectedDivision ? 0 : -1}>
-                <Button
-                  onClick={handleEvaluate}
-                  disabled={evaluating || !selectedDivision}
-                >
-                  {evaluating ? (
-                    <>
-                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                      Evaluating…
-                    </>
-                  ) : (
-                    <>
-                      <Play className="w-4 h-4 mr-2" />
-                      Run Evaluation
-                    </>
-                  )}
-                </Button>
-              </span>
-            </TooltipTrigger>
-            {!selectedDivision && (
-              <TooltipContent>Select a division first</TooltipContent>
-            )}
-          </Tooltip>
+          {(() => {
+            // Task 13.3.4 — Run Evaluation: warn (not disable) if outside the
+            // EVALUATION phase, or if the last run returned a backend warning.
+            const phaseWarn = activePeriod && phase && phase !== "EVALUATION";
+            const showWarn = phaseWarn || Boolean(evaluateWarning);
+            const tooltipMsg = showWarn
+              ? "Evaluasi dijalankan di luar window evaluasi resmi."
+              : !selectedDivision
+              ? "Select a division first"
+              : null;
+            return (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span tabIndex={tooltipMsg ? 0 : -1}>
+                    <Button
+                      ref={evaluateButtonRef}
+                      onClick={handleEvaluate}
+                      disabled={evaluating || !selectedDivision}
+                      variant={showWarn ? "outline" : "default"}
+                      className={
+                        showWarn
+                          ? "border-yellow-500/50 text-yellow-700 hover:bg-yellow-500/10 dark:text-yellow-400"
+                          : ""
+                      }
+                    >
+                      {evaluating ? (
+                        <>
+                          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                          Evaluating…
+                        </>
+                      ) : (
+                        <>
+                          {showWarn ? (
+                            <AlertTriangle className="w-4 h-4 mr-2" />
+                          ) : (
+                            <Play className="w-4 h-4 mr-2" />
+                          )}
+                          Run Evaluation
+                        </>
+                      )}
+                    </Button>
+                  </span>
+                </TooltipTrigger>
+                {tooltipMsg && <TooltipContent>{tooltipMsg}</TooltipContent>}
+              </Tooltip>
+            );
+          })()}
         </div>
       </div>
+
+      {/* Task 13.3.3 — evaluation prompt banner (dismissible, session-only). */}
+      {activePeriod?.evaluation_prompt && !bannerDismissed && (
+        <div className="rounded-lg border-2 border-yellow-500/40 bg-yellow-500/10 p-4 flex items-start gap-3">
+          <div className="w-9 h-9 rounded-md bg-yellow-500/20 text-yellow-700 dark:text-yellow-400 flex items-center justify-center shrink-0">
+            <Bell className="w-4 h-4" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium text-yellow-800 dark:text-yellow-200">
+              Masa pendaftaran telah berakhir.
+            </p>
+            <p className="text-xs text-yellow-700/80 dark:text-yellow-200/80 mt-0.5">
+              Jalankan evaluasi untuk mulai memproses kandidat.
+            </p>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <Button
+              size="sm"
+              onClick={() => {
+                evaluateButtonRef.current?.scrollIntoView({
+                  behavior: "smooth",
+                  block: "center",
+                });
+                evaluateButtonRef.current?.focus();
+              }}
+              className="bg-yellow-600 hover:bg-yellow-700 text-white"
+            >
+              <Play className="w-3.5 h-3.5 mr-1.5" />
+              Jalankan Evaluasi
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => setBannerDismissed(true)}
+              aria-label="Tutup banner"
+            >
+              <X className="w-3.5 h-3.5" />
+            </Button>
+          </div>
+        </div>
+      )}
 
       {/* Stats */}
       <div className="grid grid-cols-3 gap-4">
@@ -419,13 +534,30 @@ export default function DashboardPage() {
                   Tidak ada periode aktif
                 </span>
               )}
-              <Button
-                onClick={() => setConfirmOpen(true)}
-                disabled={!canPublish}
-              >
-                <Megaphone className="w-4 h-4 mr-2" />
-                Publish Hasil ({checkedCount})
-              </Button>
+              {/* Task 13.3.4 — phase guard: disabled outside ANNOUNCEMENT
+                  unless the user is a Super Admin (backend bypasses). */}
+              {(() => {
+                const phaseLocked = !phaseAllowsPublish && activePeriod != null;
+                const tooltipMsg = phaseLocked
+                  ? "Pengumuman hanya dapat dilakukan pada fase Pengumuman."
+                  : null;
+                return (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span tabIndex={tooltipMsg ? 0 : -1}>
+                        <Button
+                          onClick={() => setConfirmOpen(true)}
+                          disabled={!canPublish}
+                        >
+                          <Megaphone className="w-4 h-4 mr-2" />
+                          Publish Hasil ({checkedCount})
+                        </Button>
+                      </span>
+                    </TooltipTrigger>
+                    {tooltipMsg && <TooltipContent>{tooltipMsg}</TooltipContent>}
+                  </Tooltip>
+                );
+              })()}
             </div>
           )}
         </CardContent>
