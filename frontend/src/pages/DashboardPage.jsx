@@ -12,6 +12,7 @@ import {
   Loader2,
   Megaphone,
   Play,
+  RotateCw,
   Sparkles,
   Trophy,
   Users,
@@ -167,6 +168,11 @@ export default function DashboardPage() {
   // hint stays visible after the toast fades.
   const [evaluateWarning, setEvaluateWarning] = useState(null);
 
+  // Task 13.5.3 — last evaluate run's skipped_count, plus reset-confirm state.
+  const [lastSkippedCount, setLastSkippedCount] = useState(0);
+  const [reEvaluateOpen, setReEvaluateOpen] = useState(false);
+  const [reEvaluating, setReEvaluating] = useState(false);
+
   const currentUser = getCurrentUser();
   const isSuperAdmin = currentUser?.role === ROLES.SUPER_ADMIN;
   const phase = activePeriod?.current_phase || null;
@@ -214,18 +220,39 @@ export default function DashboardPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [divisionFilter, statusFilter]);
 
-  const handleEvaluate = async () => {
+  // Task 13.5.3 — run evaluate batch and surface evaluated/skipped counts.
+  // ``force`` re-evaluates already-scored candidates in the division.
+  const runEvaluate = async ({ force = false } = {}) => {
     if (!selectedDivision) {
       toast.error("Please select a division first.");
       return;
     }
-    setEvaluating(true);
+    if (force) {
+      setReEvaluating(true);
+    } else {
+      setEvaluating(true);
+    }
     try {
-      const result = await evaluateBatch(selectedDivision);
-      toast.success(
-        `Evaluation complete: ${result.results.length} candidate(s) scored.`
-      );
-      if (result.errors.length > 0) {
+      const result = await evaluateBatch(selectedDivision, { force });
+      const evaluated = result.evaluated_count ?? 0;
+      const skipped = result.skipped_count ?? 0;
+      setLastSkippedCount(skipped);
+
+      if (evaluated === 0 && skipped > 0) {
+        toast.info(
+          "Semua kandidat di divisi ini sudah dievaluasi sebelumnya."
+        );
+      } else if (skipped > 0) {
+        toast.success(
+          `Evaluasi selesai. ${evaluated} kandidat dievaluasi, ${skipped} kandidat dilewati (sudah dievaluasi).`
+        );
+      } else {
+        toast.success(
+          `Evaluasi selesai. ${evaluated} kandidat dievaluasi.`
+        );
+      }
+
+      if (result.errors?.length > 0) {
         toast.warning(`${result.errors.length} application(s) had errors.`);
       }
       // Task 13.3.4 — surface the soft-warn from the backend (non-null when
@@ -246,7 +273,15 @@ export default function DashboardPage() {
       toast.error(`Evaluation failed: ${err.message}`);
     } finally {
       setEvaluating(false);
+      setReEvaluating(false);
     }
+  };
+
+  const handleEvaluate = () => runEvaluate({ force: false });
+
+  const handleConfirmReEvaluate = async () => {
+    setReEvaluateOpen(false);
+    await runEvaluate({ force: true });
   };
 
   const submittedCount = applications.length;
@@ -257,6 +292,19 @@ export default function DashboardPage() {
     .map((a) => a.evaluation?.composite_score)
     .filter((s) => s != null)
     .sort((a, b) => b - a)[0];
+
+  // ── Task 13.5.3 — re-evaluate visibility ────────────────────────────────
+  // Show the "Evaluasi Ulang Semua" button when the last run skipped some
+  // candidates, OR when the current view already contains evaluated apps in
+  // the selected division (so the recruiter has something to re-evaluate).
+  const evaluatedInSelectedDivision = applications.filter(
+    (a) =>
+      a.division === selectedDivision &&
+      a.evaluation?.composite_score != null
+  ).length;
+  const canReEvaluate =
+    selectedDivision != null &&
+    (lastSkippedCount > 0 || evaluatedInSelectedDivision > 0);
 
   // ── Task 12.3 — bulk-publish derived state ─────────────────────────────
   const checkedIds = applications
@@ -359,7 +407,7 @@ export default function DashboardPage() {
                     <Button
                       ref={evaluateButtonRef}
                       onClick={handleEvaluate}
-                      disabled={evaluating || !selectedDivision}
+                      disabled={evaluating || reEvaluating || !selectedDivision}
                       variant={showWarn ? "outline" : "default"}
                       className={
                         showWarn
@@ -389,6 +437,27 @@ export default function DashboardPage() {
               </Tooltip>
             );
           })()}
+          {/* Task 13.5.3 — re-evaluate everything in the selected division. */}
+          {canReEvaluate && (
+            <Button
+              variant="outline"
+              onClick={() => setReEvaluateOpen(true)}
+              disabled={evaluating || reEvaluating || !selectedDivision}
+              title="Re-evaluate all candidates in this division"
+            >
+              {reEvaluating ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Mengevaluasi ulang…
+                </>
+              ) : (
+                <>
+                  <RotateCw className="w-4 h-4 mr-2" />
+                  Evaluasi Ulang Semua
+                </>
+              )}
+            </Button>
+          )}
         </div>
       </div>
 
@@ -743,6 +812,38 @@ export default function DashboardPage() {
           Threshold aktif: Top {activePeriod.threshold_n} per divisi
         </p>
       )}
+
+      {/* Task 13.5.3 — Re-evaluate everything confirmation. */}
+      <AlertDialog open={reEvaluateOpen} onOpenChange={setReEvaluateOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Evaluasi Ulang Semua Kandidat</AlertDialogTitle>
+            <AlertDialogDescription>
+              Ini akan mengevaluasi ulang semua kandidat di divisi ini,
+              termasuk yang sudah memiliki skor. Lanjutkan?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={reEvaluating}>Batal</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                handleConfirmReEvaluate();
+              }}
+              disabled={reEvaluating}
+            >
+              {reEvaluating ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Mengevaluasi ulang…
+                </>
+              ) : (
+                "Evaluasi Ulang"
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Task 12.3 — Publish confirmation */}
       <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>

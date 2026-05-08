@@ -346,14 +346,19 @@ export async function runEvaluation(rubricId) {
 
 /**
  * Trigger batch evaluation for a division (Task 8.1).
- * Returns the `data` payload merged with `_warning` (top-level field added in
- * Task 13.2.2 — non-null when evaluation runs outside the EVALUATION phase).
- * The warning sits outside `data` in the envelope, so the generic request
- * wrapper would drop it; this helper does its own fetch to surface it.
+ * Returns the `data` payload merged with envelope-level fields:
+ *   _warning         — Task 13.2.2 soft phase warning (or null)
+ *   evaluated_count  — Task 13.5.2 number of candidates processed this run
+ *   skipped_count    — Task 13.5.2 number skipped (already scored, force=False)
+ * These sit outside `data` in the envelope, so the generic request wrapper
+ * would drop them; this helper does its own fetch to surface them.
  * @param {string} division  — e.g. "big_data"
- * @param {number[]|null} applicationIds — specific IDs, or null for all
+ * @param {object} [opts]
+ * @param {number[]|null} [opts.applicationIds] — specific IDs, or null for all
+ * @param {boolean} [opts.force] — Task 13.5.1 re-evaluate already-scored apps
  */
-export async function evaluateBatch(division, applicationIds = null) {
+export async function evaluateBatch(division, opts = {}) {
+  const { applicationIds = null, force = false } = opts;
   const token = getToken();
   const res = await fetch(`${BASE_URL}/recruiter/evaluate/batch`, {
     method: "POST",
@@ -364,6 +369,7 @@ export async function evaluateBatch(division, applicationIds = null) {
     body: JSON.stringify({
       division,
       application_ids: applicationIds,
+      force,
     }),
   });
   if (res.status === 401) {
@@ -385,7 +391,12 @@ export async function evaluateBatch(division, applicationIds = null) {
   if (json.success === false) {
     throw new Error(json.error || "Unknown API error");
   }
-  return { ...(json.data || {}), _warning: json.warning ?? null };
+  return {
+    ...(json.data || {}),
+    _warning: json.warning ?? null,
+    evaluated_count: json.evaluated_count ?? 0,
+    skipped_count: json.skipped_count ?? 0,
+  };
 }
 
 /**

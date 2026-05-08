@@ -31,6 +31,9 @@ _recruiter_or_admin = require_role(UserRole.RECRUITER, UserRole.SUPER_ADMIN)
 class EvaluateBatchRequest(BaseModel):
     division: str
     application_ids: list[int] | None = None
+    # Task 13.5.1 — when True, re-evaluate already-scored candidates.
+    # The SUBMITTED-only status filter still applies.
+    force: bool = False
 
 
 @router.post(
@@ -43,10 +46,13 @@ async def evaluate_batch(
 ):
     """Run the full evaluation pipeline for a division.
 
-    Body: { division: str, application_ids: [int] | null }
+    Body: { division: str, application_ids: [int] | null, force: bool }
 
-    If application_ids is null, evaluates all submitted applications
-    in the given division.
+    If application_ids is null, evaluates all eligible applications in the
+    given division. By default (force=False) candidates whose Candidate row
+    already carries a composite_score are skipped to avoid recomputation.
+    With force=True the score filter is bypassed; the SUBMITTED-only status
+    filter still applies regardless.
 
     Precondition: the division's rubric must have at least one dimension.
     Returns 400 if the rubric has zero dimensions.
@@ -61,6 +67,7 @@ async def evaluate_batch(
             division=payload.division,
             application_ids=payload.application_ids,
             db=db,
+            force=payload.force,
         )
     except ValueError as exc:
         msg = str(exc)
@@ -80,10 +87,14 @@ async def evaluate_batch(
         )
 
     warning = _phase_warning(db)
+    skipped_count = int(result.pop("skipped", 0))
+    evaluated_count = int(result.get("queued", 0))
 
     return {
         "success": True,
         "data": result,
+        "evaluated_count": evaluated_count,
+        "skipped_count": skipped_count,
         "warning": warning,
         "error": None,
     }

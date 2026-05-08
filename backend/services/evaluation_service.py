@@ -50,17 +50,20 @@ async def run_evaluation_pipeline(
     division: str,
     application_ids: list[int] | None,
     db: Session,
+    force: bool = False,
 ) -> dict:
     """Run the full evaluation pipeline for applications in a division.
 
     Args:
         division: Division value string (e.g. "big_data").
         application_ids: Specific application IDs to evaluate, or None for all
-            submitted applications in the division.
+            eligible applications in the division.
         db: Database session.
+        force: When True, re-evaluate already-scored candidates. Status filter
+            (SUBMITTED only) always applies regardless.
 
     Returns:
-        { queued: int, results: [...], errors: [...] }
+        { queued: int, results: [...], errors: [...], skipped: int }
     """
     # --- 1. Find the rubric for the division ---
     rubric = (
@@ -88,20 +91,43 @@ async def run_evaluation_pipeline(
     except ValueError:
         raise ValueError(f"Invalid division '{division}'")
 
+    # Task 13.5.1 — SUBMITTED-only status filter always applies. Non-SUBMITTED
+    # applications (draft, screening, announced_*) are never re-evaluated.
     q = db.query(Application).filter(
         Application.division == division_enum,
-        Application.status.in_([
-            ApplicationStatus.SUBMITTED,
-            ApplicationStatus.SCREENING,
-        ]),
+        Application.status == ApplicationStatus.SUBMITTED,
     )
     if application_ids:
         q = q.filter(Application.id.in_(application_ids))
 
-    applications = q.all()
+    candidate_apps = q.all()
+
+    # Task 13.5.1 — when force=False, skip applications whose Candidate row
+    # already has a stored composite_score. user_id links Application →
+    # Candidate (one Candidate per user, see _ensure_candidate).
+    applications: list[Application] = []
+    skipped = 0
+    if force or not candidate_apps:
+        applications = candidate_apps
+    else:
+        user_ids = [a.user_id for a in candidate_apps]
+        scored_user_ids = {
+            uid
+            for (uid,) in db.query(Candidate.user_id)
+            .filter(
+                Candidate.user_id.in_(user_ids),
+                Candidate.composite_score.isnot(None),
+            )
+            .all()
+        }
+        for app in candidate_apps:
+            if app.user_id in scored_user_ids:
+                skipped += 1
+            else:
+                applications.append(app)
 
     if not applications:
-        return {"queued": 0, "results": [], "errors": []}
+        return {"queued": 0, "results": [], "errors": [], "skipped": skipped}
 
     results = []
     errors = []
@@ -128,6 +154,7 @@ async def run_evaluation_pipeline(
         "queued": len(applications),
         "results": results,
         "errors": errors,
+        "skipped": skipped,
     }
 
 
