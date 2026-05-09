@@ -23,7 +23,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, s
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from backend.database import get_db
+from backend.database import SessionLocal, get_db
 from backend.middleware.auth_middleware import get_current_user, require_role
 from backend.models.application import Application, ApplicationStatus, Division
 from backend.models.candidate import Candidate
@@ -294,10 +294,11 @@ def submit_application(
     db.refresh(app)
 
     # Task 10.2: trigger NER anonymization in the background.
-    # Pass a NEW db session — the request-scoped session will be closed
-    # by the time the background task runs.
+    # Pass the SessionLocal factory — the task opens and closes its own
+    # session, since the request-scoped session is already closed by
+    # then.
     background_tasks.add_task(
-        run_submit_anonymization, app.id, next(get_db())
+        run_submit_anonymization, app.id, SessionLocal
     )
 
     return {

@@ -1,11 +1,11 @@
 /**
  * API client — fetch wrapper for all backend endpoints.
- * Base URL: http://127.0.0.1:8000/api
+ * Base URL: VITE_API_BASE_URL (falls back to http://127.0.0.1:8000/api for dev).
  */
 
 import { getToken, removeToken } from "@/lib/auth";
 
-const BASE_URL = "http://127.0.0.1:8000/api";
+const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000/api";
 
 /**
  * Generic fetch wrapper that handles JSON responses and errors.
@@ -244,6 +244,19 @@ export async function deactivateUser(userId) {
 
 export async function reactivateUser(userId) {
   return request(`/users/${userId}/reactivate`, { method: "PUT" });
+}
+
+/**
+ * Super Admin only — assisted password reset for a user.
+ * Phase-2 stop-gap until self-service email reset is wired in Phase 3.
+ * @param {number} userId
+ * @param {string} newPassword - min 8 chars (server-enforced)
+ */
+export async function adminResetPassword(userId, newPassword) {
+  return request("/auth/admin/reset-password", {
+    method: "POST",
+    body: JSON.stringify({ user_id: userId, new_password: newPassword }),
+  });
 }
 
 // ── Upload ──────────────────────────────────────────────────────────────────

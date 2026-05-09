@@ -14,7 +14,7 @@ from pydantic import BaseModel, EmailStr, Field, field_validator
 from sqlalchemy.orm import Session
 
 from backend.database import get_db
-from backend.middleware.auth_middleware import get_current_user
+from backend.middleware.auth_middleware import get_current_user, require_role
 from backend.models.user import User, UserRole
 from backend.services.auth_service import (
     AuthResult,
@@ -59,6 +59,18 @@ class RegisterRequest(BaseModel):
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str
+
+
+class AdminResetPasswordRequest(BaseModel):
+    """Super-admin assisted password reset (Phase 2 stop-gap).
+
+    Self-service reset (email token) is Phase 3. Until then, a candidate
+    who forgets their password contacts the lab; a super-admin uses this
+    endpoint to set a new one.
+    """
+
+    user_id: int
+    new_password: str = Field(..., min_length=8, max_length=72)
 
 
 class UserOut(BaseModel):
@@ -189,5 +201,42 @@ def me(current_user: User = Depends(get_current_user)):
     return {
         "success": True,
         "data": UserOut.from_user(current_user).model_dump(),
+        "error": None,
+    }
+
+
+@router.post(
+    "/admin/reset-password",
+    dependencies=[Depends(require_role(UserRole.SUPER_ADMIN))],
+)
+def admin_reset_password(
+    payload: AdminResetPasswordRequest,
+    db: Session = Depends(get_db),
+):
+    """Super-admin-only assisted password reset.
+
+    Hashes the new password with bcrypt and replaces the target user's
+    stored hash. Does not invalidate existing JWTs (that's Phase 3 +
+    requires a token blacklist) — but the next login will require the
+    new password.
+    """
+    target = db.query(User).filter(User.id == payload.user_id).first()
+    if not target:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found",
+        )
+
+    target.password_hash = hash_password(payload.new_password)
+    db.commit()
+    db.refresh(target)
+
+    return {
+        "success": True,
+        "data": {
+            "user_id": target.id,
+            "email": target.email,
+            "message": "Password has been reset.",
+        },
         "error": None,
     }

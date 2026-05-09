@@ -16,7 +16,7 @@ import traceback
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
 from backend.models.application import Application
 from backend.models.candidate import Candidate, CandidateDocument
@@ -40,7 +40,9 @@ def _generate_anon_id() -> str:
 # Public entry point (called by BackgroundTasks)
 # ---------------------------------------------------------------------------
 
-def run_submit_anonymization(application_id: int, db: Session) -> None:
+def run_submit_anonymization(
+    application_id: int, session_factory: sessionmaker
+) -> None:
     """Run NER anonymization on CV + Motivation Letter for a submitted application.
 
     Called as a FastAPI BackgroundTask after submit_application commits.
@@ -52,8 +54,11 @@ def run_submit_anonymization(application_id: int, db: Session) -> None:
 
     Args:
         application_id: The Application.id to process.
-        db: A NEW database session (not the request-scoped one).
+        session_factory: SessionLocal — the task opens and closes its own
+            session so the request-scoped session never leaks into the
+            background context.
     """
+    db = session_factory()
     try:
         _run_anonymization(application_id, db)
     except Exception:

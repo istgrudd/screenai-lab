@@ -278,12 +278,15 @@ def get_my_announcement(
     app_status = app.status.value if hasattr(app.status, "value") else str(app.status)
 
     if app_status in ("announced_pass", "announced_fail"):
-        # Look up the audit log for the announcement details
+        # Look up the most recent announcement audit row for this candidate.
+        # Bulk announces use action_type="bulk_announcement" and per-app uses
+        # "announcement" — fall back to either so the candidate sees their
+        # notes/announced_at regardless of which path the recruiter took.
         audit = (
             db.query(AuditLog)
             .filter(
                 AuditLog.candidate_id == app.user_id,
-                AuditLog.action_type == "announcement",
+                AuditLog.action_type.in_(("announcement", "bulk_announcement")),
             )
             .order_by(AuditLog.timestamp.desc())
             .first()

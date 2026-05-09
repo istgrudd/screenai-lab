@@ -29,7 +29,7 @@ from backend.services.ktm_validator import validate_ktm
 from backend.services.normalizer import normalize_and_segment
 from backend.services.anonymizer import anonymize_text
 from backend.services.rag_pipeline import evaluate_candidate
-from backend.services.scoring import store_evaluation_results
+from backend.services.scoring import store_evaluation_results, validate_rubric_weights
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +80,9 @@ async def run_evaluation_pipeline(
             f"Rubric for {division} has no dimensions configured. "
             f"Please set up the rubric first."
         )
+
+    # --- 1c. Composite-score sanity: weights must sum to 1.0 ---
+    validate_rubric_weights(rubric)
 
     # --- 2. Find target applications ---
     # Application.division is stored as the enum name ("BIG_DATA") via

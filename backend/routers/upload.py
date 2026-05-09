@@ -5,14 +5,18 @@ Endpoint:
                        normalize/segment, anonymize (NER + regex),
                        save candidate + document to DB, and persist
                        extracted/anonymized JSON to data/.
+
+DEPRECATED (Task 14.4): use /api/documents/upload/{doc_type} instead.
+Mounted only for legacy Capstone clients.
 """
 
 import json
+import logging
 import os
 import shutil
 import uuid
 
-from fastapi import APIRouter, Depends, File, Form, UploadFile, HTTPException
+from fastapi import APIRouter, Depends, File, Form, Response, UploadFile, HTTPException
 from sqlalchemy.orm import Session
 
 from backend.config import settings
@@ -30,6 +34,11 @@ from backend.services.anonymizer import anonymize_text
 from backend.services.scoring import cefr_from_score
 
 router = APIRouter(prefix="/api", tags=["upload"])
+logger = logging.getLogger(__name__)
+
+_DEPRECATION_MESSAGE = (
+    "POST /api/upload is deprecated; use POST /api/documents/upload/{doc_type} instead."
+)
 
 
 def _is_certificate_content(text: str) -> bool:
@@ -50,6 +59,7 @@ def _is_certificate_content(text: str) -> bool:
 
 @router.post("/upload", dependencies=[Depends(require_role(UserRole.CANDIDATE))])
 def upload_documents(
+    response: Response,
     files: list[UploadFile] = File(...),
     rubric_id: int | None = Form(None),
     db: Session = Depends(get_db),
@@ -69,6 +79,12 @@ def upload_documents(
 
     Returns a list of created candidates with their document details.
     """
+    # Task 14.4: deprecation signal. Headers go on every response (success
+    # or error after this point); the warning log fires once per request.
+    response.headers["Deprecation"] = "true"
+    response.headers["X-Deprecated-Message"] = _DEPRECATION_MESSAGE
+    logger.warning(_DEPRECATION_MESSAGE)
+
     if not files:
         raise HTTPException(status_code=400, detail="No files provided.")
 

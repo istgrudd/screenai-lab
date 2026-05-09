@@ -13,10 +13,11 @@ from sqlalchemy.orm import Session
 from backend.database import get_db
 from backend.middleware.auth_middleware import get_current_user, require_role
 from backend.models.application import Application
+from backend.models.audit import AuditLog
 from backend.models.candidate import Candidate, CandidateDocument, DimensionScore
 from backend.models.rubric import Dimension, Rubric
 from backend.models.user import User, UserRole
-from backend.services.scoring import cefr_from_score
+from backend.services.scoring import cefr_from_score, validate_rubric_weights
 
 _recruiter_or_admin = require_role(UserRole.RECRUITER, UserRole.SUPER_ADMIN)
 _candidate_only = require_role(UserRole.CANDIDATE)
@@ -240,6 +241,7 @@ def override_score(
     dim_score_id: int,
     payload: ScoreOverride,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Override a dimension score for a candidate."""
     score_record = (
@@ -260,6 +262,19 @@ def override_score(
     # Get dimension for weight
     dim = db.query(Dimension).filter(Dimension.id == score_record.dimension_id).first()
     weight = dim.weight if dim else 0
+
+    # Composite-score sanity: the recompute below assumes the rubric's
+    # dimension weights sum to 1.0. Validate against the rubric this score
+    # belongs to before mutating anything so a malformed rubric surfaces
+    # as a clean 400 instead of silently producing an off-scale composite.
+    rubric = (
+        db.query(Rubric).filter(Rubric.id == score_record.rubric_id).first()
+    )
+    if rubric is not None:
+        try:
+            validate_rubric_weights(rubric)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
 
     # Store old score for reference
     old_score = score_record.score
@@ -283,6 +298,21 @@ def override_score(
     candidate.composite_score = round(
         sum(s.weighted_score for s in all_scores) + (candidate.language_bonus or 0.0),
         2,
+    )
+
+    # Task 14.3 — audit log every override. AuditLog.candidate_id is a FK to
+    # users.id (the human), so we record the candidate's user_id, not the
+    # Candidate-row id. Written inside the same transaction so an override
+    # without a matching audit row is impossible.
+    db.add(
+        AuditLog(
+            recruiter_id=current_user.id,
+            candidate_id=candidate.user_id,
+            action_type="score_override",
+            old_value=str(old_score) if old_score is not None else None,
+            new_value=str(score_record.score),
+            reason=payload.reason,
+        )
     )
 
     db.commit()

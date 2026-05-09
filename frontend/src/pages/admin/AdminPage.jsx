@@ -5,6 +5,7 @@ import {
   CalendarClock,
   ChevronLeft,
   ChevronRight,
+  KeyRound,
   Loader2,
   Power,
   Search,
@@ -39,6 +40,7 @@ import {
 } from "@/components/ui/table";
 
 import {
+  adminResetPassword,
   deactivateUser,
   getActivePeriod,
   getActivePeriodStats,
@@ -158,6 +160,27 @@ export default function AdminPage() {
       fetchPage();
     } catch (err) {
       toast.error(err.message || "Action failed");
+    } finally {
+      setBusyUserId(null);
+    }
+  };
+
+  const handleResetPassword = async (user) => {
+    const newPassword = window.prompt(
+      `Set a new password for ${user.full_name} (${user.email}).\n` +
+        `Minimum 8 characters. Share securely — this is an admin-assisted reset.`
+    );
+    if (newPassword == null) return; // cancelled
+    if (newPassword.length < 8) {
+      toast.error("Password must be at least 8 characters.");
+      return;
+    }
+    setBusyUserId(user.id);
+    try {
+      await adminResetPassword(user.id, newPassword);
+      toast.success(`Password reset for ${user.full_name}.`);
+    } catch (err) {
+      toast.error(err.message || "Password reset failed");
     } finally {
       setBusyUserId(null);
     }
@@ -330,6 +353,17 @@ export default function AdminPage() {
                               <Power className="w-3.5 h-3.5" />
                             )}
                             {u.is_active ? "Deactivate" : "Reactivate"}
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleResetPassword(u)}
+                            disabled={busy}
+                            className="gap-1"
+                            title="Set a new password for this user"
+                          >
+                            <KeyRound className="w-3.5 h-3.5" />
+                            Reset password
                           </Button>
                         </div>
                         {isSelf && (
