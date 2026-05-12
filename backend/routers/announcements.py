@@ -10,12 +10,13 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from backend.database import get_db
 from backend.middleware.auth_middleware import get_current_user, require_role
+from backend.middleware.rate_limit import limiter, user_or_ip_key
 from backend.models.application import Application, ApplicationStatus, Division
 from backend.models.audit import AuditLog
 from backend.models.period import RecruitmentPeriod
@@ -137,7 +138,9 @@ def create_announcement(
 # ---------------------------------------------------------------------------
 
 @router.post("/bulk")
+@limiter.limit("10/minute", key_func=user_or_ip_key)
 def bulk_announce(
+    request: Request,
     payload: BulkAnnounceRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(_recruiter_or_admin),

@@ -45,8 +45,8 @@ class Settings(BaseSettings):
         """Return the list of origins allowed to call the API.
 
         Production deployments set ALLOWED_ORIGINS to a comma-separated list
-        (e.g. "https://screenai-lab.vercel.app,https://www.example.com"). Local
-        dev falls back to a single FRONTEND_URL.
+        (e.g. "https://screenai-lab.example.com,https://www.example.com").
+        Local dev falls back to a single FRONTEND_URL.
         """
         if self.allowed_origins.strip():
             return [o.strip() for o in self.allowed_origins.split(",") if o.strip()]

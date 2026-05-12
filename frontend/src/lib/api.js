@@ -66,7 +66,8 @@ export async function login(email, password) {
 
 /**
  * Register a new candidate. All fields are required — Telkom-specific
- * student info is validated server-side (nim must match /^103\d{10}$/).
+ * student info is validated server-side (nim must be a numeric string
+ * of at least 10 digits — see backend/routers/auth.py:_NIM_PATTERN).
  */
 export async function register({
   email,

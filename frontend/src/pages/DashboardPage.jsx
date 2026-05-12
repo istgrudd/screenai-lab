@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import {
@@ -284,35 +284,54 @@ export default function DashboardPage() {
     await runEvaluate({ force: true });
   };
 
+  // Memoize the header stats so checkbox toggles don't re-walk the list.
+  // applications changes only when fetchData runs.
   const submittedCount = applications.length;
-  const scoredCount = applications.filter(
-    (a) => a.evaluation?.composite_score != null
-  ).length;
-  const topScore = applications
-    .map((a) => a.evaluation?.composite_score)
-    .filter((s) => s != null)
-    .sort((a, b) => b - a)[0];
+  const { scoredCount, topScore } = useMemo(() => {
+    let scored = 0;
+    let top = null;
+    for (const a of applications) {
+      const s = a.evaluation?.composite_score;
+      if (s != null) {
+        scored += 1;
+        if (top == null || s > top) top = s;
+      }
+    }
+    return { scoredCount: scored, topScore: top };
+  }, [applications]);
 
   // ── Task 13.5.3 — re-evaluate visibility ────────────────────────────────
   // Show the "Evaluasi Ulang Semua" button when the last run skipped some
   // candidates, OR when the current view already contains evaluated apps in
   // the selected division (so the recruiter has something to re-evaluate).
-  const evaluatedInSelectedDivision = applications.filter(
-    (a) =>
-      a.division === selectedDivision &&
-      a.evaluation?.composite_score != null
-  ).length;
+  const evaluatedInSelectedDivision = useMemo(
+    () =>
+      applications.filter(
+        (a) =>
+          a.division === selectedDivision &&
+          a.evaluation?.composite_score != null
+      ).length,
+    [applications, selectedDivision]
+  );
   const canReEvaluate =
     selectedDivision != null &&
     (lastSkippedCount > 0 || evaluatedInSelectedDivision > 0);
 
   // ── Task 12.3 — bulk-publish derived state ─────────────────────────────
-  const checkedIds = applications
-    .filter((a) => checked[a.id] && EVALUATED_STATUSES.has(a.status))
-    .map((a) => a.id);
+  // checkedIds / checkedCount / evaluatedInDivision depend on `checked`, so
+  // they DO recompute on every checkbox toggle (by design). useMemo here
+  // skips the work when only `applications` changed (e.g. a poll refresh).
+  const checkedIds = useMemo(
+    () =>
+      applications
+        .filter((a) => checked[a.id] && EVALUATED_STATUSES.has(a.status))
+        .map((a) => a.id),
+    [applications, checked]
+  );
   const checkedCount = checkedIds.length;
-  const evaluatedInView = applications.filter((a) =>
-    EVALUATED_STATUSES.has(a.status)
+  const evaluatedInView = useMemo(
+    () => applications.filter((a) => EVALUATED_STATUSES.has(a.status)),
+    [applications]
   );
   // Bulk publish targets the divisionFilter — must be a single division.
   // Task 13.3.4: phase must be ANNOUNCEMENT, unless the current user is a
@@ -324,10 +343,19 @@ export default function DashboardPage() {
     activePeriod != null &&
     phaseAllowsPublish;
   // Y = evaluated apps in the targeted division MINUS checked count.
-  const evaluatedInDivision = evaluatedInView.filter(
-    (a) => divisionFilter === "all" || a.division === divisionFilter
-  );
-  const failCount = Math.max(evaluatedInDivision.length - checkedCount, 0);
+  const failCount = useMemo(() => {
+    const inDivision = evaluatedInView.filter(
+      (a) => divisionFilter === "all" || a.division === divisionFilter
+    ).length;
+    return Math.max(inDivision - checkedCount, 0);
+  }, [evaluatedInView, divisionFilter, checkedCount]);
+
+  // Stable callback identity so the inline `onCheckedChange` prop on each
+  // row's <Checkbox> doesn't force a re-render of every row when any one
+  // toggles.
+  const handleToggleChecked = useCallback((id, value) => {
+    setChecked((prev) => ({ ...prev, [id]: Boolean(value) }));
+  }, []);
 
   const handleConfirmPublish = async () => {
     if (!canPublish) return;
@@ -695,9 +723,7 @@ export default function DashboardPage() {
                   const checkboxNode = isEvaluated ? (
                     <Checkbox
                       checked={isChecked}
-                      onCheckedChange={(v) =>
-                        setChecked((prev) => ({ ...prev, [a.id]: Boolean(v) }))
-                      }
+                      onCheckedChange={(v) => handleToggleChecked(a.id, v)}
                       onClick={(e) => e.stopPropagation()}
                       aria-label={`Select ${a.candidate?.full_name || "candidate"}`}
                     />

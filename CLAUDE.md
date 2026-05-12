@@ -288,9 +288,9 @@ Existing pages yang di-update:
 Tambahan `.env` untuk Phase 2:
 
 ```env
-# Tidak ada env baru yang wajib untuk Phase 2
-# RECRUITMENT_DEADLINE env var bisa dihapus setelah
-# CountdownCard pakai /api/periods/active
+# Tidak ada env baru yang wajib untuk Phase 2.
+# VITE_RECRUITMENT_DEADLINE removed in Batch 5 — CountdownCard now reads
+# /api/periods/active.
 ```
 
 Tambahan dependencies:
@@ -307,10 +307,10 @@ Sama seperti sebelumnya. Phase 3 target:
 
 | Service | Platform | Notes |
 |---|---|---|
-| Backend | VPS lab atau Railway | Auto-deploy dari GitHub |
-| Frontend | Vercel | Free tier |
-| Database | SQLite → PostgreSQL bila resource cukup | |
-| File Storage | Server local (VPS) | |
+| Backend | VPS lab (self-hosted) | `uvicorn` di belakang Nginx/Caddy, dikelola systemd |
+| Frontend | VPS lab (self-hosted) | `npm run build` → static assets disajikan oleh reverse proxy yang sama |
+| Database | SQLite → PostgreSQL self-hosted di VPS lab | Instalasi & konfigurasi manual |
+| File Storage | Disk lokal VPS (`uploads/`) | Backup manual / volume snapshot |
 
 ---
 

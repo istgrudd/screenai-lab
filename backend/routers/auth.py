@@ -9,12 +9,13 @@ Endpoints:
 
 import re
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, EmailStr, Field, field_validator
 from sqlalchemy.orm import Session
 
 from backend.database import get_db
 from backend.middleware.auth_middleware import get_current_user, require_role
+from backend.middleware.rate_limit import limiter
 from backend.models.user import User, UserRole
 from backend.services.auth_service import (
     AuthResult,
@@ -106,7 +107,8 @@ class UserOut(BaseModel):
 # ---------------------------------------------------------------------------
 
 @router.post("/register", status_code=status.HTTP_201_CREATED)
-def register(payload: RegisterRequest, db: Session = Depends(get_db)):
+@limiter.limit("5/minute")
+def register(request: Request, payload: RegisterRequest, db: Session = Depends(get_db)):
     """Register a new candidate account. Role is always 'candidate'."""
     email = payload.email.lower()
     if db.query(User).filter(User.email == email).first():
@@ -148,7 +150,8 @@ def register(payload: RegisterRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/login")
-def login(payload: LoginRequest, db: Session = Depends(get_db)):
+@limiter.limit("10/minute")
+def login(request: Request, payload: LoginRequest, db: Session = Depends(get_db)):
     """Authenticate a user and return a JWT.
 
     Returns 401 for bad credentials and 403 for correct credentials against

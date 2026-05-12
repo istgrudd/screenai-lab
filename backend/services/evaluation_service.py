@@ -10,6 +10,7 @@ Capstone pipeline models (Candidate / CandidateDocument).
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import traceback
@@ -32,6 +33,13 @@ from backend.services.rag_pipeline import evaluate_candidate
 from backend.services.scoring import store_evaluation_results, validate_rubric_weights
 
 logger = logging.getLogger(__name__)
+
+# Bound the number of in-flight DeepSeek calls inside a single batch. The
+# event loop already serializes the SQLAlchemy work between awaits, so the
+# semaphore only gates the LLM round-trip — the slow part. Keep this small
+# enough to stay under DeepSeek rate limits but large enough that batch
+# wall-clock scales sub-linearly with N.
+_LLM_CONCURRENCY = 5
 
 
 def _utcnow() -> datetime:
@@ -132,24 +140,35 @@ async def run_evaluation_pipeline(
     if not applications:
         return {"queued": 0, "results": [], "errors": [], "skipped": skipped}
 
-    results = []
-    errors = []
+    # Bounded-concurrency evaluation. The SQLAlchemy Session is sync and the
+    # only `await` inside _evaluate_one is the DeepSeek call, so two coroutines
+    # never touch the session at the same Python instruction — but they DO
+    # overlap their LLM round-trips, which is the win.
+    semaphore = asyncio.Semaphore(_LLM_CONCURRENCY)
 
-    for app in applications:
-        try:
-            result = await _evaluate_one(app, rubric, db)
-            results.append(result)
+    async def _bounded(app: Application) -> tuple[str, dict]:
+        async with semaphore:
+            try:
+                result = await _evaluate_one(app, rubric, db)
+                app.status = ApplicationStatus.SCREENING
+                db.flush()
+                return ("ok", result)
+            except Exception as exc:
+                traceback.print_exc()
+                return (
+                    "err",
+                    {"application_id": app.id, "error": str(exc)},
+                )
 
-            # Update application status to screening
-            app.status = ApplicationStatus.SCREENING
-            db.flush()
+    outcomes = await asyncio.gather(*[_bounded(a) for a in applications])
 
-        except Exception as exc:
-            traceback.print_exc()
-            errors.append({
-                "application_id": app.id,
-                "error": str(exc),
-            })
+    results: list[dict] = []
+    errors: list[dict] = []
+    for tag, item in outcomes:
+        if tag == "ok":
+            results.append(item)
+        else:
+            errors.append(item)
 
     db.commit()
 

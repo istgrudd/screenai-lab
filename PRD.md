@@ -10,7 +10,7 @@
 |---|---|---|
 | **Phase 1 — Candidate Portal MVP** | Platform pendaftaran + upload dokumen + dashboard kandidat | ✅ Complete |
 | **Phase 2 — Full Recruitment Flow** | Evaluasi AI + NER submit-time + periode rekrutmen + seleksi manual rekruter | 🔄 In Progress |
-| **Phase 3 — Deployment** | VPS lab / cloud hosting + production config | 📋 Planned |
+| **Phase 3 — Deployment** | VPS lab self-hosted + production config | 📋 Planned |
 
 ---
 
@@ -102,10 +102,11 @@ ScreenAI Lab adalah fork dari ScreenAI (Capstone) yang diadaptasi untuk kebutuha
 
 ### Phase 3 — Deployment (📋 Planned)
 
-- Backend deployed ke VPS lab atau Railway/Render.
-- Frontend deployed ke Vercel/Netlify.
-- Migrasi SQLite → PostgreSQL untuk production.
-- Environment variables configured untuk production.
+- Backend dan frontend keduanya di-host di VPS lab (single self-hosted server).
+- Backend dijalankan via `uvicorn` di belakang reverse proxy (Nginx/Caddy) dengan TLS.
+- Frontend di-build (`npm run build`) dan disajikan sebagai static assets oleh reverse proxy yang sama (atau host terpisah di subdomain lab).
+- Migrasi SQLite → PostgreSQL untuk production (instalasi manual di VPS).
+- Environment variables di-set manual di host (file `.env` atau systemd unit).
 - CORS configured untuk production domain.
 - Code splitting frontend (React.lazy) untuk bundle size.
 - Audit log lengkap: semua tindakan rekruter (override, announce, verify).
@@ -259,11 +260,11 @@ ScreenAI Lab adalah fork dari ScreenAI (Capstone) yang diadaptasi untuk kebutuha
 | Background Tasks | FastAPI BackgroundTasks | Untuk submit-time NER |
 | Backend | FastAPI + python-jose (JWT, HS256) + bcrypt (langsung, tanpa passlib) | bcrypt pinned `==4.0.1` |
 | Frontend | React + Vite + Tailwind + shadcn/ui | Academic Luminary style |
-| Database | SQLite (dev) / PostgreSQL (prod via Railway plugin) | Legacy `postgres://` URL dinormalisasi otomatis di `database.py` |
+| Database | SQLite (dev) / PostgreSQL self-hosted di VPS lab (prod) | Legacy `postgres://` URL dinormalisasi otomatis di `database.py` |
 | Migrations | Alembic — `alembic upgrade head` dijalankan otomatis di FastAPI lifespan | 6 revisions saat ini |
 | Auth | JWT-based (HS256, expiry 8 jam), token di localStorage | Phase 1 implemented |
-| Deployment (Backend) | **Railway aktif** via `Procfile` + `railway.json` (Nixpacks builder, healthcheck `/api/health`) | Auto-deploy dari GitHub |
-| Deployment (Frontend) | Vercel | Phase 3 target — `vercel.json` belum ada |
+| Deployment (Backend) | VPS lab self-hosted — `uvicorn backend.main:app` (via systemd / supervisor) di belakang reverse proxy (Nginx/Caddy) dengan TLS; healthcheck `/api/health` | Phase 3 target |
+| Deployment (Frontend) | VPS lab self-hosted — `npm run build` lalu disajikan sebagai static assets oleh reverse proxy yang sama | Phase 3 target |
 
 ---
 

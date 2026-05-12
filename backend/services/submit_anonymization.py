@@ -87,7 +87,11 @@ def _run_anonymization(application_id: int, db: Session) -> None:
     # 2. Create or update Candidate record (rubric_id=None at this stage)
     candidate = _ensure_candidate_for_submit(app, db)
 
-    # 3. Process documents: CV and Motivation Letter only
+    # 3. Process documents:
+    #      CV + Motivation Letter → full pipeline (extract + normalize + NER)
+    #      SWOT                   → raw-text extraction only (Perf 3 cache —
+    #                               GET /swot-text reads from DB instead of
+    #                               re-opening the PDF on every request)
     doc_types = [DocumentType.CV, DocumentType.MOTIVATION_LETTER]
     processed = 0
 
@@ -143,13 +147,84 @@ def _run_anonymization(application_id: int, db: Session) -> None:
         )
         processed += 1
 
+    # 4. SWOT — extract raw text only, no NER. Failures are non-fatal so a
+    #    SWOT that fails to parse doesn't poison the rest of submit-time work.
+    swot_processed = _store_swot_text(application_id, candidate, db)
+    if swot_processed:
+        processed += 1
+
     db.commit()
 
     # 5. Log completion
     logger.info(
-        "NER completed for application %d: %d documents anonymized",
+        "NER completed for application %d: %d documents processed",
         application_id, processed,
     )
+
+
+def _store_swot_text(
+    application_id: int, candidate: Candidate, db: Session
+) -> bool:
+    """Extract SWOT raw text at submit time so the GET endpoint can serve from DB.
+
+    Returns True if a SWOT CandidateDocument row was written.
+    """
+    swot_doc = (
+        db.query(Document)
+        .filter(
+            Document.application_id == application_id,
+            Document.doc_type == DocumentType.SWOT,
+        )
+        .first()
+    )
+    if not swot_doc:
+        return False
+    if not os.path.exists(swot_doc.file_path):
+        logger.warning(
+            "SWOT file missing for app %d: %s",
+            application_id,
+            swot_doc.file_path,
+        )
+        return False
+
+    try:
+        extraction = extract_text_from_pdf(swot_doc.file_path)
+    except Exception:
+        logger.warning(
+            "SWOT extraction failed for app %d", application_id,
+        )
+        return False
+
+    raw_text = (extraction.get("raw_text") or "").strip()
+    page_count = (extraction.get("metadata") or {}).get("page_count")
+
+    existing = (
+        db.query(CandidateDocument)
+        .filter(
+            CandidateDocument.candidate_id == candidate.id,
+            CandidateDocument.document_type == DocumentType.SWOT.value,
+        )
+        .first()
+    )
+    if existing:
+        existing.raw_text = raw_text
+        existing.filename = swot_doc.file_name
+        existing.file_path = swot_doc.file_path
+        existing.page_count = page_count
+        db.flush()
+        return True
+
+    cand_doc = CandidateDocument(
+        candidate_id=candidate.id,
+        filename=swot_doc.file_name,
+        file_path=swot_doc.file_path,
+        document_type=DocumentType.SWOT.value,
+        raw_text=raw_text,
+        page_count=page_count,
+    )
+    db.add(cand_doc)
+    db.flush()
+    return True
 
 
 # ---------------------------------------------------------------------------
