@@ -7,8 +7,10 @@ Endpoints:
     GET  /api/recruiter/applications       — Recruiter+; list submitted applications
 
 Rules:
-    * One application per user for the current period. The candidate sees a
-      409 if they try to POST a second one.
+    * Current implementation allows one application per user globally. The
+      candidate sees a 409 if they try to POST a second one. If multi-period
+      re-application is needed later, widen the model/check to
+      (user_id, period_id).
     * Submission requires one Document per DocumentType (D-01 … D-06). The
       endpoint returns the list of missing doc_types on failure.
     * After submission, status transitions out of ``draft`` and the document
@@ -109,7 +111,12 @@ def create_application(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Create a new application. One per candidate per active period."""
+    """Create a new application.
+
+    There is currently at most one application per candidate globally, not one
+    application per recruitment period. Multi-period re-application would need
+    a `(user_id, period_id)` uniqueness model.
+    """
     existing = (
         db.query(Application).filter(Application.user_id == current_user.id).first()
     )
@@ -357,111 +364,86 @@ def list_submitted_applications(
     By default returns every application whose status has moved past
     ``draft``. Can be narrowed with ``division`` and ``status`` query
     params (Task 6 will consume these).
-
-    Task 12.5: each row carries ``rank`` (1-based, by composite_score DESC
-    within its division across all submitted apps; None if not evaluated)
-    and ``is_recommended`` (True iff active period has ``threshold_n`` and
-    ``rank <= threshold_n``). Both are computed at query time.
     """
-    # Fetch Application + User in one round trip (was N+1 — one User SELECT
-    # per row in the old code). joinedload emits a LEFT OUTER JOIN, so a
-    # null user_id (shouldn't happen given the FK, but defensively) still
-    # produces an Application row.
-    q = db.query(Application).options(joinedload(Application.user))
-    if status_filter is None:
-        q = q.filter(Application.status != ApplicationStatus.DRAFT)
-    else:
-        q = q.filter(Application.status == status_filter)
-    if division is not None:
+    q = (
+        db.query(Application)
+        .options(joinedload(Application.user), joinedload(Application.documents))
+        .filter(Application.status != ApplicationStatus.DRAFT)
+    )
+    if division:
         q = q.filter(Application.division == division)
+    if status_filter:
+        q = q.filter(Application.status == status_filter)
 
-    rows = q.order_by(Application.submitted_at.desc().nullslast()).all()
+    apps = q.order_by(Application.submitted_at.desc().nullslast()).all()
 
-    # ---- Task 12.5: per-division rank from composite_score --------------
-    # Build (app_id -> composite_score) for every row whose user has a
-    # Candidate eval record, then rank within division. We rank across the
-    # *filtered* result set so the recruiter sees ranks consistent with
-    # whatever they're currently viewing.
-    user_ids = [app.user_id for app in rows]
-    scored_by_user: dict[int, Candidate] = {}
-    if user_ids:
-        for c in (
-            db.query(Candidate)
-            .filter(Candidate.user_id.in_(user_ids))
-            .order_by(Candidate.created_at.desc())
-            .all()
-        ):
-            # Keep the newest per user (sorted DESC, so first-write wins).
-            scored_by_user.setdefault(c.user_id, c)
+    # Build rank lookup per division based on composite_score (desc), ignoring
+    # unscored candidates. Rank is computed within the current filtered set so
+    # UI filters and counts stay intuitive.
+    candidate_by_user = {
+        c.user_id: c for c in db.query(Candidate).filter(Candidate.user_id.isnot(None)).all()
+    }
+    scored_by_division: dict[str, list[tuple[Application, Candidate]]] = {}
+    for app in apps:
+        cand = candidate_by_user.get(app.user_id)
+        if cand and cand.composite_score is not None:
+            div_value = app.division.value if hasattr(app.division, "value") else str(app.division)
+            scored_by_division.setdefault(div_value, []).append((app, cand))
 
-    # Doc counts in one GROUP BY query instead of N individual COUNT(*)s.
-    app_ids = [a.id for a in rows]
-    if app_ids:
-        doc_counts: dict[int, int] = dict(
-            db.query(Document.application_id, func.count(Document.id))
-            .filter(Document.application_id.in_(app_ids))
-            .group_by(Document.application_id)
-            .all()
-        )
-    else:
-        doc_counts = {}
-
-    by_division: dict[str, list[tuple[int, float]]] = {}
-    for app in rows:
-        scored = scored_by_user.get(app.user_id)
-        if scored is None or scored.composite_score is None:
-            continue
-        div_key = app.division.value if hasattr(app.division, "value") else str(app.division)
-        by_division.setdefault(div_key, []).append((app.id, scored.composite_score))
-
-    rank_by_app_id: dict[int, int] = {}
-    for div_key, items in by_division.items():
-        items.sort(key=lambda t: t[1], reverse=True)
-        for idx, (app_id, _score) in enumerate(items, start=1):
-            rank_by_app_id[app_id] = idx
+    rank_by_app: dict[int, int] = {}
+    for _div, pairs in scored_by_division.items():
+        pairs.sort(key=lambda pair: pair[1].composite_score or -1, reverse=True)
+        for idx, (app, _cand) in enumerate(pairs, start=1):
+            rank_by_app[app.id] = idx
 
     active_period = (
         db.query(RecruitmentPeriod)
         .filter(RecruitmentPeriod.is_active == True)  # noqa: E712
-        .order_by(RecruitmentPeriod.created_at.desc())
         .first()
     )
     threshold_n = active_period.threshold_n if active_period else None
 
-    data = []
-    for app in rows:
-        user = app.user  # already loaded via joinedload — no extra round trip
-        count = doc_counts.get(app.id, 0)
-        scored = scored_by_user.get(app.user_id) if user else None
+    # One grouped query for document counts; avoids N+1 count queries.
+    count_rows = (
+        db.query(Document.application_id, func.count(Document.id))
+        .filter(Document.application_id.in_([app.id for app in apps]) if apps else False)
+        .group_by(Document.application_id)
+        .all()
+    )
+    doc_counts = {application_id: count for application_id, count in count_rows}
+    required_count = len(DocumentType)
 
-        rank = rank_by_app_id.get(app.id)
-        is_recommended = bool(
-            rank is not None and threshold_n is not None and rank <= threshold_n
-        )
+    items: list[dict] = []
+    for app in apps:
+        doc_count = doc_counts.get(app.id, 0)
+        cand = candidate_by_user.get(app.user_id)
+        rank = rank_by_app.get(app.id)
+        is_recommended = bool(threshold_n and rank and rank <= threshold_n)
 
-        data.append(
-            {
-                **ApplicationOut.from_application(app, count).model_dump(),
-                "doc_completeness_pct": int(round((count / len(DocumentType)) * 100)),
-                "rank": rank,
-                "is_recommended": is_recommended,
-                "candidate": {
-                    "user_id": user.id if user else None,
-                    "full_name": user.full_name if user else None,
-                    "email": user.email if user else None,
-                    "nim": user.nim if user else None,
-                    "faculty": user.faculty if user else None,
-                    "major": user.major if user else None,
-                    "year": user.year if user else None,
-                } if user else None,
-                "evaluation": {
-                    "candidate_id": scored.id,
-                    "anonymous_id": scored.anonymous_id,
-                    "composite_score": scored.composite_score,
-                    "language_score": scored.language_score,
-                    "language_bonus": scored.language_bonus,
-                    "status": scored.status,
-                } if scored else None,
-            }
-        )
-    return {"success": True, "data": data, "error": None}
+        item = ApplicationOut.from_application(app, doc_count).model_dump()
+        item.update({
+            "doc_completeness_pct": round((doc_count / required_count) * 100),
+            "candidate": {
+                "user_id": app.user.id,
+                "full_name": app.user.full_name,
+                "email": app.user.email,
+                "nim": app.user.nim,
+                "faculty": app.user.faculty,
+                "major": app.user.major,
+                "year": app.user.year,
+                "whatsapp": app.user.whatsapp,
+            },
+            "evaluation": {
+                "candidate_id": cand.id,
+                "anonymous_id": cand.anonymous_id,
+                "composite_score": cand.composite_score,
+                "language_score": cand.language_score,
+                "language_bonus": cand.language_bonus,
+                "status": cand.status,
+            } if cand else None,
+            "rank": rank,
+            "is_recommended": is_recommended,
+        })
+        items.append(item)
+
+    return {"success": True, "data": items, "error": None}
