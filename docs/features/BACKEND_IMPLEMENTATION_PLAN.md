@@ -735,6 +735,88 @@ evaluation
 score_distribution
 ```
 
+Example response:
+
+```json
+{
+  "success": true,
+  "data": {
+    "period": {
+      "id": 7,
+      "name": "MBC Recruitment 2026",
+      "current_phase": "EVALUATION",
+      "start_date": "2026-06-01T00:00:00Z",
+      "submission_end_date": "2026-06-10T23:59:59Z",
+      "evaluation_end_date": "2026-06-20T23:59:59Z",
+      "end_date": "2026-06-25T23:59:59Z"
+    },
+    "totals": {
+      "applications": 120,
+      "draft": 18,
+      "submitted": 24,
+      "document_review": 16,
+      "correction_requested": 7,
+      "verified": 20,
+      "screening": 25,
+      "announced_pass": 8,
+      "announced_fail": 2,
+      "cancelled": 0
+    },
+    "by_division": [
+      {
+        "division": "big_data",
+        "applications": 35,
+        "submitted": 8,
+        "document_review": 5,
+        "verified": 7,
+        "screening": 10,
+        "announced_pass": 3,
+        "announced_fail": 1
+      },
+      {
+        "division": "cyber_security",
+        "applications": 30,
+        "submitted": 6,
+        "document_review": 4,
+        "verified": 5,
+        "screening": 8,
+        "announced_pass": 2,
+        "announced_fail": 1
+      }
+    ],
+    "document_completeness": {
+      "average_pct": 91.4,
+      "complete_applications": 96,
+      "incomplete_applications": 24,
+      "missing_by_type": {
+        "cv": 3,
+        "khs": 5,
+        "ktm": 2,
+        "motivation_letter": 4,
+        "swot": 6,
+        "supporting_docs": 12
+      }
+    },
+    "evaluation": {
+      "screening_eligible_count": 20,
+      "pending_evaluation_count": 14,
+      "evaluated_count": 35,
+      "average_score": 78.6,
+      "highest_score": 94.2,
+      "lowest_score": 51.0
+    },
+    "score_distribution": [
+      { "bucket": "0-59", "count": 3 },
+      { "bucket": "60-69", "count": 7 },
+      { "bucket": "70-79", "count": 12 },
+      { "bucket": "80-89", "count": 10 },
+      { "bucket": "90-100", "count": 3 }
+    ]
+  },
+  "error": null
+}
+```
+
 Required metrics:
 
 - total applications
@@ -809,6 +891,64 @@ limit
 total
 items[]
 ```
+
+Example response:
+
+```json
+{
+  "success": true,
+  "data": {
+    "page": 1,
+    "limit": 20,
+    "total": 42,
+    "items": [
+      {
+        "id": 101,
+        "action_type": "document_verification",
+        "actor": {
+          "user_id": 5,
+          "full_name": "Recruiter MBC",
+          "email": "recruiter@example.com",
+          "role": "recruiter"
+        },
+        "affected_user": {
+          "user_id": 17,
+          "full_name": "Budi Santoso",
+          "email": "candidate@example.com",
+          "nim": "1031234567890"
+        },
+        "old_value": "false",
+        "new_value": "true",
+        "reason": "doc_id=88; doc_type=supporting_docs",
+        "timestamp": "2026-06-12T09:30:00Z"
+      },
+      {
+        "id": 100,
+        "action_type": "score_override",
+        "actor": {
+          "user_id": 6,
+          "full_name": "Lead Reviewer",
+          "email": "lead@example.com",
+          "role": "super_admin"
+        },
+        "affected_user": {
+          "user_id": 18,
+          "full_name": "Siti Aminah",
+          "email": "siti@example.com",
+          "nim": "1031234567891"
+        },
+        "old_value": "72.0",
+        "new_value": "80.0",
+        "reason": "Manual review found stronger portfolio evidence.",
+        "timestamp": "2026-06-12T08:15:00Z"
+      }
+    ]
+  },
+  "error": null
+}
+```
+
+Default sorting should be newest first by `timestamp DESC`. The response may include user summaries for readability, but it should not expose sensitive fields such as password hashes, raw JWT data, verification/reset secrets, or internal stack traces.
 
 Each item should include:
 
