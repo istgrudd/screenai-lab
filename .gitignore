@@ -14,7 +14,8 @@ venv/
 .env
 
 # docs
-docs/*
+docs/reports/
+docs/archive/
 
 # Data (local only — never commit)
 data/raw_pdfs/
