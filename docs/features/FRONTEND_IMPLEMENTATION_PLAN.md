@@ -528,12 +528,18 @@ Implementation notes:
 **Should show:**
 
 - division selector
-- pending submitted applications per division
+- verified / screening-eligible applications per division
 - run evaluation button
 - re-evaluate button if candidates are already scored
 - warning if outside evaluation phase
 - result summary after evaluation
 - per-application errors
+
+**Eligibility wording:**
+
+- In the current backend, this may still map to submitted applications.
+- After the document verification gate is implemented, the evaluation queue should use `verified` applications or any backend-defined screening-eligible state.
+- Avoid labeling every submitted application as evaluation-ready because submitted documents may still be pending review or correction.
 
 **Actions:**
 
