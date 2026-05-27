@@ -349,26 +349,31 @@ Analytics is a key new full-stack feature. It should not be implemented as a pur
 The first analytics version should include:
 
 - Applicants per division
-- Funnel counts:
+- Funnel counts by application status:
   - draft
   - submitted
+  - document_review
+  - correction_requested
+  - verified
   - screening
-  - announced pass
-  - announced fail
+  - announced_pass
+  - announced_fail
+  - cancelled
 - Document completeness:
   - average completeness percentage
   - missing document counts by document type
   - fully complete applications
 - Evaluation progress:
-  - submitted but not evaluated
-  - evaluated/screening
-  - announced
+  - screening_eligible_count
+  - pending_evaluation_count
+  - evaluated_count
+  - announced count
 - Score distribution:
-  - 0-20
-  - 21-40
-  - 41-60
-  - 61-80
-  - 81-100
+  - 0-59
+  - 60-69
+  - 70-79
+  - 80-89
+  - 90-100
 - Top-level active-period summary:
   - active period name
   - current phase
@@ -412,10 +417,11 @@ Recommended scripts:
 |---|---|
 | Email verification | `scripts/smoke_test_email_verification.py` |
 | Forgot password | `scripts/smoke_test_forgot_password.py` |
-| Analytics | `scripts/smoke_test_analytics.py` |
-| Document rejection reason | `scripts/smoke_test_document_rejection.py` |
-| Audit logs | `scripts/smoke_test_audit_logs.py` |
 | Draft application reset | `scripts/smoke_test_draft_application_reset.py` |
+| Document verification gate | `scripts/smoke_test_document_review_flow.py` |
+| Document rejection reason | `scripts/smoke_test_document_rejection.py` |
+| Analytics | `scripts/smoke_test_analytics.py` |
+| Audit logs | `scripts/smoke_test_audit_logs.py` |
 | Notification service | `scripts/smoke_test_email_notifications.py` |
 
 ### 12.2 Frontend-only features

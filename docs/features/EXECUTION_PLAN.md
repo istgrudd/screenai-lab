@@ -74,10 +74,10 @@ candidate register
 -> create application draft
 -> upload documents
 -> review & submit
--> application status: submitted
+-> application status: document_review
 -> recruiter verifies uploaded documents
    -> if accepted:
-      -> application status: verified / ready_for_anonymization
+      -> application status: verified
       -> run NER anonymization
       -> application status: screening
       -> AI evaluation
@@ -88,6 +88,7 @@ candidate register
       -> candidate receives notification
       -> candidate uploads replacement document
       -> candidate resubmits document correction
+      -> application status: document_review
       -> recruiter verifies again
 ````
 
@@ -117,26 +118,23 @@ cancelled
 
 Meaning:
 
-| Status                 | Meaning                                                                       |
-| ---------------------- | ----------------------------------------------------------------------------- |
-| `draft`                | Candidate started application but has not submitted.                          |
-| `submitted`            | Candidate submitted application and documents.                                |
-| `document_review`      | Recruiter/admin is checking document correctness.                             |
-| `correction_requested` | One or more documents were rejected and candidate must upload replacement.    |
-| `verified`             | Documents are accepted and application is ready for anonymization/evaluation. |
-| `screening`            | Application has entered AI/manual screening.                                  |
-| `announced_pass`       | Candidate passed after announcement.                                          |
-| `announced_fail`       | Candidate failed after announcement.                                          |
-| `cancelled`            | Candidate/admin cancelled the application before final screening.             |
+| Status                 | Meaning                                                                                                                                                   |
+| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `draft`                | Candidate started application but has not submitted.                                                                                                      |
+| `submitted`            | Legacy/transitional status for submitted applications before they enter explicit document review. New submissions should transition to `document_review`. |
+| `document_review`      | Recruiter/admin is checking document correctness.                                                                                                         |
+| `correction_requested` | One or more documents were rejected and candidate must upload replacement.                                                                                |
+| `verified`             | Documents are accepted and application is ready for anonymization/evaluation.                                                                             |
+| `screening`            | Application has entered AI/manual screening.                                                                                                              |
+| `announced_pass`       | Candidate passed after announcement.                                                                                                                      |
+| `announced_fail`       | Candidate failed after announcement.                                                                                                                      |
+| `cancelled`            | Candidate/admin cancelled the application before final screening.                                                                                         |
 
-Open implementation choice:
+Decision:
 
-* `submitted` may immediately transition to `document_review` after submit.
-* Or submit endpoint may directly set `document_review`.
+The submit endpoint must transition the application to `document_review` after successful final submission.
 
-Recommendation:
-
-Use `document_review` after submit to make the workflow explicit.
+`submitted` may remain in the enum for backward compatibility, migration safety, or legacy records, but new applications should not stay in `submitted` as the active document-review queue state.
 
 ---
 
