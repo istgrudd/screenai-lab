@@ -202,7 +202,7 @@ Target: a self-hosted VPS in the MBC Lab running three Docker containers (fronte
 10. **Wire `GET /api/health` to monitoring** (Uptime Kuma, cron + curl, etc.) — the FastAPI app exposes this endpoint already.
 11. **Backups.** Two things to back up:
     - PostgreSQL: `docker compose exec db pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > backup-$(date +%F).sql`. Run nightly via cron.
-    - Uploaded files in `./data/uploads/`: `rsync` to off-host storage or take a filesystem snapshot. The Postgres volume (`postgres_data`) is managed by Docker; the `pg_dump` above is the canonical backup path.
+    - Uploaded files in `./uploads/`: `rsync` to off-host storage or take a filesystem snapshot. The Postgres volume (`postgres_data`) is managed by Docker; the `pg_dump` above is the canonical backup path.
 12. **Updates.** `git pull && docker compose up --build -d`. Alembic migrations are auto-applied on the next backend boot via the lifespan.
 
 ### Schema migration safety
