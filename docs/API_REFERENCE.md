@@ -539,6 +539,11 @@ Recruiter/super_admin toggles verification flag.
 
 Used mainly for supporting documents manual verification.
 
+**Side effects**
+
+- Writes `AuditLog(action_type="document_verification")` in the same transaction.
+- Response shape is unchanged; no frontend-supplied reason is required.
+
 ---
 
 ## Recruitment Periods (`/api/periods/*`)

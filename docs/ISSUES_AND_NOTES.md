@@ -31,6 +31,9 @@ No other `TODO/FIXME/XXX/HACK` comments exist in `backend/` or `frontend/src/`.
 ### ✅ Score override has no audit trail (Task 14.3) — **Resolved in Batch 2**
 - [backend/routers/candidates.py](../backend/routers/candidates.py) now writes an `AuditLog(action_type="score_override")` row alongside each `DimensionScore` override. See [BATCH_2_REPORT.md](reports/BATCH_2_REPORT.md).
 
+### ✅ Document verification has no audit trail — **Resolved in 2026-05-27 report**
+- [backend/routers/documents.py](../backend/routers/documents.py) now writes an `AuditLog(action_type="document_verification")` row when recruiter/super_admin users toggle `Document.is_verified`. The audit row records the acting recruiter, the owning candidate user, old/new verification values, and document context. See [DOCUMENT_VERIFICATION_AUDIT_REPORT.md](reports/DOCUMENT_VERIFICATION_AUDIT_REPORT.md).
+
 ### ✅ Legacy endpoints not flagged deprecated (Task 14.4) — **Resolved in Batch 2**
 - `POST /api/upload` and `POST /api/evaluate` now set `Deprecation: true` headers and log a `warning` on each call. The Lab pipeline (`/api/documents/upload/{doc_type}` + `/api/recruiter/evaluate/batch`) is the supported path.
 

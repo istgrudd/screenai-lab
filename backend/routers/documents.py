@@ -27,6 +27,7 @@ from sqlalchemy.orm import Session
 from backend.database import get_db
 from backend.middleware.auth_middleware import get_current_user, require_role
 from backend.models.application import Application, ApplicationStatus
+from backend.models.audit import AuditLog
 from backend.models.document import Document, DocumentType
 from backend.models.user import User, UserRole
 from backend.utils.file_storage import (
@@ -289,13 +290,34 @@ def verify_document(
     doc_id: int,
     payload: VerifyRequest,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Toggle the ``is_verified`` flag — used for D-06 Dokumen Pendukung."""
     doc = db.query(Document).filter(Document.id == doc_id).first()
     if not doc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
 
+    app = db.query(Application).filter(Application.id == doc.application_id).first()
+    if not app:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Application missing")
+
+    old_value = doc.is_verified
     doc.is_verified = bool(payload.is_verified)
+
+    doc_type_value = (
+        doc.doc_type.value if hasattr(doc.doc_type, "value") else str(doc.doc_type)
+    )
+    db.add(
+        AuditLog(
+            recruiter_id=current_user.id,
+            candidate_id=app.user_id,
+            action_type="document_verification",
+            old_value=str(old_value),
+            new_value=str(doc.is_verified),
+            reason=f"doc_id={doc.id}; doc_type={doc_type_value}",
+        )
+    )
+
     db.commit()
     db.refresh(doc)
     return {"success": True, "data": _serialize_document(doc), "error": None}
