@@ -35,9 +35,13 @@ services:
     depends_on:
       - db
     volumes:
-      # SQLite dev DB (unused in prod), uploads, raw_pdfs, extracted,
-      # anonymized — all default to ./data/* in backend/config.py.
+      # SQLite dev DB (unused in prod), legacy raw_pdfs/extracted/anonymized
+      # artifacts — all default to ./data/* in backend/config.py.
       - ./data:/app/data
+      # Candidate-submitted application documents. backend/config.py defaults
+      # settings.upload_dir to ./uploads, which resolves to /app/uploads inside
+      # the container, so this mount makes uploads survive container recreation.
+      - ./uploads:/app/uploads
       # HuggingFace IndoBERT cache. First boot downloads ~1.3 GB; mounting
       # the host directory means subsequent restarts skip the download.
       - ./models:/app/models
