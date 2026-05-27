@@ -500,25 +500,45 @@ Must verify:
 
 ### Purpose
 
-Allow candidates to correct mistakes before final submission, especially wrong division selection.
+Allow candidates to correct mistakes before final submission, especially wrong division selection, without silently deleting historical application data.
 
 ### Affected roles
 
 | Role | Impact |
 |---|---|
-| Candidate | Can cancel own draft application. |
-| Super Admin | Can support manual correction if needed. |
+| Candidate | Can cancel their own draft application before final submission. |
+| Super Admin | Can support manual correction if needed, but should not bypass submitted/screening history without a separate admin workflow. |
+
+### Data model plan
+
+Extend `ApplicationStatus` with:
+
+```text
+cancelled
+```
+
+Optional metadata fields can be added if operational audit/history is needed:
+
+```text
+cancelled_at
+cancelled_by_user_id
+cancellation_reason
+```
+
+The first implementation can rely on the `cancelled` status alone if no explicit cancellation metadata is required yet.
 
 ### API contract
 
-#### `DELETE /api/applications/my/draft`
+#### `POST /api/applications/my/draft/cancel`
 
 Rules:
 
 - Candidate only.
-- Only allowed for `draft` application.
-- Submitted/screening/announced applications cannot be cancelled.
-- Uploaded draft documents should be removed or dereferenced safely.
+- Only allowed for the authenticated candidate's own `draft` application.
+- Submitted, document-review, correction-requested, verified, screening, announced, and already-cancelled applications cannot be cancelled through this endpoint.
+- The application status is changed to `cancelled`; the application row is not hard-deleted.
+- Existing draft document rows remain linked to the cancelled application for history/debugging, but they must not appear as active upload state for the candidate's next draft.
+- After cancellation, the candidate may create a new draft application.
 
 Response:
 
@@ -526,17 +546,24 @@ Response:
 {
   "success": true,
   "data": {
+    "application_id": 123,
+    "status": "cancelled",
     "message": "Draft application has been cancelled."
   },
   "error": null
 }
 ```
 
-### Delete vs cancelled status
+### Cancelled status vs hard delete
 
-Recommended first version: hard delete draft application and draft documents only. Drafts are not final submissions, so this keeps the flow simple.
+Use `cancelled` status rather than hard delete. This matches the execution-plan decision and avoids silent data loss while still allowing candidates to restart before final submission.
 
-If audit/history is required later, add a `cancelled` status.
+Implementation implications:
+
+- Application queries that mean "current active application" should exclude `cancelled` unless the route is explicitly history-oriented.
+- `POST /api/applications` should allow a new draft when the candidate's previous application is only `cancelled`.
+- Document upload/list endpoints should resolve against the active draft, not cancelled applications.
+- Recruiter operational lists should omit `cancelled` by default unless a status filter explicitly requests it.
 
 ### Smoke test
 
@@ -548,11 +575,12 @@ scripts/smoke_test_draft_application_reset.py
 
 Must verify:
 
-- Candidate can cancel own draft.
-- Candidate cannot cancel submitted application.
+- Candidate can cancel their own draft.
+- Candidate cannot cancel submitted, document-review, correction-requested, verified, screening, or announced applications.
 - Candidate cannot cancel another user's draft.
 - Candidate can create a new draft after cancellation.
-- Old draft documents are cleaned up or no longer visible.
+- Old draft documents remain linked to the cancelled application but are no longer visible as the active draft's uploaded documents.
+- Recruiter default application listing does not include cancelled drafts.
 
 ---
 

@@ -170,7 +170,6 @@ plan
 
 | Phase    | Type          | Scope                                                     | Main Smoke Tests                                                    |
 | -------- | ------------- | --------------------------------------------------------- | ------------------------------------------------------------------- |
-| Phase 0  | Docs/Baseline | Planning docs and baseline regression check               | existing smoke suite                                                |
 | Phase 1  | Frontend-only | Candidate information architecture refactor               | `npm run build` + manual route checklist                            |
 | Phase 2  | Frontend-only | Recruiter and super-admin navigation/workspace split      | `npm run build` + manual route checklist                            |
 | Phase 3  | Backend-first | Email service + candidate email verification              | `smoke_test_email_verification.py`                                  |
@@ -183,46 +182,6 @@ plan
 | Phase 10 | Full-stack    | Audit log listing + admin audit page                      | `smoke_test_audit_logs.py`                                          |
 | Phase 11 | Full-stack    | Email notifications lifecycle                             | `smoke_test_email_notifications.py`                                 |
 | Phase 12 | Regression    | Final cleanup, docs, regression suite                     | all smoke tests + frontend build                                    |
-
----
-
-# Phase 0 — Documentation and Baseline
-
-## Goal
-
-Create feature planning documents and establish the current baseline before implementation starts.
-
-## Scope
-
-* `docs/features/OVERVIEW.md`
-* `docs/features/FRONTEND_IMPLEMENTATION_PLAN.md`
-* `docs/features/BACKEND_IMPLEMENTATION_PLAN.md`
-* `docs/features/EXECUTION_PLAN.md`
-
-## Validation
-
-Run existing smoke tests before feature implementation:
-
-```bash
-python -m scripts.smoke_test_auth
-python -m scripts.smoke_test_applications
-python -m scripts.smoke_test_bulk_announce
-python -m scripts.smoke_test_evaluation
-```
-
-If frontend dependencies are available:
-
-```bash
-cd frontend
-npm run build
-```
-
-## Done Criteria
-
-* Feature docs exist.
-* Product decisions are documented.
-* Baseline smoke tests are known to pass or known failures are documented.
-* No production code changes are introduced in this phase.
 
 ---
 
@@ -1556,18 +1515,17 @@ docs/features/EXECUTION_PLAN.md
 
 Recommended implementation order:
 
-1. Phase 0 — documentation and baseline.
-2. Phase 1 — candidate frontend IA cleanup.
-3. Phase 2 — recruiter/super admin frontend workspace split.
-4. Phase 3 — email verification backend.
-5. Phase 4 — forgot password and session invalidation backend.
-6. Phase 5 — auth email frontend pages.
-7. Phase 6 — document verification gate backend.
-8. Phase 7 — document rejection/correction full-stack flow.
-9. Phase 8 — NER/evaluation timing adjustment.
-10. Phase 9 — analytics API and dashboard.
-11. Phase 10 — audit log listing and admin page.
-12. Phase 11 — email notification lifecycle.
-13. Phase 12 — final regression and docs.
+1. Phase 1 — candidate frontend IA cleanup.
+2. Phase 2 — recruiter/super admin frontend workspace split.
+3. Phase 3 — email verification backend.
+4. Phase 4 — forgot password and session invalidation backend.
+5. Phase 5 — auth email frontend pages.
+6. Phase 6 — document verification gate backend.
+7. Phase 7 — document rejection/correction full-stack flow.
+8. Phase 8 — NER/evaluation timing adjustment.
+9. Phase 9 — analytics API and dashboard.
+10. Phase 10 — audit log listing and admin page.
+11. Phase 11 — email notification lifecycle.
+12. Phase 12 — final regression and docs.
 
 This order keeps frontend structure clean before large workflow changes, while ensuring backend-critical authentication and document verification features are implemented before analytics and notification polish.

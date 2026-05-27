@@ -10,6 +10,8 @@ The detailed implementation documents live beside this file:
 
 > Status: planning document. The feature list below is intentionally written as an implementation roadmap, not as a record of already completed work.
 
+> Implementation source of truth: `EXECUTION_PLAN.md` contains the locked product decisions, phase order, smoke tests, and done criteria. If this overview conflicts with the execution plan, follow `EXECUTION_PLAN.md`.
+
 ---
 
 ## 1. Background
@@ -488,31 +490,42 @@ These can be considered later after the feature roadmap and core UI/API structur
 
 ---
 
-## 15. Open Decisions
+## 15. Resolved Product Decisions
 
-The following decisions should be resolved before implementation starts:
+The first implementation cycle follows the locked decisions in `EXECUTION_PLAN.md`. The items below replace the previous open-decision list in this overview.
 
-1. Should email verification be required only for candidates, or for all roles?
-2. Should a candidate be able to cancel/reset a draft application independently, or should super admin approval be required?
-3. Should document rejection allow replacement after submit if the recruitment phase is still `SUBMISSION`, or should replacement remain locked after submit?
-4. Should analytics be scoped only to the active period, or should it support all periods from the first version?
-5. Should email templates be database-editable in the first version, or hardcoded in the backend service first?
-6. Should token/session hardening be implemented before or after email verification and forgot password?
+| Area | Decision |
+|---|---|
+| Email verification scope | Required for candidates first. Recruiter and super admin verification can be supported later. |
+| Register flow | Registration creates the account and sends verification email, but does not return a normal access token. |
+| Verification expiry | Verification link/code expires after 60 minutes. Expired users must request resend. |
+| Forgot password session behavior | Successful password reset invalidates older sessions/tokens through a `password_changed_at` strategy. |
+| Admin reset password | Existing super-admin reset remains as a manual fallback/support flow. |
+| Draft reset/cancel | Use a `cancelled` status instead of hard delete, preserving history and avoiding silent data loss. |
+| Document verification | Recruiter verifies submitted documents before NER anonymization and AI evaluation. |
+| Rejected documents | Candidate is notified and can upload replacement documents after rejection. |
+| NER timing | NER anonymization runs only after required documents are verified/accepted. |
+| Analytics scope | Analytics defaults to the active recruitment period. |
+| Email templates | Hardcoded in backend service first; database-editable templates are deferred. |
+| Smoke tests | Every backend/full-stack feature must include a targeted smoke test script. |
 
 ---
 
 ## 16. Recommended First Implementation Sequence
 
-Recommended order:
+Recommended order follows the phase order in `EXECUTION_PLAN.md` after removing the old documentation-only baseline phase:
 
-1. Create this feature documentation set.
-2. Refactor candidate frontend information architecture.
-3. Refactor recruiter frontend information architecture.
-4. Add analytics API and analytics dashboard.
-5. Add email verification and forgot password.
-6. Add document rejection reason and email notification lifecycle.
-7. Add audit log listing and audit viewer.
-8. Add email template/settings UI if needed.
-9. Run final regression smoke tests and update architecture/API docs.
+1. Refactor candidate frontend information architecture.
+2. Split recruiter and super-admin frontend workspaces.
+3. Add email service and candidate email verification.
+4. Add forgot password and session invalidation.
+5. Add auth email frontend pages.
+6. Expand application statuses and add the document verification gate.
+7. Add document rejection/correction UI.
+8. Move NER timing to run after document verification.
+9. Add analytics API and analytics dashboard.
+10. Add audit log listing and admin audit page.
+11. Add email notification lifecycle.
+12. Run final cleanup, documentation updates, and full regression tests.
 
-This sequence keeps the UI foundation stable before adding larger full-stack features.
+This sequence keeps the UI foundation stable first, then implements account-critical flows, then changes the recruitment workflow, and only after that adds analytics, audit viewing, notifications, and final cleanup.

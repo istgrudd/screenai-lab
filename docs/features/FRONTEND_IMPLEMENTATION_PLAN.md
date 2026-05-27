@@ -434,14 +434,36 @@ Account
 
 **State handling:**
 
-| State | UI |
-|---|---|
-| no application | show empty state and CTA to start |
-| draft | show draft progress and CTA to documents/review |
-| submitted | show submitted confirmation and waiting state |
-| screening | show under-review state |
-| announced_pass | show pass result and next step info |
-| announced_fail | show fail result and optional notes |
+The page should support both the current backend statuses and the planned expanded statuses from `EXECUTION_PLAN.md`. New statuses introduced by the document-review workflow should be treated as first-class states, not folded into generic submitted/screening copy.
+
+| State | UI | Primary CTA |
+|---|---|---|
+| no application | Show empty state and explain that the candidate has not started an application. | Start Application |
+| `draft` | Show draft progress, selected division if available, and document completeness. | Continue Documents or Review & Submit |
+| `submitted` | Show submitted confirmation and explain that the application is waiting for recruiter document review. | View Documents |
+| `document_review` | Show that uploaded documents are being checked by recruiter/admin. Candidate should not assume AI screening has started yet. | View Documents |
+| `correction_requested` | Highlight rejected document(s), show rejection reason(s), and explain what must be re-uploaded. | Fix Documents |
+| `verified` | Show that documents have been accepted and the application is ready for anonymization/evaluation. | Track Status |
+| `screening` | Show under-review state and explain that AI/manual screening is in progress. | Track Status |
+| `announced_pass` | Show pass result, announcement notes if any, and next-step instructions. | View Next Steps |
+| `announced_fail` | Show fail result, announcement notes if any, and closure message. | View Notes |
+| `cancelled` | Show that the draft/application was cancelled and prevent normal progress CTAs. | Start New Application if allowed |
+
+Document-review statuses should also affect the progress/journey component:
+
+```text
+Draft -> Submitted -> Document Review -> Verified -> Screening -> Announcement
+                         |
+                         v
+                  Correction Requested
+```
+
+Implementation notes:
+
+- `correction_requested` should prioritize document rejection reasons over generic status copy.
+- `verified` is not the same as `screening`; it means documents are accepted, but evaluation may not have started.
+- `cancelled` should be terminal for the current application record unless the backend explicitly allows reopening.
+- While the backend still returns the old status set, the UI may hide unavailable future states but the component structure should already account for them.
 
 ---
 
