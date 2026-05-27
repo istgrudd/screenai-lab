@@ -46,10 +46,10 @@ export const POST_SUBMIT_STATUSES = new Set([
 
 export const STATUS_LABELS = {
   draft: "Draft",
-  submitted: "Submitted",
-  screening: "Screening",
-  announced_pass: "Passed",
-  announced_fail: "Not passed",
+  submitted: "Pendaftaran",
+  screening: "Evaluasi AI",
+  announced_pass: "Pengumuman",
+  announced_fail: "Pengumuman",
 };
 
 export function formatDivision(division) {

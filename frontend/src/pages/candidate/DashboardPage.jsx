@@ -321,9 +321,9 @@ export default function DashboardPage() {
           {locked && (
             <Card>
               <CardHeader className="pb-3">
-                <CardTitle className="text-lg">Recruitment Journey</CardTitle>
+                <CardTitle className="text-lg">Tahapan Seleksi</CardTitle>
                 <CardDescription>
-                  Where your application is in the pipeline right now.
+                  Pendaftaran, Evaluasi AI, dan Pengumuman.
                 </CardDescription>
               </CardHeader>
               <CardContent>

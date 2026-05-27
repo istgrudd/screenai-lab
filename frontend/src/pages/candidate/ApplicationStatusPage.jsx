@@ -158,20 +158,20 @@ function StatusHero({ application, announcement }) {
     : "bg-primary/10 text-primary";
 
   const title = isPass
-    ? "You passed"
+    ? "Pengumuman: Lolos"
     : isFail
-    ? "You did not pass"
+    ? "Pengumuman: Tidak Lolos"
     : status === "screening"
-    ? "Application under review"
-    : "Application submitted";
+    ? "Tahap Evaluasi AI"
+    : "Tahap Pendaftaran";
 
   const description = isPass
-    ? "Congratulations. Keep an eye on official follow-up information from the recruitment team."
+    ? "Hasil akhir sudah diumumkan. Selamat, kamu lolos seleksi."
     : isFail
-    ? "Thank you for applying to MBC Laboratory. The published result is shown below."
+    ? "Hasil akhir sudah diumumkan. Terima kasih sudah mendaftar di MBC Laboratory."
     : status === "screening"
-    ? "Your application is being reviewed. Results will appear here once announced."
-    : "Your application has been received. You can track the journey here.";
+    ? "Aplikasi kamu sedang berada di tahap Evaluasi AI."
+    : "Aplikasi dan dokumen kamu sudah diterima pada tahap Pendaftaran.";
 
   return (
     <Card className={announced ? "overflow-hidden" : ""}>
@@ -201,7 +201,7 @@ function StatusHero({ application, announcement }) {
             </Badge>
           </span>
           <span>
-            Submitted:{" "}
+            Dikirim:{" "}
             {formatDateTime(application.submitted_at, "Not submitted yet")}
           </span>
           <span className="inline-flex items-center gap-1">
@@ -312,9 +312,9 @@ export default function ApplicationStatusPage() {
 
           <Card>
             <CardHeader className="pb-3">
-              <CardTitle className="text-lg">Recruitment Journey</CardTitle>
+              <CardTitle className="text-lg">Tahapan Seleksi</CardTitle>
               <CardDescription>
-                Where your application is in the current pipeline.
+                Pendaftaran, Evaluasi AI, dan Pengumuman.
               </CardDescription>
             </CardHeader>
             <CardContent>

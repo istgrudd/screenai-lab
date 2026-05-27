@@ -12,6 +12,29 @@ import {
 } from "@/components/ui/tooltip";
 import { updateMyProfile } from "@/lib/api";
 
+const WHATSAPP_ERROR =
+  "Nomor WhatsApp tidak valid. Gunakan format 08..., 628..., atau +628...";
+
+function isValidIndonesianWhatsapp(value) {
+  const trimmed = value.trim();
+  if (!trimmed) return true;
+  if (!/^\+?[\d\s().-]+$/.test(trimmed)) return false;
+
+  const normalized = trimmed.replace(/[\s().-]/g, "");
+  if (!/^\+?\d+$/.test(normalized)) return false;
+
+  const digits = normalized.startsWith("+")
+    ? normalized.slice(1)
+    : normalized;
+  if (digits.length < 10 || digits.length > 15) return false;
+
+  return (
+    /^08\d+$/.test(normalized) ||
+    /^628\d+$/.test(normalized) ||
+    /^\+628\d+$/.test(normalized)
+  );
+}
+
 function LockHint() {
   return (
     <Tooltip>
@@ -63,6 +86,10 @@ export default function CandidateProfileForm({ profile, locked, onSaved }) {
     }
     if (password && password.length < 8) {
       toast.error("Password minimal 8 karakter.");
+      return;
+    }
+    if (!isValidIndonesianWhatsapp(whatsapp || "")) {
+      toast.error(WHATSAPP_ERROR);
       return;
     }
 
