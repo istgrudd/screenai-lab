@@ -29,8 +29,8 @@ uploads/*
 # Vector store persistence
 backend/vectorstore/
 
-# NER model cache
-models/
+# NER model cache (repo root only)
+/models/
 
 # IDE
 .vscode/
