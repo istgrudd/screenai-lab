@@ -4,6 +4,8 @@ This document describes the planned backend work for the ScreenAI Lab feature ex
 
 > Status: planning document. The content below describes intended work, not completed work.
 
+> Execution alignment: product decisions and cross-stack phase order follow `EXECUTION_PLAN.md`. This backend plan provides the backend-specific contracts, models, and smoke-test details needed to implement those phases.
+
 ---
 
 ## 1. Goals
@@ -15,13 +17,14 @@ The planned backend goals are:
 1. Add email verification for new accounts.
 2. Add self-service forgot password through email-based reset links.
 3. Keep the existing super-admin assisted password reset as a manual fallback.
-4. Add analytics endpoints for recruiter and super-admin dashboards.
-5. Add document rejection reason and candidate-facing visibility.
-6. Add audit log listing for super-admin oversight.
-7. Add a reusable email service abstraction for Resend.
-8. Add draft application reset/cancel behavior.
-9. Prepare safer session/token behavior for password changes.
-10. Add smoke test scripts for every new backend or full-stack feature.
+4. Add application status expansion and a document-verification gate before NER/evaluation.
+5. Add document rejection reason and candidate-facing correction visibility.
+6. Add analytics endpoints for recruiter and super-admin dashboards.
+7. Add audit log listing for super-admin oversight.
+8. Add a reusable email service abstraction for Resend.
+9. Add draft application reset/cancel behavior.
+10. Prepare safer session/token behavior for password changes.
+11. Add smoke test scripts for every new backend or full-stack feature.
 
 ---
 
@@ -79,9 +82,10 @@ Every backend or full-stack feature should include a targeted smoke test under `
 | Email verification | P0 | Candidate, Super Admin | Verify registered email before full account access. |
 | Forgot password | P0 | Candidate, Recruiter, Super Admin | Self-service account recovery through email. |
 | Email service abstraction | P0/P1 | All roles | Centralize Resend integration and test mode. |
-| Analytics API | P1 | Recruiter, Super Admin | Recruitment metrics for dashboards. |
+| Application status expansion + document verification gate | P1 | Candidate, Recruiter, Super Admin | Add explicit document-review states and prevent NER/evaluation before documents are verified. |
 | Draft application reset/cancel | P1 | Candidate, Super Admin | Allow correction before final submission. |
-| Document rejection reason | P1 | Candidate, Recruiter, Super Admin | Make document verification actionable. |
+| Document rejection reason | P1 | Candidate, Recruiter, Super Admin | Make document verification actionable and allow correction for rejected documents. |
+| Analytics API | P1 | Recruiter, Super Admin | Recruitment metrics for dashboards. |
 | Audit log listing | P1 | Super Admin | View audit trail from the UI. |
 | Email notification lifecycle | P1 | Candidate, Recruiter, Super Admin | Notify users about key workflow events. |
 | Email template/settings support | P2 | Super Admin | Optional configurable email templates. |
@@ -674,11 +678,17 @@ rejection_reason
 reviewed_at
 ```
 
-### Replacement behavior decision
+### Replacement behavior
 
-Open decision: should rejected documents be replaceable after submit?
+Rejected documents are replaceable after submit while the application is in `correction_requested`. This is a locked workflow decision for the first implementation cycle.
 
-Default recommendation: keep the current post-submit lock unless recruitment policy explicitly allows corrections after submission.
+Rules:
+
+- Only rejected document types may be replaced. Verified documents should remain locked.
+- Candidate replacement should not bypass recruiter/admin review.
+- After replacement, the application should return to `document_review` or a backend-defined correction-submitted state if one is introduced later.
+- The document list/status endpoint should clearly expose which documents are rejected, which are verified, and which are awaiting review.
+- Evaluation must remain blocked while any required document is rejected or pending review.
 
 ### Smoke test
 
@@ -1097,6 +1107,7 @@ Expected Alembic migrations:
 | Forgot password | `scripts/smoke_test_forgot_password.py` |
 | Analytics | `scripts/smoke_test_analytics.py` |
 | Draft application reset | `scripts/smoke_test_draft_application_reset.py` |
+| Document verification gate | `scripts/smoke_test_document_review_flow.py` |
 | Document rejection reason | `scripts/smoke_test_document_rejection.py` |
 | Audit log listing | `scripts/smoke_test_audit_logs.py` |
 | Email notifications | `scripts/smoke_test_email_notifications.py` |
@@ -1135,7 +1146,8 @@ After implementing a new feature, run related existing smoke tests.
 | Email verification | `smoke_test_auth` |
 | Forgot password | `smoke_test_auth` |
 | Draft reset | `smoke_test_applications` |
-| Document rejection | `smoke_test_document_verification_audit` |
+| Document verification gate | `smoke_test_applications`, `smoke_test_evaluation`, `smoke_test_document_review_flow` |
+| Document rejection | `smoke_test_document_verification_audit`, `smoke_test_document_rejection` |
 | Analytics | `smoke_test_applications`, `smoke_test_evaluation`, `smoke_test_bulk_announce` |
 | Audit logs | document verification audit, announcement tests, score override path if covered |
 
@@ -1178,10 +1190,10 @@ Verification/reset link secrets should not be stored in plaintext.
 
 Recommended durations:
 
-| Flow | Suggested expiry |
+| Flow | Expiry |
 |---|---|
-| Email verification | 60 minutes to 24 hours |
-| Forgot password | 30 to 60 minutes |
+| Email verification | 60 minutes for the first implementation cycle. |
+| Forgot password | 30 to 60 minutes. |
 
 ### 17.4 Rate limiting
 
@@ -1209,24 +1221,39 @@ Consider audit logging for:
 
 ---
 
-## 18. Open Backend Decisions
+## 18. Resolved and Deferred Backend Decisions
 
-Resolve these before implementation:
+The first implementation cycle follows the locked decisions in `EXECUTION_PLAN.md`. The items below replace the previous open-decision list so backend implementation does not branch into conflicting behavior.
 
-1. Should email verification be required only for candidates first, or for all roles?
-2. Should register return no token after account creation, or a limited verification-only response?
-3. Should verification link expiry be 60 minutes or 24 hours?
-4. Should changing email require pending-email verification?
-5. Should draft cancellation hard-delete the draft or add a `cancelled` status?
-6. Should rejected documents be replaceable after submit if the phase is still `SUBMISSION`?
-7. Should analytics default to active period only, or support all periods from the first version?
-8. Should email notifications be logged in the database from the first version?
-9. Should email templates be hardcoded first or database-configurable from the first version?
-10. Should password reset immediately invalidate existing active sessions?
+### 18.1 Resolved for the first implementation cycle
+
+| Area | Decision |
+|---|---|
+| Email verification scope | Required for candidates first. Recruiter and super admin verification can be supported later. |
+| Register flow | Registration does not return a normal access token. User must verify email before normal login. |
+| Verification expiry | Verification link/code expires after 60 minutes. |
+| Forgot password session behavior | Successful password reset invalidates older sessions/tokens through `password_changed_at`. |
+| Admin reset password | Existing super-admin reset remains as a manual support fallback and should also update `password_changed_at`. |
+| Draft cancellation | Use `cancelled` status rather than hard delete. |
+| Rejected document replacement | Candidate can replace rejected documents while the application is in `correction_requested`. |
+| Analytics scope | Analytics defaults to the active recruitment period, with optional `period_id` override. |
+| Email templates | Hardcoded service templates first; database-editable templates are deferred. |
+| NER/evaluation timing | NER anonymization and AI evaluation run only after required documents are verified/accepted. |
+
+### 18.2 Deferred decisions
+
+These decisions can be addressed after the first implementation cycle without blocking the current phases:
+
+1. Should changing email require a pending-email verification flow?
+2. Should email notifications be logged in the database from the first version, or added after email delivery is stable?
+3. Should recruiter and super-admin accounts also require email verification in a later phase?
+4. Should all-period analytics or export/reporting be added after the active-period analytics endpoint is stable?
 
 ---
 
 ## 19. Recommended First Backend Batches
+
+The backend batch order below is aligned with `EXECUTION_PLAN.md`: account-critical flows first, then recruitment workflow changes, then analytics and audit visibility.
 
 ### Batch B1 — Email service and verification
 
@@ -1238,34 +1265,55 @@ Resolve these before implementation:
 6. Update API docs for auth changes.
 7. Run auth and verification smoke tests.
 
-### Batch B2 — Forgot password
+### Batch B2 — Forgot password and session invalidation
 
 1. Add password reset link table.
 2. Add forgot-password and reset-password endpoints.
-3. Add password-change timestamp if session invalidation is included.
-4. Add `scripts/smoke_test_forgot_password.py`.
-5. Confirm admin reset still works.
+3. Add `password_changed_at` and reject JWTs issued before the latest password change.
+4. Ensure admin reset also updates `password_changed_at`.
+5. Add `scripts/smoke_test_forgot_password.py` and `scripts/smoke_test_token_invalidation.py`.
+6. Confirm admin reset still works.
 
-### Batch B3 — Analytics API
+### Batch B3 — Application status expansion and document verification gate
+
+1. Add planned application statuses: `document_review`, `correction_requested`, `verified`, and `cancelled`.
+2. Add document review fields and review endpoint.
+3. Transition submitted applications into `document_review`.
+4. Mark applications as `verified` only when all required documents are accepted.
+5. Block NER anonymization and AI evaluation until the application is `verified` or another backend-defined screening-eligible state.
+6. Add `scripts/smoke_test_document_review_flow.py`.
+
+### Batch B4 — Document rejection and correction flow
+
+1. Require rejection reason when a document is rejected.
+2. Set application status to `correction_requested` when required documents are rejected.
+3. Allow candidate replacement only for rejected document types.
+4. Return replacement submissions to document review.
+5. Add audit logging and candidate visibility for rejection reasons.
+6. Add `scripts/smoke_test_document_rejection.py`.
+
+### Batch B5 — NER timing update after document verification
+
+1. Move submit-time anonymization so it runs after required documents are verified/accepted.
+2. Preserve fallback behavior where evaluation can trigger anonymization if cached text is missing.
+3. Ensure SWOT raw-text cache still follows the chosen post-verification timing.
+4. Rerun application and evaluation smoke tests.
+
+### Batch B6 — Analytics API
 
 1. Add recruiter analytics endpoint.
-2. Add aggregate queries for funnel, division counts, document completeness, and score buckets.
-3. Add `scripts/smoke_test_analytics.py`.
-4. Support frontend analytics dashboard.
+2. Add aggregate queries for funnel, division counts, document completeness, evaluation progress, and score buckets.
+3. Use screening-eligible/evaluated wording instead of treating every submitted application as evaluation-ready.
+4. Add `scripts/smoke_test_analytics.py`.
+5. Support frontend analytics dashboard.
 
-### Batch B4 — Document rejection
-
-1. Add document review fields.
-2. Add document review endpoint.
-3. Add audit logging and candidate visibility.
-4. Add `scripts/smoke_test_document_rejection.py`.
-
-### Batch B5 — Audit log listing
+### Batch B7 — Audit log listing
 
 1. Add audit log listing endpoint.
 2. Add pagination/filtering.
-3. Add `scripts/smoke_test_audit_logs.py`.
-4. Support admin audit log page.
+3. Keep default sorting as newest first by `timestamp DESC`.
+4. Add `scripts/smoke_test_audit_logs.py`.
+5. Support admin audit log page.
 
 ---
 

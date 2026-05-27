@@ -4,6 +4,8 @@ This document describes the planned frontend restructuring for ScreenAI Lab. It 
 
 > Status: planning document. The implementation details below describe intended work, not completed work.
 
+> Execution note: frontend phases and route details in this file are implementation guidance. Cross-stack phase order, locked product decisions, and done criteria follow `EXECUTION_PLAN.md`.
+
 ---
 
 ## 1. Goals
@@ -201,7 +203,7 @@ Account
 | `/profile/edit` | CandidateEditProfilePage | New | Edit profile, password, WhatsApp, and editable academic fields. |
 | `/application` | CandidateApplicationOverviewPage | New/refactor | Application overview and start/resume CTA. |
 | `/application/start` | CandidateStartApplicationPage | New | Division selection and application creation. |
-| `/documents` | CandidateDocumentsPage | Keep/refine | Upload and replace required documents while application is draft. |
+| `/documents` | CandidateDocumentsPage | Keep/refine | Upload/manage required documents while draft; support read-only and correction states after submit. |
 | `/application/review` | CandidateReviewSubmitPage | Move/rename | Final review and submit step. |
 | `/application/status` | CandidateApplicationStatusPage | New/merge | Combined submitted/status/result page. |
 | `/result` | Redirect | Deprecated | Redirect to `/application/status`. |
@@ -382,7 +384,9 @@ Account
 **Behavior:**
 
 - If no application exists, redirect or CTA to `/application/start`.
-- If application is not draft, show read-only document list or redirect to status depending on UX decision.
+- If application is `draft`, allow upload/replacement for required documents.
+- If application is `submitted`, `document_review`, `verified`, `screening`, or announced, show the document list in read-only mode and link back to `/application/status` for progress/result context.
+- If application is `correction_requested`, allow replacement only for rejected document types; verified or still-pending documents remain read-only unless backend policy changes.
 
 ### 6.7 Candidate Review & Submit
 
@@ -870,6 +874,8 @@ Planned backend APIs that later frontend phases will consume:
 
 ## 13. Frontend Implementation Sequence
 
+The sequence below is a frontend-focused breakdown. The cross-stack implementation order remains governed by `EXECUTION_PLAN.md`; when a frontend phase depends on a backend endpoint, implement and smoke-test the backend contract first.
+
 ### Phase F1 — Candidate information architecture cleanup
 
 Scope:
@@ -900,7 +906,7 @@ Manual route checks:
 - candidate can view application status/result
 - old `/submitted`, `/result`, `/review` routes still behave safely
 
-### Phase F2 — Recruiter workspace split
+### Phase F2 — Recruiter and super-admin workspace split
 
 Scope:
 
@@ -911,27 +917,6 @@ Scope:
 - create candidates page
 - move dashboard table/action logic into focused components
 - update recruiter sidebar
-
-Expected checks:
-
-```bash
-cd frontend
-npm run build
-```
-
-Manual route checks:
-
-- recruiter can open dashboard overview
-- recruiter can filter applications
-- recruiter can run evaluation
-- recruiter can re-evaluate when applicable
-- recruiter can select candidates for announcement
-- recruiter can open candidate detail
-
-### Phase F3 — Super admin navigation cleanup
-
-Scope:
-
 - group admin navigation
 - keep existing users/periods pages
 - add placeholder pages for audit logs/settings/templates if backend is not ready yet
@@ -946,35 +931,17 @@ npm run build
 
 Manual route checks:
 
+- recruiter can open dashboard overview
+- recruiter can filter applications
+- recruiter can run evaluation using verified/screening-eligible wording
+- recruiter can re-evaluate when applicable
+- recruiter can select candidates for announcement
+- recruiter can open candidate detail
 - super admin sees admin navigation group
 - recruiter does not see admin-only pages
 - candidate cannot access admin/recruiter pages
 
-### Phase F4 — Analytics UI
-
-Scope:
-
-- add analytics route/page
-- add metric cards and charts
-- consume backend analytics endpoint once available
-- show empty states and loading/error states
-
-Expected checks:
-
-```bash
-cd frontend
-npm run build
-python -m scripts.smoke_test_analytics
-```
-
-Manual route checks:
-
-- recruiter and super admin can view analytics
-- candidate cannot view analytics
-- empty analytics state is readable
-- charts render from seeded test data
-
-### Phase F5 — Auth email UI
+### Phase F3 — Auth email UI
 
 Scope:
 
@@ -1002,13 +969,14 @@ Manual route checks:
 - forgot password page handles submitted email safely
 - reset password page handles token success/expired/invalid states
 
-### Phase F6 — Document rejection UI
+### Phase F4 — Document rejection/correction UI
 
 Scope:
 
 - add rejection reason UI on recruiter document verification page
 - show rejection reason on candidate documents/status page
 - add document status badges
+- allow replacement CTA only for rejected document types in `correction_requested`
 - add notification copy if backend email notification is ready
 
 Expected checks:
@@ -1023,9 +991,34 @@ Manual route checks:
 
 - recruiter can reject document with reason
 - candidate can see rejection reason
-- candidate sees clear next action if replacement is allowed
+- candidate can replace rejected document types when the application is `correction_requested`
+- candidate cannot replace verified documents unless backend policy changes
 
-### Phase F7 — Audit/settings UI
+### Phase F5 — Analytics UI
+
+Scope:
+
+- add analytics route/page
+- add metric cards and charts
+- consume backend analytics endpoint once available
+- show empty states and loading/error states
+
+Expected checks:
+
+```bash
+cd frontend
+npm run build
+python -m scripts.smoke_test_analytics
+```
+
+Manual route checks:
+
+- recruiter and super admin can view analytics
+- candidate cannot view analytics
+- empty analytics state is readable
+- charts render from seeded test data
+
+### Phase F6 — Audit/settings UI
 
 Scope:
 
@@ -1125,17 +1118,29 @@ Run this checklist after each frontend refactor phase.
 
 ---
 
-## 16. Open Frontend Decisions
+## 16. Resolved and Deferred Frontend Decisions
 
-Before implementation, resolve these decisions:
+The decisions below replace the previous open-decision list. The goal is to keep Phase 1 and Phase 2 implementable without re-litigating route structure during execution.
 
-1. Should `/` remain recruiter/super admin dashboard, or should it redirect to `/recruiter/dashboard` / `/admin/dashboard`?
-2. Should candidate `Application Overview` be a separate route or part of dashboard?
-3. Should `My Applications` remain visible before true multi-period support exists?
-4. Should profile routes be unified as `/profile` and `/profile/edit` for all roles, or remain role-prefixed for recruiter/admin?
-5. Should audit logs/settings/email templates be added as placeholder pages before backend endpoints exist?
-6. Should candidate documents remain viewable read-only after submit, or should post-submit document access live only inside application status?
-7. Should analytics be available under recruiter navigation only, or also as a separate admin analytics page?
+### 16.1 Resolved for the first implementation cycle
+
+| Area | Decision |
+|---|---|
+| Canonical dashboards | Use `/recruiter/dashboard` and `/admin/dashboard` as canonical dashboard routes. `/` may remain as a compatibility route that redirects based on authenticated role. |
+| Candidate application overview | Keep `CandidateApplicationOverviewPage` as a separate `/application` route. The dashboard remains a summary/next-action hub, not the full application workspace. |
+| `My Applications` visibility | Keep `/my-applications` accessible for compatibility, but remove it from the main candidate sidebar until true multi-period application support exists. |
+| Profile routes | Candidate uses `/profile` and `/profile/edit`. Recruiter and super admin use role-prefixed routes (`/recruiter/profile`, `/admin/profile`, and edit variants) while sharing reusable profile components internally. |
+| Admin placeholder pages | Add audit logs, settings, and email-template placeholder pages during the admin workspace split if backend endpoints are not ready yet. Placeholders must clearly say which backend support is pending. |
+| Candidate documents after submit | Keep `/documents` available after submit as a read-only document list. In `correction_requested`, allow replacement only for rejected document types. Application status should link to documents when review/correction is needed. |
+| Analytics route | Use `/recruiter/analytics` as the shared analytics workspace for recruiter and super admin in the first version. Admin dashboard may show analytics summaries, but a separate `/admin/analytics` route is deferred. |
+
+### 16.2 Deferred frontend decisions
+
+| Area | Deferred decision |
+|---|---|
+| Dedicated admin analytics route | Revisit `/admin/analytics` only after the shared analytics workspace and admin dashboard summary are implemented. |
+| Email template editing UI | Keep templates hardcoded/read-only first. Add editable template UI only if the backend exposes database-backed templates. |
+| Long-term document UX | After correction flow is used in practice, decide whether read-only documents should remain a separate route or be folded more tightly into application status. |
 
 ---
 
