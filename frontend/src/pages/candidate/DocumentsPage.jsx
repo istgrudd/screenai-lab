@@ -28,51 +28,12 @@ import {
   listApplicationDocuments,
   uploadApplicationDocument,
 } from "@/lib/api";
-
-// Step order follows PRD Section 4 / F-26: CV → Motivation Letter → KHS
-// → KTM → SWOT → Dokumen Pendukung.
-const STEPS = [
-  {
-    doc_type: "cv",
-    label: "Curriculum Vitae",
-    short: "CV",
-    tip: "Up-to-date CV highlighting projects, achievements, and skills relevant to your chosen division.",
-  },
-  {
-    doc_type: "motivation_letter",
-    label: "Motivation Letter",
-    short: "Motivation",
-    tip: "Explain why you want to join this division and how your interests align with its research focus.",
-  },
-  {
-    doc_type: "khs",
-    label: "KHS / Transcript",
-    short: "KHS",
-    tip: "Most recent official transcript (KHS) from iGracias. Make sure IPK and semester breakdown are visible.",
-  },
-  {
-    doc_type: "ktm",
-    label: "KTM / Student ID",
-    short: "KTM",
-    tip: "Scan or photo of your active KTM showing your NIM and program clearly.",
-  },
-  {
-    doc_type: "swot",
-    label: "SWOT Analysis",
-    short: "SWOT",
-    tip: "A one-page self-assessment: Strengths, Weaknesses, Opportunities, Threats. Used qualitatively by recruiters.",
-  },
-  {
-    doc_type: "supporting_docs",
-    label: "Dokumen Pendukung",
-    short: "Pendukung",
-    tip: "A single PDF bundle: proof of following social media, broadcast shares, and other supporting evidence.",
-  },
-];
+import { REQUIRED_DOCUMENTS } from "@/lib/candidateApplication";
 
 function StepTracker({ steps, activeIndex, uploadedTypes }) {
-  const completed = steps.filter((s) => uploadedTypes.has(s.doc_type)).length;
+  const completed = steps.filter((step) => uploadedTypes.has(step.doc_type)).length;
   const pct = Math.round((completed / steps.length) * 100);
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -91,12 +52,12 @@ function StepTracker({ steps, activeIndex, uploadedTypes }) {
       </div>
       <Progress value={pct} />
       <div className="hidden md:grid grid-cols-6 gap-2">
-        {steps.map((s, i) => {
-          const done = uploadedTypes.has(s.doc_type);
-          const active = i === activeIndex;
+        {steps.map((step, index) => {
+          const done = uploadedTypes.has(step.doc_type);
+          const active = index === activeIndex;
           return (
             <div
-              key={s.doc_type}
+              key={step.doc_type}
               className={`rounded-lg border px-2 py-2 text-xs text-center ${
                 active
                   ? "bg-primary text-primary-foreground border-primary"
@@ -107,7 +68,7 @@ function StepTracker({ steps, activeIndex, uploadedTypes }) {
             >
               <div className="flex items-center justify-center gap-1 font-medium">
                 {done && !active && <CheckCircle2 className="w-3 h-3" />}
-                {i + 1}. {s.short}
+                {index + 1}. {step.short}
               </div>
             </div>
           );
@@ -127,6 +88,7 @@ export default function DocumentsPage() {
 
   useEffect(() => {
     let cancelled = false;
+
     async function load() {
       setLoading(true);
       try {
@@ -139,17 +101,18 @@ export default function DocumentsPage() {
         if (cancelled) return;
         setDocuments(docs);
         setLimits(lim);
-      } catch (err) {
-        if (err.message?.toLowerCase().includes("not found")) {
-          toast.error("Please choose a division on your profile first.");
-          navigate("/profile", { replace: true });
+      } catch (error) {
+        if (error.message?.toLowerCase().includes("not found")) {
+          toast.error("Please start an application first.");
+          navigate("/application/start", { replace: true });
           return;
         }
-        toast.error(err.message || "Failed to load documents");
+        toast.error(error.message || "Failed to load documents");
       } finally {
         if (!cancelled) setLoading(false);
       }
     }
+
     load();
     return () => {
       cancelled = true;
@@ -157,14 +120,18 @@ export default function DocumentsPage() {
   }, [navigate]);
 
   const uploadedTypes = useMemo(
-    () => new Set(documents.map((d) => d.doc_type)),
+    () => new Set(documents.map((document) => document.doc_type)),
     [documents]
   );
-  const allComplete = STEPS.every((s) => uploadedTypes.has(s.doc_type));
+  const allComplete = REQUIRED_DOCUMENTS.every((step) =>
+    uploadedTypes.has(step.doc_type)
+  );
   const locked = application && application.status !== "draft";
 
-  const currentStep = STEPS[activeIndex];
-  const currentDoc = documents.find((d) => d.doc_type === currentStep?.doc_type);
+  const currentStep = REQUIRED_DOCUMENTS[activeIndex];
+  const currentDoc = documents.find(
+    (document) => document.doc_type === currentStep?.doc_type
+  );
   const currentLimit = limits[currentStep?.doc_type] || {
     max_bytes: 5 * 1024 * 1024,
     allowed_mime: ["application/pdf"],
@@ -173,7 +140,9 @@ export default function DocumentsPage() {
   const handleUpload = async (file) => {
     const result = await uploadApplicationDocument(currentStep.doc_type, file);
     setDocuments((prev) => {
-      const filtered = prev.filter((d) => d.doc_type !== result.doc_type);
+      const filtered = prev.filter(
+        (document) => document.doc_type !== result.doc_type
+      );
       return [...filtered, result];
     });
   };
@@ -190,7 +159,6 @@ export default function DocumentsPage() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
       <div className="flex items-start justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
@@ -199,7 +167,7 @@ export default function DocumentsPage() {
           </h1>
           <p className="text-muted-foreground mt-1">
             Submit all six required documents. You can save progress and come
-            back later — nothing is final until you review and submit.
+            back later. Nothing is final until you review and submit.
           </p>
         </div>
         <Badge variant="outline" className="uppercase">
@@ -207,18 +175,16 @@ export default function DocumentsPage() {
         </Badge>
       </div>
 
-      {/* Tracker */}
       <Card>
         <CardContent className="py-5">
           <StepTracker
-            steps={STEPS}
+            steps={REQUIRED_DOCUMENTS}
             activeIndex={activeIndex}
             uploadedTypes={uploadedTypes}
           />
         </CardContent>
       </Card>
 
-      {/* Current step */}
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-xl">
@@ -226,7 +192,7 @@ export default function DocumentsPage() {
           </CardTitle>
           <CardDescription>
             {locked
-              ? "Your application has been submitted — documents are locked."
+              ? "Your application has been submitted. Documents are locked."
               : "Drop the file here or click to browse. We re-validate on the server."}
           </CardDescription>
         </CardHeader>
@@ -246,12 +212,11 @@ export default function DocumentsPage() {
         </CardContent>
       </Card>
 
-      {/* Navigation footer */}
       <Card>
         <CardContent className="py-4 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
           <Button
             variant="outline"
-            onClick={() => setActiveIndex((i) => Math.max(0, i - 1))}
+            onClick={() => setActiveIndex((index) => Math.max(0, index - 1))}
             disabled={activeIndex === 0}
             className="gap-2"
           >
@@ -260,17 +225,29 @@ export default function DocumentsPage() {
           </Button>
 
           <div className="flex items-center gap-2">
-            {activeIndex < STEPS.length - 1 ? (
+            {activeIndex < REQUIRED_DOCUMENTS.length - 1 ? (
               <Button
-                onClick={() => setActiveIndex((i) => Math.min(STEPS.length - 1, i + 1))}
+                onClick={() =>
+                  setActiveIndex((index) =>
+                    Math.min(REQUIRED_DOCUMENTS.length - 1, index + 1)
+                  )
+                }
                 className="gap-2"
               >
                 Next Step
                 <ArrowRight className="w-4 h-4" />
               </Button>
+            ) : locked ? (
+              <Button
+                onClick={() => navigate("/application/status")}
+                className="gap-2"
+              >
+                <ShieldCheck className="w-4 h-4" />
+                View Status
+              </Button>
             ) : (
               <Button
-                onClick={() => navigate("/review")}
+                onClick={() => navigate("/application/review")}
                 disabled={!allComplete}
                 className="gap-2"
               >
@@ -282,7 +259,7 @@ export default function DocumentsPage() {
         </CardContent>
       </Card>
 
-      {!allComplete && activeIndex === STEPS.length - 1 && (
+      {!allComplete && activeIndex === REQUIRED_DOCUMENTS.length - 1 && (
         <p className="text-xs text-muted-foreground text-center">
           Upload every document before moving to the review page.
         </p>

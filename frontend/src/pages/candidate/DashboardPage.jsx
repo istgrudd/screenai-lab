@@ -115,12 +115,12 @@ function NoApplicationCard() {
         <div>
           <h3 className="text-lg font-semibold">You haven't started an application yet</h3>
           <p className="text-sm text-muted-foreground mt-1 max-w-md">
-            Head to your profile to confirm your student information and
-            choose the MBC Laboratory division you want to apply to.
+            Choose the MBC Laboratory division you want to apply to and create
+            your application draft.
           </p>
         </div>
-        <Button onClick={() => navigate("/profile")} className="gap-2">
-          Go to profile
+        <Button onClick={() => navigate("/application/start")} className="gap-2">
+          Start application
           <ArrowRight className="w-4 h-4" />
         </Button>
       </CardContent>
@@ -289,7 +289,13 @@ export default function DashboardPage() {
                 {!locked && (
                   <Button
                     size="sm"
-                    onClick={() => navigate(progressPct === 100 ? "/review" : "/documents")}
+                    onClick={() =>
+                      navigate(
+                        progressPct === 100
+                          ? "/application/review"
+                          : "/documents"
+                      )
+                    }
                     className="gap-2"
                   >
                     {progressPct === 100 ? "Review & Submit" : "Continue uploading"}
@@ -300,7 +306,7 @@ export default function DashboardPage() {
                   <Button
                     size="sm"
                     variant="outline"
-                    onClick={() => navigate("/submitted")}
+                    onClick={() => navigate("/application/status")}
                     className="gap-2"
                   >
                     View submission

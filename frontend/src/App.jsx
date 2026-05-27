@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { BrowserRouter, Routes, Route, NavLink, Navigate, useLocation } from "react-router-dom";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -10,10 +11,10 @@ import {
   LogOut,
   ClipboardList,
   GraduationCap,
-  ShieldCheck,
   CheckCircle2,
   UserCog,
   CalendarClock,
+  Loader2,
 } from "lucide-react";
 
 import DashboardPage from "@/pages/DashboardPage";
@@ -26,10 +27,12 @@ import MyApplicationsPage from "@/pages/MyApplicationsPage";
 
 import CandidateDashboardPage from "@/pages/candidate/DashboardPage";
 import ProfilePage from "@/pages/candidate/ProfilePage";
+import EditProfilePage from "@/pages/candidate/EditProfilePage";
+import ApplicationOverviewPage from "@/pages/candidate/ApplicationOverviewPage";
+import StartApplicationPage from "@/pages/candidate/StartApplicationPage";
 import DocumentsPage from "@/pages/candidate/DocumentsPage";
 import ReviewPage from "@/pages/candidate/ReviewPage";
-import SubmittedPage from "@/pages/candidate/SubmittedPage";
-import ResultPage from "@/pages/candidate/ResultPage";
+import ApplicationStatusPage from "@/pages/candidate/ApplicationStatusPage";
 import AdminPage from "@/pages/admin/AdminPage";
 import AdminProfilePage from "@/pages/admin/ProfilePage";
 import RecruitmentPeriodPage from "@/pages/admin/RecruitmentPeriodPage";
@@ -43,6 +46,8 @@ import {
   ROLES,
   defaultPathForRole,
 } from "@/lib/auth";
+import { getMyApplication } from "@/lib/api";
+import { isNotFoundError } from "@/lib/candidateApplication";
 
 const ROLE_LABEL = {
   super_admin: "Super Admin",
@@ -60,12 +65,22 @@ function navLinksForRole(role) {
   if (role === ROLES.CANDIDATE) {
     return [
       { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+      {
+        to: "/application",
+        label: "Application Overview",
+        icon: ClipboardList,
+        isActive: (pathname) =>
+          ["/application", "/application/start", "/application/review", "/review"].includes(pathname),
+      },
+      { to: "/documents", label: "Documents", icon: FileText },
+      {
+        to: "/application/status",
+        label: "Application Status",
+        icon: CheckCircle2,
+        isActive: (pathname) =>
+          ["/application/status", "/submitted", "/result"].includes(pathname),
+      },
       { to: "/profile", label: "Profile", icon: GraduationCap },
-      { to: "/documents", label: "Documents", icon: ClipboardList },
-      { to: "/review", label: "Review", icon: ShieldCheck },
-      { to: "/submitted", label: "Status", icon: CheckCircle2 },
-      { to: "/result", label: "Result", icon: BarChart3 },
-      { to: "/my-applications", label: "History", icon: FileText },
     ];
   }
   if (role === ROLES.RECRUITER || role === ROLES.SUPER_ADMIN) {
@@ -87,6 +102,7 @@ function navLinksForRole(role) {
 
 function Sidebar() {
   const user = getCurrentUser();
+  const location = useLocation();
   const links = navLinksForRole(user?.role);
 
   return (
@@ -113,7 +129,7 @@ function Sidebar() {
             end={link.to === "/"}
             className={({ isActive }) =>
               `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
-                isActive
+                (link.isActive ? link.isActive(location.pathname) : isActive)
                   ? "bg-primary text-primary-foreground shadow-sm"
                   : "text-muted-foreground hover:text-foreground hover:bg-muted"
               }`
@@ -191,6 +207,49 @@ function RootRedirect() {
   return <Navigate to={target} replace />;
 }
 
+function RouteLoader() {
+  return (
+    <div className="flex items-center justify-center py-24">
+      <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+    </div>
+  );
+}
+
+function LegacyReviewRedirect() {
+  const [target, setTarget] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function resolveTarget() {
+      try {
+        const application = await getMyApplication();
+        if (cancelled) return;
+        setTarget(
+          application.status === "draft"
+            ? "/application/review"
+            : "/application/status"
+        );
+      } catch (error) {
+        if (cancelled) return;
+        setTarget(
+          isNotFoundError(error)
+            ? "/application/start"
+            : "/application/status"
+        );
+      }
+    }
+
+    resolveTarget();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (!target) return <RouteLoader />;
+  return <Navigate to={target} replace />;
+}
+
 export default function App() {
   return (
     <BrowserRouter>
@@ -232,6 +291,36 @@ export default function App() {
             }
           />
           <Route
+            path="/profile/edit"
+            element={
+              <AuthenticatedShell>
+                <ProtectedRoute roles={[ROLES.CANDIDATE]}>
+                  <EditProfilePage />
+                </ProtectedRoute>
+              </AuthenticatedShell>
+            }
+          />
+          <Route
+            path="/application"
+            element={
+              <AuthenticatedShell>
+                <ProtectedRoute roles={[ROLES.CANDIDATE]}>
+                  <ApplicationOverviewPage />
+                </ProtectedRoute>
+              </AuthenticatedShell>
+            }
+          />
+          <Route
+            path="/application/start"
+            element={
+              <AuthenticatedShell>
+                <ProtectedRoute roles={[ROLES.CANDIDATE]}>
+                  <StartApplicationPage />
+                </ProtectedRoute>
+              </AuthenticatedShell>
+            }
+          />
+          <Route
             path="/documents"
             element={
               <AuthenticatedShell>
@@ -242,7 +331,7 @@ export default function App() {
             }
           />
           <Route
-            path="/review"
+            path="/application/review"
             element={
               <AuthenticatedShell>
                 <ProtectedRoute roles={[ROLES.CANDIDATE]}>
@@ -252,11 +341,31 @@ export default function App() {
             }
           />
           <Route
+            path="/application/status"
+            element={
+              <AuthenticatedShell>
+                <ProtectedRoute roles={[ROLES.CANDIDATE]}>
+                  <ApplicationStatusPage />
+                </ProtectedRoute>
+              </AuthenticatedShell>
+            }
+          />
+          <Route
+            path="/review"
+            element={
+              <AuthenticatedShell>
+                <ProtectedRoute roles={[ROLES.CANDIDATE]}>
+                  <LegacyReviewRedirect />
+                </ProtectedRoute>
+              </AuthenticatedShell>
+            }
+          />
+          <Route
             path="/submitted"
             element={
               <AuthenticatedShell>
                 <ProtectedRoute roles={[ROLES.CANDIDATE]}>
-                  <SubmittedPage />
+                  <Navigate to="/application/status" replace />
                 </ProtectedRoute>
               </AuthenticatedShell>
             }
@@ -276,7 +385,7 @@ export default function App() {
             element={
               <AuthenticatedShell>
                 <ProtectedRoute roles={[ROLES.CANDIDATE]}>
-                  <ResultPage />
+                  <Navigate to="/application/status" replace />
                 </ProtectedRoute>
               </AuthenticatedShell>
             }

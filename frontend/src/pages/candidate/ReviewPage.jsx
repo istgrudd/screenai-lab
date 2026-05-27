@@ -73,12 +73,16 @@ export default function ReviewPage() {
         setApplication(app);
         if (app.status !== "draft") {
           // Already submitted — bounce to the confirmation page.
-          navigate("/submitted", { replace: true });
+          navigate("/application/status", { replace: true });
           return;
         }
         const { documents: docs } = await listApplicationDocuments(app.id);
         if (!cancelled) setDocuments(docs);
       } catch (err) {
+        if (err.message?.toLowerCase().includes("not found")) {
+          navigate("/application/start", { replace: true });
+          return;
+        }
         toast.error(err.message || "Failed to load review data");
       } finally {
         if (!cancelled) setLoading(false);
@@ -100,7 +104,7 @@ export default function ReviewPage() {
     try {
       await submitApplication(application.id);
       toast.success("Application submitted!");
-      navigate("/submitted", { replace: true });
+      navigate("/application/status", { replace: true });
     } catch (err) {
       toast.error(err.message || "Submit failed");
     } finally {
@@ -138,8 +142,8 @@ export default function ReviewPage() {
           </p>
           <p className="text-sm text-amber-800 dark:text-amber-300/80">
             Once submitted, you cannot replace documents or change your chosen
-            division. Your application will enter the AI screening queue
-            immediately.
+            division. Your application will move into the recruitment review
+            pipeline.
           </p>
         </div>
       </div>
