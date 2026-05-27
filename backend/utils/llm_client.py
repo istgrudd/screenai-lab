@@ -1,4 +1,4 @@
-"""DeepSeek V3 LLM client wrapper (OpenAI-compatible).
+"""DeepSeek V4 LLM client wrapper (OpenAI-compatible).
 
 Provides structured JSON output with retry logic for the
 recruitment screening pipeline.
@@ -17,7 +17,7 @@ _client: OpenAI | None = None
 
 
 def get_llm_client() -> OpenAI:
-    """Return the OpenAI-compatible client for DeepSeek V3."""
+    """Return the OpenAI-compatible client for DeepSeek V4."""
     global _client
     if _client is None:
         _client = OpenAI(
@@ -30,17 +30,17 @@ def get_llm_client() -> OpenAI:
 def call_llm(
     system_prompt: str,
     user_prompt: str,
-    model: str = "deepseek-v4-flash",
+    model: str = "deepseek-v4-pro",
     temperature: float = 0.1,
     max_tokens: int = 4096,
     max_retries: int = 3,
 ) -> str:
-    """Call the DeepSeek V4 Flash LLM and return the response text.
+    """Call the DeepSeek V4 Pro LLM and return the response text.
 
     Args:
         system_prompt: System-level instruction.
         user_prompt: User message (CV + rubric context).
-        model: Model name (default: deepseek-v4-flash).
+        model: Model name (default: deepseek-v4-pro).
         temperature: Low for deterministic scoring output.
         max_tokens: Maximum response length.
         max_retries: Number of retries on failure.
