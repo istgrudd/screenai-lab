@@ -8,7 +8,6 @@ import {
   ClipboardList,
   FileText,
   Loader2,
-  Save,
   ShieldCheck,
 } from "lucide-react";
 
@@ -261,17 +260,6 @@ export default function DocumentsPage() {
           </Button>
 
           <div className="flex items-center gap-2">
-            <Button
-              variant="ghost"
-              onClick={() => {
-                toast.success("Progress saved — your documents stay until you submit.");
-              }}
-              className="gap-2"
-            >
-              <Save className="w-4 h-4" />
-              Save as Draft
-            </Button>
-
             {activeIndex < STEPS.length - 1 ? (
               <Button
                 onClick={() => setActiveIndex((i) => Math.min(STEPS.length - 1, i + 1))}

@@ -13,13 +13,18 @@ venv/
 # Environment variables
 .env
 
+# docs
+docs/*
+
 # Data (local only — never commit)
 data/raw_pdfs/
 data/extracted/
 data/anonymized/
 data/screenai_lab.db
+data/screenai_lab.db-journal
 data/*.db
 uploads/
+uploads/*
 
 # Vector store persistence
 backend/vectorstore/

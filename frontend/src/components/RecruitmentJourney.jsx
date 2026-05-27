@@ -43,6 +43,21 @@ export const STATUS_TO_JOURNEY_STEP = {
   announced_fail: "final_decision",
 };
 
+// Task 13.3.2 — phase → which journey step should glow as "active".
+// Phase mapping is spec-driven (CLAUDE.md Task 13.3.2):
+//   SUBMISSION   → Submitted
+//   EVALUATION   → AI Screening
+//   ANNOUNCEMENT → Final Decision
+//   CLOSED       → final state (all done)
+//   UPCOMING     → none (rare for already-submitted candidate)
+export const PHASE_TO_JOURNEY_STEP = {
+  UPCOMING: null,
+  SUBMISSION: "submitted",
+  EVALUATION: "ai_screening",
+  ANNOUNCEMENT: "final_decision",
+  CLOSED: "final_decision",
+};
+
 function JourneyStep({ step, active, done, isLast }) {
   const Icon = step.icon;
   return (
@@ -85,12 +100,35 @@ function JourneyStep({ step, active, done, isLast }) {
  * Timeline tracker visualising where a candidate's application sits in
  * the recruitment pipeline.
  *
+ * Active-step resolution (Task 13.3.2):
+ *   1. If `pending`, show every step as upcoming (pre-submit preview).
+ *   2. A terminal application status (announced_pass/fail) wins outright —
+ *      regardless of phase, the candidate has a result.
+ *   3. Otherwise, prefer the phase mapping (currentPhase) so the tracker
+ *      reflects where the *recruitment* is, not just the candidate's last
+ *      stored status. CLOSED with no announcement → still Final Decision.
+ *   4. Fall back to the legacy status mapping if no phase is provided.
+ *
  * Props:
- *   status   — backend ApplicationStatus value (draft, submitted, …)
- *   pending  — override: show all steps as upcoming (pre-submit view)
+ *   status        — backend ApplicationStatus (draft, submitted, …)
+ *   currentPhase  — UPCOMING | SUBMISSION | EVALUATION | ANNOUNCEMENT | CLOSED
+ *   pending       — override: render all steps as upcoming
  */
-export default function RecruitmentJourney({ status, pending = false }) {
-  const activeId = pending ? null : STATUS_TO_JOURNEY_STEP[status];
+export default function RecruitmentJourney({
+  status,
+  currentPhase = null,
+  pending = false,
+}) {
+  let activeId = null;
+  if (!pending) {
+    if (status === "announced_pass" || status === "announced_fail") {
+      activeId = "final_decision";
+    } else if (currentPhase && PHASE_TO_JOURNEY_STEP[currentPhase] !== undefined) {
+      activeId = PHASE_TO_JOURNEY_STEP[currentPhase];
+    } else {
+      activeId = STATUS_TO_JOURNEY_STEP[status] ?? null;
+    }
+  }
   const activeIndex = JOURNEY_STEPS.findIndex((s) => s.id === activeId);
 
   return (

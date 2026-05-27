@@ -8,8 +8,8 @@ An AI-powered candidate screening platform for **MBC Laboratory, Telkom Universi
 
 | Layer | Technology |
 |---|---|
-| Backend | FastAPI + SQLAlchemy + SQLite |
-| Auth | JWT (python-jose) + bcrypt (passlib) |
+| Backend | FastAPI + SQLAlchemy + SQLite (dev) / PostgreSQL (prod) |
+| Auth | JWT (python-jose) + bcrypt (direct, no passlib) |
 | PDF Parsing | PyMuPDF |
 | NER (Anonymization) | IndoBERT (`ageng-anugrah/indobert-large-p2-finetuned-ner`) |
 | RAG & Orchestration | LangChain + ChromaDB |

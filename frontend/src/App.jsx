@@ -31,7 +31,9 @@ import ReviewPage from "@/pages/candidate/ReviewPage";
 import SubmittedPage from "@/pages/candidate/SubmittedPage";
 import ResultPage from "@/pages/candidate/ResultPage";
 import AdminPage from "@/pages/admin/AdminPage";
+import AdminProfilePage from "@/pages/admin/ProfilePage";
 import RecruitmentPeriodPage from "@/pages/admin/RecruitmentPeriodPage";
+import RecruiterProfilePage from "@/pages/recruiter/ProfilePage";
 
 import ProtectedRoute from "@/components/ProtectedRoute";
 import {
@@ -74,6 +76,9 @@ function navLinksForRole(role) {
     if (role === ROLES.SUPER_ADMIN) {
       links.push({ to: "/admin/users", label: "Admin Panel", icon: UserCog });
       links.push({ to: "/admin/periods", label: "Periode Rekrutasi", icon: CalendarClock });
+      links.push({ to: "/admin/profile", label: "Profile", icon: GraduationCap });
+    } else {
+      links.push({ to: "/recruiter/profile", label: "Profile", icon: GraduationCap });
     }
     return links;
   }
@@ -326,6 +331,26 @@ export default function App() {
               <AuthenticatedShell>
                 <ProtectedRoute roles={[ROLES.SUPER_ADMIN]}>
                   <RecruitmentPeriodPage />
+                </ProtectedRoute>
+              </AuthenticatedShell>
+            }
+          />
+          <Route
+            path="/admin/profile"
+            element={
+              <AuthenticatedShell>
+                <ProtectedRoute roles={[ROLES.SUPER_ADMIN]}>
+                  <AdminProfilePage />
+                </ProtectedRoute>
+              </AuthenticatedShell>
+            }
+          />
+          <Route
+            path="/recruiter/profile"
+            element={
+              <AuthenticatedShell>
+                <ProtectedRoute roles={[ROLES.RECRUITER, ROLES.SUPER_ADMIN]}>
+                  <RecruiterProfilePage />
                 </ProtectedRoute>
               </AuthenticatedShell>
             }

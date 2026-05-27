@@ -186,15 +186,59 @@ Phase 2 (bulk):
 
 ---
 
-### Task 13 — Hardening & Deprecation (Week 3)
+## Task 13 — Phase-Aware Recruitment Period
+
+### Task 13.1 — Model & Migration (Session 1)
 
 | # | Task | Detail |
-|---|------|--------|
-| 13.1 | Division validation | `evaluate_batch.py` — ganti `division: str` ke `division: Division` di `EvaluateBatchRequest`. |
-| 13.2 | Rubric type safety | `rubric.py` — ganti `Rubric.division` dari `String(20)` ke `Enum(Division, native_enum=False)`. Migration. |
-| 13.3 | Audit log score override | `candidates.py` — tambah `audit_log` entry setiap kali `is_override=True` di dimension_scores. |
-| 13.4 | Deprecate legacy endpoints | Tambah response header `Deprecation: true` + log warning di `/api/upload` dan `/api/evaluate`. Jangan hapus dulu. |
-| 13.5 | Smoke tests update | Update semua smoke tests untuk cover Period flow + bulk announce. |
+|---|---|---|
+| 13.1.1 | Update model `RecruitmentPeriod` | Tambah `submission_end_date` (DateTime), `evaluation_end_date` (DateTime). `end_date` tetap ada sebagai penutup ANNOUNCEMENT phase. |
+| 13.1.2 | Helper `get_current_phase(period, now)` | Pure function, derived — return `UPCOMING/SUBMISSION/EVALUATION/ANNOUNCEMENT/CLOSED`. Taruh di `utils/period_utils.py` atau dalam model sebagai property. |
+| 13.1.3 | Alembic migration | Add dua kolom baru. Handle nullable untuk compat data lama. |
+| 13.1.4 | Update `POST /api/periods` + `PUT /api/periods/{id}` | Validasi: `start_date < submission_end_date < evaluation_end_date < end_date`. |
+| 13.1.5 | Update `GET /api/periods/active` response | Tambah field `current_phase` dan `phases` (object berisi semua tanggal). |
+
+**Milestone:** Model baru live, `current_phase` bisa di-consume frontend.
+
+---
+
+### Task 13.2 — Backend Enforcement (Session 2)
+
+| # | Task | Detail |
+|---|---|---|
+| 13.2.1 | Submit lock update | Cek `current_phase == SUBMISSION` (bukan sekadar `is_active`). Return 403 dengan pesan phase-aware. |
+| 13.2.2 | Evaluate batch — soft warn | Jika phase bukan `EVALUATION`, tetap proses tapi response include `warning: "Di luar window evaluasi"`. |
+| 13.2.3 | Bulk announce lock | `POST /api/announcements/bulk` hanya bisa di phase `ANNOUNCEMENT`. Return 403 di luar itu. Super Admin bypass. |
+| 13.2.4 | Super Admin phase override | `PUT /api/periods/{id}` bisa update `submission_end_date` / `evaluation_end_date` / `end_date` kapan saja untuk extend atau cut short. |
+| 13.2.5 | `GET /api/periods/active` soft-prompt flag | Tambah field `evaluation_prompt: bool` — True jika phase baru masuk EVALUATION (untuk trigger banner di RecruiterDashboard). |
+
+**Milestone:** Phase enforcement aktif di backend. Submit/announce terkunci sesuai phase.
+
+---
+
+### Task 13.3 — Frontend Phase-Aware Update (Session 3)
+
+| # | Task | Detail |
+|---|---|---|
+| 13.3.1 | `DashboardPage` countdown kontekstual | Phase SUBMISSION → countdown ke `submission_end_date`. Phase EVALUATION → "Sedang dalam tahap evaluasi". Phase ANNOUNCEMENT → "Pengumuman sedang berlangsung". CLOSED → "Periode telah berakhir". |
+| 13.3.2 | Recruitment Journey tracker — highlight aktif | Step yang sesuai `current_phase` di-highlight aktif (bukan semua green). Submitted ✅, AI Screening aktif saat EVALUATION, dst. |
+| 13.3.3 | RecruiterDashboard — evaluation prompt banner | Jika `evaluation_prompt == true` dari API, tampilkan banner: *"Submission period telah berakhir. Jalankan evaluasi sekarang?"* per divisi. |
+| 13.3.4 | RecruiterDashboard — phase-aware UI state | Tombol "Run Evaluation" + "Publish Hasil" disabled dengan tooltip jika di luar phase yang tepat. Super Admin tidak kena disable. |
+| 13.3.5 | `RecruitmentPeriodPage` (`/admin/periods`) update | Form create/edit period dengan 4 tanggal. Validasi urutan tanggal di frontend. Tampilkan current phase badge per periode di list. |
+
+**Milestone:** UI sepenuhnya kontekstual terhadap phase aktif.
+
+---
+
+## Task 14 — Hardening & Deprecation
+
+| # | Task | Detail |
+|---|---|---|
+| 14.1 | Division enum validation | `EvaluateBatchRequest`: ganti `division: str` → `division: Division` |
+| 14.2 | Rubric type safety | `Rubric.division`: `String(20)` → `Enum(Division)` + migration |
+| 14.3 | Audit log score override | `candidates.py`: log setiap `is_override=True` |
+| 14.4 | Deprecate legacy endpoints | Header `Deprecation: true` + log warning di `/api/upload` dan `/api/evaluate` |
+| 14.5 | Smoke tests update | Cover Period phases + phase enforcement + bulk announce |
 
 ---
 
@@ -244,9 +288,9 @@ Existing pages yang di-update:
 Tambahan `.env` untuk Phase 2:
 
 ```env
-# Tidak ada env baru yang wajib untuk Phase 2
-# RECRUITMENT_DEADLINE env var bisa dihapus setelah
-# CountdownCard pakai /api/periods/active
+# Tidak ada env baru yang wajib untuk Phase 2.
+# VITE_RECRUITMENT_DEADLINE removed in Batch 5 — CountdownCard now reads
+# /api/periods/active.
 ```
 
 Tambahan dependencies:
@@ -263,10 +307,10 @@ Sama seperti sebelumnya. Phase 3 target:
 
 | Service | Platform | Notes |
 |---|---|---|
-| Backend | VPS lab atau Railway | Auto-deploy dari GitHub |
-| Frontend | Vercel | Free tier |
-| Database | SQLite → PostgreSQL bila resource cukup | |
-| File Storage | Server local (VPS) | |
+| Backend | VPS lab (self-hosted) | `uvicorn` di belakang Nginx/Caddy, dikelola systemd |
+| Frontend | VPS lab (self-hosted) | `npm run build` → static assets disajikan oleh reverse proxy yang sama |
+| Database | SQLite → PostgreSQL self-hosted di VPS lab | Instalasi & konfigurasi manual |
+| File Storage | Disk lokal VPS (`uploads/`) | Backup manual / volume snapshot |
 
 ---
 

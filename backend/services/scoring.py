@@ -10,7 +10,26 @@ Handles storing RAG pipeline results into the database:
 from sqlalchemy.orm import Session
 
 from backend.models.candidate import Candidate, DimensionScore
-from backend.models.rubric import Dimension
+from backend.models.rubric import Dimension, Rubric
+
+
+def validate_rubric_weights(rubric: Rubric) -> None:
+    """Guard composite-score arithmetic against malformed rubrics.
+
+    The composite formula assumes ``weight ∈ (0, 1]`` and the dimension
+    weights for a rubric sum to 1.0 (so ``Σ score × weight`` lands in
+    [0, 100]). Rubric CRUD already enforces this on write, but a manual
+    DB edit or a half-migrated rubric can desync — and a desynced rubric
+    will silently produce off-scale composite scores. Raising early
+    surfaces the bug to the recruiter as a clean 400 instead.
+
+    Tolerance is ±0.01 to absorb float-sum rounding.
+    """
+    total_weight = sum(d.weight for d in rubric.dimensions)
+    if not (0.99 <= total_weight <= 1.01):
+        raise ValueError(
+            f"Rubric weights must sum to 1.0, got {total_weight}"
+        )
 
 
 # --- CEFR mapping for EPrT TOTAL SCORE -> (level, bonus) ---

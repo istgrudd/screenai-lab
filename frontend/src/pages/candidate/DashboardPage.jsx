@@ -1,10 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import {
   AlertCircle,
   ArrowRight,
-  CalendarClock,
   CheckCircle2,
   ClipboardList,
   GraduationCap,
@@ -25,6 +24,7 @@ import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 
 import RecruitmentJourney from "@/components/RecruitmentJourney";
+import RecruitmentPhaseCard from "@/components/RecruitmentPhaseCard";
 import {
   getMe,
   getMyApplication,
@@ -41,109 +41,6 @@ const DOC_CHECKLIST = [
   { doc_type: "swot", label: "SWOT Analysis" },
   { doc_type: "supporting_docs", label: "Dokumen Pendukung" },
 ];
-
-function useCountdown(isoDate) {
-  const deadline = useMemo(
-    () => (isoDate ? new Date(isoDate) : null),
-    [isoDate]
-  );
-  const [now, setNow] = useState(() => new Date());
-
-  useEffect(() => {
-    const t = setInterval(() => setNow(new Date()), 60_000);
-    return () => clearInterval(t);
-  }, []);
-
-  if (!deadline || Number.isNaN(deadline.getTime())) {
-    return { expired: false, days: 0, hours: 0, minutes: 0, deadline: null };
-  }
-
-  const msLeft = deadline.getTime() - now.getTime();
-  const expired = msLeft <= 0;
-  const abs = Math.max(msLeft, 0);
-  const days = Math.floor(abs / (24 * 60 * 60 * 1000));
-  const hours = Math.floor((abs % (24 * 60 * 60 * 1000)) / (60 * 60 * 1000));
-  const minutes = Math.floor((abs % (60 * 60 * 1000)) / (60 * 1000));
-
-  return { expired, days, hours, minutes, deadline };
-}
-
-function CountdownCard({ period, loading }) {
-  const { expired, days, hours, minutes, deadline } = useCountdown(
-    period?.end_date || null
-  );
-
-  if (loading) {
-    return (
-      <Card>
-        <CardContent className="py-5 flex items-center gap-4">
-          <div className="w-11 h-11 rounded-lg bg-muted flex items-center justify-center">
-            <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
-          </div>
-          <p className="text-sm text-muted-foreground">
-            Memuat informasi periode…
-          </p>
-        </CardContent>
-      </Card>
-    );
-  }
-
-  if (!period) {
-    return (
-      <Card className="border-muted">
-        <CardContent className="py-5 flex items-center gap-4">
-          <div className="w-11 h-11 rounded-lg bg-muted text-muted-foreground flex items-center justify-center shrink-0">
-            <CalendarClock className="w-5 h-5" />
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-xs uppercase tracking-wide text-muted-foreground">
-              Periode Rekrutasi
-            </p>
-            <p className="text-lg font-semibold">
-              Tidak ada periode rekrutasi aktif
-            </p>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Pendaftaran akan dibuka oleh Super Admin.
-            </p>
-          </div>
-        </CardContent>
-      </Card>
-    );
-  }
-
-  return (
-    <Card className={expired ? "border-destructive/40 bg-destructive/5" : ""}>
-      <CardContent className="py-5 flex items-center gap-4">
-        <div
-          className={`w-11 h-11 rounded-lg flex items-center justify-center shrink-0 ${
-            expired ? "bg-destructive/15 text-destructive" : "bg-primary/10 text-primary"
-          }`}
-        >
-          <CalendarClock className="w-5 h-5" />
-        </div>
-        <div className="flex-1 min-w-0">
-          <p className="text-xs uppercase tracking-wide text-muted-foreground">
-            {period.name}
-          </p>
-          {expired ? (
-            <p className="text-lg font-semibold text-destructive">
-              Periode telah ditutup
-            </p>
-          ) : (
-            <p className="text-lg font-semibold tabular-nums">
-              {days}d {hours}h {minutes}m tersisa
-            </p>
-          )}
-          {deadline && (
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Tutup {deadline.toLocaleString()}
-            </p>
-          )}
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
 
 function ChecklistCard({ documents, applicationId, locked }) {
   const navigate = useNavigate();
@@ -322,7 +219,11 @@ export default function DashboardPage() {
         )}
       </div>
 
-      <CountdownCard period={activePeriod} loading={periodLoading} />
+      <RecruitmentPhaseCard
+        role="candidate"
+        period={activePeriod}
+        loading={periodLoading}
+      />
 
       {!application ? (
         <NoApplicationCard />
@@ -420,7 +321,10 @@ export default function DashboardPage() {
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <RecruitmentJourney status={application.status} />
+                <RecruitmentJourney
+                  status={application.status}
+                  currentPhase={activePeriod?.current_phase || null}
+                />
               </CardContent>
             </Card>
           )}

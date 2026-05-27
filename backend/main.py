@@ -8,9 +8,12 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi.errors import RateLimitExceeded
+from slowapi import _rate_limit_exceeded_handler
 
 from backend.config import settings
 from backend.database import SessionLocal, init_db
+from backend.middleware.rate_limit import limiter
 from backend.routers.auth import router as auth_router
 from backend.routers.upload import router as upload_router
 from backend.routers.rubrics import router as rubrics_router
@@ -39,6 +42,19 @@ async def lifespan(app: FastAPI):
         - Create database tables (if not already present)
     """
     # --- Startup ---
+    # Production safety guards — refuse to boot with placeholder secrets or
+    # an unconfigured CORS list. Both have caused real-world incidents
+    # elsewhere (forged JWTs, accidental open-CORS in prod).
+    if (
+        settings.secret_key.startswith("dev-secret")
+        and settings.environment != "development"
+    ):
+        raise RuntimeError(
+            "SECRET_KEY must be changed before running in production"
+        )
+    if settings.environment != "development" and not settings.allowed_origins:
+        raise RuntimeError("ALLOWED_ORIGINS must be set in production")
+
     settings.ensure_data_dirs()
 
     # Import models so they register with Base before init_db
@@ -75,6 +91,10 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+
+# --- Rate limiting ---
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # --- CORS ---
 app.add_middleware(

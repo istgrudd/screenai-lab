@@ -7,26 +7,43 @@ Endpoints:
 
 from __future__ import annotations
 
+import logging
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from backend.database import get_db
 from backend.middleware.auth_middleware import get_current_user, require_role
-from backend.models.application import Application
+from backend.models.application import Application, Division
 from backend.models.candidate import Candidate, DimensionScore
+from backend.models.period import RecruitmentPeriod
 from backend.models.rubric import Rubric
 from backend.models.user import User, UserRole
 from backend.services.evaluation_service import run_evaluation_pipeline
+from backend.utils.period_utils import get_current_phase
 
 router = APIRouter(prefix="/api/recruiter", tags=["evaluation"])
+logger = logging.getLogger(__name__)
 
 _recruiter_or_admin = require_role(UserRole.RECRUITER, UserRole.SUPER_ADMIN)
 
+_SANITIZED_ERROR = (
+    "Evaluation failed due to an internal error. "
+    "Please contact the administrator."
+)
+
 
 class EvaluateBatchRequest(BaseModel):
-    division: str
+    # Task 14.1: typed as Division so FastAPI rejects unknown values at the
+    # schema layer with a clean 422 instead of letting them reach the
+    # service and surface as a raw ValueError.
+    division: Division
     application_ids: list[int] | None = None
+    # Task 13.5.1 — when True, re-evaluate already-scored candidates.
+    # The SUBMITTED-only status filter still applies.
+    force: bool = False
 
 
 @router.post(
@@ -39,22 +56,33 @@ async def evaluate_batch(
 ):
     """Run the full evaluation pipeline for a division.
 
-    Body: { division: str, application_ids: [int] | null }
+    Body: { division: str, application_ids: [int] | null, force: bool }
 
-    If application_ids is null, evaluates all submitted applications
-    in the given division.
+    If application_ids is null, evaluates all eligible applications in the
+    given division. By default (force=False) candidates whose Candidate row
+    already carries a composite_score are skipped to avoid recomputation.
+    With force=True the score filter is bypassed; the SUBMITTED-only status
+    filter still applies regardless.
 
     Precondition: the division's rubric must have at least one dimension.
     Returns 400 if the rubric has zero dimensions.
+
+    Task 13.2.2 — Soft phase warning: when no active period exists or the
+    active period is not currently in the EVALUATION phase, evaluation
+    still runs (the recruiter always retains override) but the response
+    carries a ``warning`` field so the frontend can flag the action.
     """
     try:
         result = await run_evaluation_pipeline(
-            division=payload.division,
+            division=payload.division.value,
             application_ids=payload.application_ids,
             db=db,
+            force=payload.force,
         )
     except ValueError as exc:
         msg = str(exc)
+        # Known ValueError shapes map to clean 4xx codes with their original
+        # message — these are deterministic, recruiter-actionable errors.
         if "no dimensions configured" in msg.lower():
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -65,16 +93,68 @@ async def evaluate_batch(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=msg,
             )
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=msg,
+        if "rubric weights must sum" in msg.lower():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=msg,
+            )
+        # Unrecognized ValueError — log full detail server-side, return a
+        # sanitized 500 so internal exception text never reaches the client.
+        logger.error(
+            "Unrecognized ValueError in evaluate_batch: %s",
+            msg,
+            exc_info=True,
         )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=_SANITIZED_ERROR,
+        )
+    except HTTPException:
+        # Preserve HTTPExceptions raised by inner code (or by us above) —
+        # never let them fall through to the catch-all and get sanitized.
+        raise
+    except Exception as exc:  # pragma: no cover — defensive catch-all
+        logger.error(
+            "Unexpected error in evaluate_batch: %s", exc, exc_info=True
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=_SANITIZED_ERROR,
+        )
+
+    warning = _phase_warning(db)
+    skipped_count = int(result.pop("skipped", 0))
+    evaluated_count = int(result.get("queued", 0))
 
     return {
         "success": True,
         "data": result,
+        "evaluated_count": evaluated_count,
+        "skipped_count": skipped_count,
+        "warning": warning,
         "error": None,
     }
+
+
+def _phase_warning(db: Session) -> str | None:
+    """Return a soft-warn message if evaluation runs outside the EVALUATION phase.
+
+    Returns ``None`` when an active period exists and ``current_phase`` is
+    EVALUATION; otherwise returns the standard warning string. The message
+    is the same in both "no active period" and "wrong phase" cases —
+    Task 13.2.2 specifies a single soft-warn payload.
+    """
+    period = (
+        db.query(RecruitmentPeriod)
+        .filter(RecruitmentPeriod.is_active == True)  # noqa: E712
+        .first()
+    )
+    if period is None:
+        return "Evaluasi dijalankan di luar window evaluasi resmi."
+    phase = get_current_phase(period, datetime.now(timezone.utc))
+    if phase != "EVALUATION":
+        return "Evaluasi dijalankan di luar window evaluasi resmi."
+    return None
 
 
 @router.get(

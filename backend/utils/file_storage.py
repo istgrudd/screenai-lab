@@ -55,6 +55,15 @@ _MIME_TO_EXT: dict[str, str] = {
     "image/png": "png",
 }
 
+# Magic-byte signatures keyed by declared MIME type. We don't trust the client's
+# Content-Type header alone — a renamed `.exe` posted with `application/pdf`
+# would otherwise pass the MIME check and land on disk.
+_MAGIC_BYTES: dict[str, bytes] = {
+    "application/pdf": b"%PDF",
+    "image/jpeg": b"\xff\xd8\xff",
+    "image/png": b"\x89PNG",
+}
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -90,6 +99,18 @@ def _validate_content_type(doc_type: DocumentType, content_type: str | None) -> 
             },
         )
     return normalized
+
+
+def _validate_magic_bytes(mime: str, data: bytes) -> None:
+    """Verify the file signature matches the declared MIME type."""
+    expected = _MAGIC_BYTES.get(mime)
+    if expected is None:
+        return
+    if not data.startswith(expected):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="File content does not match declared type",
+        )
 
 
 def _validate_size(doc_type: DocumentType, size_bytes: int) -> None:
@@ -137,6 +158,8 @@ def save_upload(
     upload.file.seek(0)
     data = upload.file.read()
     _validate_size(doc_type, len(data))
+    _validate_magic_bytes(mime, data)
+    upload.file.seek(0)
 
     app_dir = _application_dir(application_id)
     _remove_existing_files(app_dir, doc_type)

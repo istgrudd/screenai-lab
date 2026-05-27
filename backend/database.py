@@ -5,8 +5,9 @@ from sqlalchemy.orm import sessionmaker, DeclarativeBase
 
 from backend.config import settings
 
-# Railway's DATABASE_URL historically uses the legacy "postgres://" scheme
-# which SQLAlchemy 2.x no longer recognizes. Normalize it here.
+# Some Postgres URLs (older Heroku-style, copy-pasted managed-DB strings)
+# still use the legacy "postgres://" scheme which SQLAlchemy 2.x no longer
+# recognizes. Normalize it here so operators can paste any common form.
 _database_url = settings.database_url
 if _database_url.startswith("postgres://"):
     _database_url = _database_url.replace("postgres://", "postgresql://", 1)
@@ -19,7 +20,7 @@ if _is_sqlite:
     # check_same_thread=False is required for FastAPI's threaded request handling.
     connect_args["check_same_thread"] = False
 else:
-    # pool_pre_ping avoids stale-connection errors on managed Postgres (Railway, etc).
+    # pool_pre_ping avoids stale-connection errors on long-lived Postgres pools.
     engine_kwargs["pool_pre_ping"] = True
 
 engine = create_engine(_database_url, connect_args=connect_args, **engine_kwargs)

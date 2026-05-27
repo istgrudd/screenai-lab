@@ -10,16 +10,18 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from backend.database import get_db
 from backend.middleware.auth_middleware import get_current_user, require_role
+from backend.middleware.rate_limit import limiter, user_or_ip_key
 from backend.models.application import Application, ApplicationStatus, Division
 from backend.models.audit import AuditLog
 from backend.models.period import RecruitmentPeriod
 from backend.models.user import User, UserRole
+from backend.utils.period_utils import get_current_phase
 
 router = APIRouter(prefix="/api/announcements", tags=["announcements"])
 
@@ -136,7 +138,9 @@ def create_announcement(
 # ---------------------------------------------------------------------------
 
 @router.post("/bulk")
+@limiter.limit("10/minute", key_func=user_or_ip_key)
 def bulk_announce(
+    request: Request,
     payload: BulkAnnounceRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(_recruiter_or_admin),
@@ -163,6 +167,17 @@ def bulk_announce(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"RecruitmentPeriod {payload.period_id} not found",
         )
+
+    # Task 13.2.3 — bulk publish is only allowed inside the ANNOUNCEMENT
+    # phase. Super Admins bypass this lock so they can manually correct
+    # results outside the official window.
+    if current_user.role != UserRole.SUPER_ADMIN:
+        phase = get_current_phase(period, datetime.now(timezone.utc))
+        if phase != "ANNOUNCEMENT":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Pengumuman hanya dapat dipublikasikan pada fase Pengumuman.",
+            )
 
     scope = (
         db.query(Application)
@@ -266,12 +281,15 @@ def get_my_announcement(
     app_status = app.status.value if hasattr(app.status, "value") else str(app.status)
 
     if app_status in ("announced_pass", "announced_fail"):
-        # Look up the audit log for the announcement details
+        # Look up the most recent announcement audit row for this candidate.
+        # Bulk announces use action_type="bulk_announcement" and per-app uses
+        # "announcement" — fall back to either so the candidate sees their
+        # notes/announced_at regardless of which path the recruiter took.
         audit = (
             db.query(AuditLog)
             .filter(
                 AuditLog.candidate_id == app.user_id,
-                AuditLog.action_type == "announcement",
+                AuditLog.action_type.in_(("announcement", "bulk_announcement")),
             )
             .order_by(AuditLog.timestamp.desc())
             .first()

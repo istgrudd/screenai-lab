@@ -9,12 +9,13 @@ Endpoints:
 
 import re
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, EmailStr, Field, field_validator
 from sqlalchemy.orm import Session
 
 from backend.database import get_db
-from backend.middleware.auth_middleware import get_current_user
+from backend.middleware.auth_middleware import get_current_user, require_role
+from backend.middleware.rate_limit import limiter
 from backend.models.user import User, UserRole
 from backend.services.auth_service import (
     AuthResult,
@@ -61,6 +62,18 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class AdminResetPasswordRequest(BaseModel):
+    """Super-admin assisted password reset (Phase 2 stop-gap).
+
+    Self-service reset (email token) is Phase 3. Until then, a candidate
+    who forgets their password contacts the lab; a super-admin uses this
+    endpoint to set a new one.
+    """
+
+    user_id: int
+    new_password: str = Field(..., min_length=8, max_length=72)
+
+
 class UserOut(BaseModel):
     id: int
     email: str
@@ -69,6 +82,7 @@ class UserOut(BaseModel):
     faculty: str | None
     major: str | None
     year: int | None
+    whatsapp: str | None
     role: str
     is_active: bool
 
@@ -82,6 +96,7 @@ class UserOut(BaseModel):
             faculty=user.faculty,
             major=user.major,
             year=user.year,
+            whatsapp=user.whatsapp,
             role=user.role.value if hasattr(user.role, "value") else str(user.role),
             is_active=user.is_active,
         )
@@ -92,7 +107,8 @@ class UserOut(BaseModel):
 # ---------------------------------------------------------------------------
 
 @router.post("/register", status_code=status.HTTP_201_CREATED)
-def register(payload: RegisterRequest, db: Session = Depends(get_db)):
+@limiter.limit("5/minute")
+def register(request: Request, payload: RegisterRequest, db: Session = Depends(get_db)):
     """Register a new candidate account. Role is always 'candidate'."""
     email = payload.email.lower()
     if db.query(User).filter(User.email == email).first():
@@ -134,7 +150,8 @@ def register(payload: RegisterRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/login")
-def login(payload: LoginRequest, db: Session = Depends(get_db)):
+@limiter.limit("10/minute")
+def login(request: Request, payload: LoginRequest, db: Session = Depends(get_db)):
     """Authenticate a user and return a JWT.
 
     Returns 401 for bad credentials and 403 for correct credentials against
@@ -187,5 +204,42 @@ def me(current_user: User = Depends(get_current_user)):
     return {
         "success": True,
         "data": UserOut.from_user(current_user).model_dump(),
+        "error": None,
+    }
+
+
+@router.post(
+    "/admin/reset-password",
+    dependencies=[Depends(require_role(UserRole.SUPER_ADMIN))],
+)
+def admin_reset_password(
+    payload: AdminResetPasswordRequest,
+    db: Session = Depends(get_db),
+):
+    """Super-admin-only assisted password reset.
+
+    Hashes the new password with bcrypt and replaces the target user's
+    stored hash. Does not invalidate existing JWTs (that's Phase 3 +
+    requires a token blacklist) — but the next login will require the
+    new password.
+    """
+    target = db.query(User).filter(User.id == payload.user_id).first()
+    if not target:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found",
+        )
+
+    target.password_hash = hash_password(payload.new_password)
+    db.commit()
+    db.refresh(target)
+
+    return {
+        "success": True,
+        "data": {
+            "user_id": target.id,
+            "email": target.email,
+            "message": "Password has been reset.",
+        },
         "error": None,
     }

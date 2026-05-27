@@ -22,13 +22,15 @@ from sqlalchemy.orm import Session
 
 from backend.database import get_db
 from backend.middleware.auth_middleware import get_current_user, require_role
-from backend.models.application import Application
+from backend.models.application import Application, ApplicationStatus, Division
+from backend.models.candidate import Candidate
 from backend.models.period import RecruitmentPeriod
 from backend.models.user import User, UserRole
 
 router = APIRouter(prefix="/api/periods", tags=["periods"])
 
 _super_admin_only = require_role(UserRole.SUPER_ADMIN)
+_recruiter_or_admin = require_role(UserRole.RECRUITER, UserRole.SUPER_ADMIN)
 
 
 # ---------------------------------------------------------------------------
@@ -39,12 +41,16 @@ class PeriodCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     start_date: datetime
     end_date: datetime
+    submission_end_date: datetime | None = None
+    evaluation_end_date: datetime | None = None
     threshold_n: int | None = Field(default=None, ge=1)
 
 
 class PeriodUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=255)
     end_date: datetime | None = None
+    submission_end_date: datetime | None = None
+    evaluation_end_date: datetime | None = None
     threshold_n: int | None = Field(default=None, ge=1)
     is_active: bool | None = None
 
@@ -53,12 +59,16 @@ class PeriodOut(BaseModel):
     id: int
     name: str
     start_date: str
+    submission_end_date: str | None
+    evaluation_end_date: str | None
     end_date: str
     is_active: bool
     threshold_n: int | None
     created_by: int
     created_at: str | None
     application_count: int | None = None
+    current_phase: str
+    phases: dict
 
     @classmethod
     def from_period(
@@ -67,13 +77,17 @@ class PeriodOut(BaseModel):
         return cls(
             id=p.id,
             name=p.name,
-            start_date=p.start_date.isoformat() if p.start_date else None,
-            end_date=p.end_date.isoformat() if p.end_date else None,
+            start_date=_utc_iso(p.start_date),
+            submission_end_date=_utc_iso(p.submission_end_date),
+            evaluation_end_date=_utc_iso(p.evaluation_end_date),
+            end_date=_utc_iso(p.end_date),
             is_active=bool(p.is_active),
             threshold_n=p.threshold_n,
             created_by=p.created_by,
-            created_at=p.created_at.isoformat() if p.created_at else None,
+            created_at=_utc_iso(p.created_at),
             application_count=application_count,
+            current_phase=p.current_phase,
+            phases=_phases_dict(p),
         )
 
 
@@ -90,6 +104,36 @@ def _ensure_aware(dt: datetime) -> datetime:
     if dt.tzinfo is None:
         return dt.replace(tzinfo=timezone.utc)
     return dt
+
+
+def _utc_iso(dt: datetime | None) -> str | None:
+    """Serialize a stored datetime as a tz-aware UTC ISO string.
+
+    Why: the ``DateTime`` column strips tz info on round-trip (esp. SQLite),
+    so a naive value here is always UTC by convention. Emit it with ``+00:00``
+    so the browser parses it as UTC instead of local time.
+    """
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.isoformat()
+
+
+def _phases_dict(p: RecruitmentPeriod) -> dict:
+    """Return phase boundaries as a structured object for the frontend.
+
+    For legacy periods without ``submission_end_date`` / ``evaluation_end_date``,
+    the missing boundaries collapse onto ``end_date`` — matching the
+    fallback semantics in ``get_current_phase``.
+    """
+    sub_end = p.submission_end_date or p.end_date
+    eval_end = p.evaluation_end_date or p.end_date
+    return {
+        "submission": {"start": _utc_iso(p.start_date), "end": _utc_iso(sub_end)},
+        "evaluation": {"start": _utc_iso(sub_end), "end": _utc_iso(eval_end)},
+        "announcement": {"start": _utc_iso(eval_end), "end": _utc_iso(p.end_date)},
+    }
 
 
 def _deactivate_others(db: Session, exclude_id: int | None = None) -> None:
@@ -116,6 +160,73 @@ def _count_applications(db: Session, period_id: int) -> int:
     )
 
 
+def _evaluated_count(db: Session, period_id: int) -> int:
+    """Count distinct applications in the period whose user has been evaluated.
+
+    "Evaluated" = has a Candidate row with a non-null ``composite_score``.
+    Used to drive the ``evaluation_prompt`` flag on GET /periods/active.
+    """
+    return (
+        db.query(Application.id)
+        .join(Candidate, Candidate.user_id == Application.user_id)
+        .filter(
+            Application.period_id == period_id,
+            Candidate.composite_score.isnot(None),
+        )
+        .distinct()
+        .count()
+    )
+
+
+def _validate_phase_order(
+    start: datetime,
+    submission_end: datetime | None,
+    evaluation_end: datetime | None,
+    end: datetime,
+) -> None:
+    """Enforce ``start < submission_end_date < evaluation_end_date < end_date``.
+
+    Either of the two intermediate boundaries may be ``None`` (back-compat
+    for legacy periods) — only the boundaries that are actually present
+    participate in the strict ordering check, but ``start < end`` is
+    always enforced.
+    """
+    if end <= start:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="end_date harus setelah start_date",
+        )
+    sub = submission_end
+    ev = evaluation_end
+    if sub is not None and not (start < sub):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="submission_end_date harus setelah start_date",
+        )
+    if ev is not None and not (ev < end):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="evaluation_end_date harus sebelum end_date",
+        )
+    if sub is not None and ev is not None and not (sub < ev):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="submission_end_date harus sebelum evaluation_end_date",
+        )
+    # Cross-check single-sided: if only one intermediate is set, it must
+    # still sit strictly between start and end.
+    if sub is not None and ev is None and not (sub < end):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="submission_end_date harus sebelum end_date",
+        )
+    if ev is not None and sub is None and not (start < ev):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="evaluation_end_date harus setelah start_date",
+        )
+
+
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
@@ -133,12 +244,18 @@ def create_period(
     """Create a new RecruitmentPeriod and make it the only active one."""
     start = _ensure_aware(payload.start_date)
     end = _ensure_aware(payload.end_date)
+    sub_end = (
+        _ensure_aware(payload.submission_end_date)
+        if payload.submission_end_date is not None
+        else None
+    )
+    eval_end = (
+        _ensure_aware(payload.evaluation_end_date)
+        if payload.evaluation_end_date is not None
+        else None
+    )
 
-    if end <= start:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="end_date harus setelah start_date",
-        )
+    _validate_phase_order(start, sub_end, eval_end, end)
     if start <= _now_utc():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -152,6 +269,8 @@ def create_period(
     period = RecruitmentPeriod(
         name=payload.name.strip(),
         start_date=start,
+        submission_end_date=sub_end,
+        evaluation_end_date=eval_end,
         end_date=end,
         is_active=True,
         threshold_n=payload.threshold_n,
@@ -170,7 +289,13 @@ def create_period(
 
 @router.get("/active")
 def get_active_period(db: Session = Depends(get_db)):
-    """Return the currently active period (public — used by candidate countdown)."""
+    """Return the currently active period (public — used by candidate countdown).
+
+    Task 13.2.5: also returns ``evaluation_prompt`` — True iff the period
+    is in the EVALUATION phase AND no candidate in this period has a
+    Candidate row with a composite_score yet. The RecruiterDashboard uses
+    this to surface the "submission ended, run evaluation now?" banner.
+    """
     period = (
         db.query(RecruitmentPeriod)
         .filter(RecruitmentPeriod.is_active == True)  # noqa: E712
@@ -182,11 +307,59 @@ def get_active_period(db: Session = Depends(get_db)):
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Tidak ada periode rekrutasi yang aktif",
         )
+
+    payload = PeriodOut.from_period(
+        period, application_count=_count_applications(db, period.id)
+    ).model_dump()
+    payload["evaluation_prompt"] = (
+        period.current_phase == "EVALUATION"
+        and _evaluated_count(db, period.id) == 0
+    )
+    return {"success": True, "data": payload, "error": None}
+
+
+@router.get("/active/stats", dependencies=[Depends(_recruiter_or_admin)])
+def get_active_period_stats(db: Session = Depends(get_db)):
+    """Return submitted-application counts for the active period (Task 13.4.1).
+
+    Powers the super_admin RecruitmentPhaseCard stats block. Counts every
+    application whose status has moved past DRAFT and is stamped with the
+    active period_id, broken down by division.
+    """
+    period = (
+        db.query(RecruitmentPeriod)
+        .filter(RecruitmentPeriod.is_active == True)  # noqa: E712
+        .order_by(RecruitmentPeriod.created_at.desc())
+        .first()
+    )
+    if not period:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Tidak ada periode rekrutasi yang aktif",
+        )
+
+    rows = (
+        db.query(Application)
+        .filter(
+            Application.period_id == period.id,
+            Application.status != ApplicationStatus.DRAFT,
+        )
+        .all()
+    )
+    by_division: dict[str, int] = {d.value: 0 for d in Division}
+    for app in rows:
+        key = (
+            app.division.value if hasattr(app.division, "value") else str(app.division)
+        )
+        by_division[key] = by_division.get(key, 0) + 1
+
     return {
         "success": True,
-        "data": PeriodOut.from_period(
-            period, application_count=_count_applications(db, period.id)
-        ).model_dump(),
+        "data": {
+            "period_id": period.id,
+            "total_submitted": len(rows),
+            "by_division": by_division,
+        },
         "error": None,
     }
 
@@ -212,10 +385,13 @@ def update_period(
     payload: PeriodUpdate,
     db: Session = Depends(get_db),
 ):
-    """Edit a period — name, end_date, threshold_n, is_active.
+    """Edit a period — name, end_date, phase boundaries, threshold_n, is_active.
 
     ``start_date`` is intentionally not editable after creation.
     Flipping ``is_active`` to True deactivates every other period.
+    Phase boundaries (``submission_end_date``, ``evaluation_end_date``,
+    ``end_date``) are validated together so the four-point ordering
+    ``start < submission_end < evaluation_end < end`` always holds.
     """
     period = _get_period_or_404(db, period_id)
 
@@ -223,15 +399,40 @@ def update_period(
         period.name = payload.name.strip()
     if payload.threshold_n is not None:
         period.threshold_n = payload.threshold_n
+
+    # Resolve the proposed final state for date fields (incoming value or
+    # the current stored value), then validate them as one set.
+    incoming_end = (
+        _ensure_aware(payload.end_date)
+        if payload.end_date is not None
+        else _ensure_aware(period.end_date)
+    )
+    incoming_sub = (
+        _ensure_aware(payload.submission_end_date)
+        if payload.submission_end_date is not None
+        else _ensure_aware(period.submission_end_date)
+    )
+    incoming_eval = (
+        _ensure_aware(payload.evaluation_end_date)
+        if payload.evaluation_end_date is not None
+        else _ensure_aware(period.evaluation_end_date)
+    )
+    start_aware = _ensure_aware(period.start_date)
+
+    if (
+        payload.end_date is not None
+        or payload.submission_end_date is not None
+        or payload.evaluation_end_date is not None
+    ):
+        _validate_phase_order(start_aware, incoming_sub, incoming_eval, incoming_end)
+
     if payload.end_date is not None:
-        new_end = _ensure_aware(payload.end_date)
-        start = _ensure_aware(period.start_date)
-        if new_end <= start:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="end_date harus setelah start_date",
-            )
-        period.end_date = new_end
+        period.end_date = incoming_end
+    if payload.submission_end_date is not None:
+        period.submission_end_date = incoming_sub
+    if payload.evaluation_end_date is not None:
+        period.evaluation_end_date = incoming_eval
+
     if payload.is_active is True:
         _deactivate_others(db, exclude_id=period.id)
         period.is_active = True

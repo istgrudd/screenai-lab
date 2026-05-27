@@ -1,11 +1,11 @@
 /**
  * API client — fetch wrapper for all backend endpoints.
- * Base URL: http://127.0.0.1:8000/api
+ * Base URL: VITE_API_BASE_URL (falls back to http://127.0.0.1:8000/api for dev).
  */
 
 import { getToken, removeToken } from "@/lib/auth";
 
-const BASE_URL = "http://127.0.0.1:8000/api";
+const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000/api";
 
 /**
  * Generic fetch wrapper that handles JSON responses and errors.
@@ -66,7 +66,8 @@ export async function login(email, password) {
 
 /**
  * Register a new candidate. All fields are required — Telkom-specific
- * student info is validated server-side (nim must match /^103\d{10}$/).
+ * student info is validated server-side (nim must be a numeric string
+ * of at least 10 digits — see backend/routers/auth.py:_NIM_PATTERN).
  */
 export async function register({
   email,
@@ -97,6 +98,27 @@ export async function logoutApi() {
 
 export async function getMe() {
   return request("/auth/me");
+}
+
+/**
+ * GET /api/users/me — enriched profile including division (from active app)
+ * and the current application_status (used by the candidate ProfilePage to
+ * decide which fields are locked).
+ */
+export async function getMyProfile() {
+  return request("/users/me");
+}
+
+/**
+ * PUT /api/users/me — partial update.
+ * Caller should omit (not send empty string) any field they don't want to
+ * change. Password is special: only sent when the user fills it in.
+ */
+export async function updateMyProfile(payload) {
+  return request("/users/me", {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
 }
 
 export async function listMyApplications() {
@@ -225,6 +247,19 @@ export async function reactivateUser(userId) {
   return request(`/users/${userId}/reactivate`, { method: "PUT" });
 }
 
+/**
+ * Super Admin only — assisted password reset for a user.
+ * Phase-2 stop-gap until self-service email reset is wired in Phase 3.
+ * @param {number} userId
+ * @param {string} newPassword - min 8 chars (server-enforced)
+ */
+export async function adminResetPassword(userId, newPassword) {
+  return request("/auth/admin/reset-password", {
+    method: "POST",
+    body: JSON.stringify({ user_id: userId, new_password: newPassword }),
+  });
+}
+
 // ── Upload ──────────────────────────────────────────────────────────────────
 
 /**
@@ -325,17 +360,57 @@ export async function runEvaluation(rubricId) {
 
 /**
  * Trigger batch evaluation for a division (Task 8.1).
+ * Returns the `data` payload merged with envelope-level fields:
+ *   _warning         — Task 13.2.2 soft phase warning (or null)
+ *   evaluated_count  — Task 13.5.2 number of candidates processed this run
+ *   skipped_count    — Task 13.5.2 number skipped (already scored, force=False)
+ * These sit outside `data` in the envelope, so the generic request wrapper
+ * would drop them; this helper does its own fetch to surface them.
  * @param {string} division  — e.g. "big_data"
- * @param {number[]|null} applicationIds — specific IDs, or null for all
+ * @param {object} [opts]
+ * @param {number[]|null} [opts.applicationIds] — specific IDs, or null for all
+ * @param {boolean} [opts.force] — Task 13.5.1 re-evaluate already-scored apps
  */
-export async function evaluateBatch(division, applicationIds = null) {
-  return request("/recruiter/evaluate/batch", {
+export async function evaluateBatch(division, opts = {}) {
+  const { applicationIds = null, force = false } = opts;
+  const token = getToken();
+  const res = await fetch(`${BASE_URL}/recruiter/evaluate/batch`, {
     method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
     body: JSON.stringify({
       division,
       application_ids: applicationIds,
+      force,
     }),
   });
+  if (res.status === 401) {
+    removeToken();
+    if (!window.location.pathname.startsWith("/login")) {
+      window.location.assign("/login");
+    }
+    throw new Error("Unauthorized");
+  }
+  if (!res.ok) {
+    let detail = `HTTP ${res.status}`;
+    try {
+      const body = await res.json();
+      detail = body.detail || body.error || JSON.stringify(body);
+    } catch { /* ignore */ }
+    throw new Error(detail);
+  }
+  const json = await res.json();
+  if (json.success === false) {
+    throw new Error(json.error || "Unknown API error");
+  }
+  return {
+    ...(json.data || {}),
+    _warning: json.warning ?? null,
+    evaluated_count: json.evaluated_count ?? 0,
+    skipped_count: json.skipped_count ?? 0,
+  };
 }
 
 /**
@@ -397,6 +472,14 @@ export async function getActivePeriod() {
   return request("/periods/active");
 }
 
+/**
+ * Recruiter+: submitted-application counts for the active period.
+ * Throws 404 when no period is active.
+ */
+export async function getActivePeriodStats() {
+  return request("/periods/active/stats");
+}
+
 /** Super Admin only — list all periods (with application_count). */
 export async function listPeriods() {
   return request("/periods");
@@ -404,7 +487,8 @@ export async function listPeriods() {
 
 /**
  * Super Admin only — create a new period (auto-active, deactivates others).
- * @param {{name:string, start_date:string, end_date:string, threshold_n:number|null}} payload
+ * @param {{name:string, start_date:string, submission_end_date:string,
+ *   evaluation_end_date:string, end_date:string, threshold_n:number|null}} payload
  */
 export async function createPeriod(payload) {
   return request("/periods", {
@@ -415,7 +499,8 @@ export async function createPeriod(payload) {
 
 /**
  * Super Admin only — update a period.
- * Editable: name, end_date, threshold_n, is_active.
+ * Editable: name, end_date, submission_end_date, evaluation_end_date,
+ * threshold_n, is_active.
  */
 export async function updatePeriod(periodId, payload) {
   return request(`/periods/${periodId}`, {

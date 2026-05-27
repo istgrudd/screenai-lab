@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import io
 import sys
+import time
 from datetime import datetime, timedelta, timezone
 
 from fastapi.testclient import TestClient
@@ -327,6 +328,10 @@ def main() -> int:
         f"reopen with new period -> 201 (got {r.status_code}: {r.text})",
     )
     period3_id = r.json()["data"]["id"]
+
+    # Task 13.2.1: submit is now gated on current_phase == SUBMISSION.
+    # Wait until start_date passes so the phase transitions UPCOMING -> SUBMISSION.
+    time.sleep(6)
 
     r = client.post(f"/api/applications/{app_id}/submit", headers=cand_auth)
     failures += _assert(

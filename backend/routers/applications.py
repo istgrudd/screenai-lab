@@ -21,17 +21,19 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from pydantic import BaseModel
-from sqlalchemy.orm import Session
+from sqlalchemy import func
+from sqlalchemy.orm import Session, joinedload
 
-from backend.database import get_db
+from backend.database import SessionLocal, get_db
 from backend.middleware.auth_middleware import get_current_user, require_role
 from backend.models.application import Application, ApplicationStatus, Division
-from backend.models.candidate import Candidate
+from backend.models.candidate import Candidate, CandidateDocument
 from backend.models.document import Document, DocumentType
 from backend.models.period import RecruitmentPeriod
 from backend.models.user import User, UserRole
 from backend.services.extractor import extract_text_from_pdf
 from backend.services.submit_anonymization import run_submit_anonymization
+from backend.utils.period_utils import get_current_phase
 
 router = APIRouter(prefix="/api/applications", tags=["applications"])
 recruiter_router = APIRouter(prefix="/api/recruiter", tags=["recruiter"])
@@ -162,9 +164,10 @@ def get_swot_text(
 ):
     """Return plain-text content of the application's uploaded SWOT PDF.
 
-    Extraction is deterministic (PyMuPDF); the text is not cached — SWOT
-    documents are small enough that re-extracting on demand is cheaper
-    than managing a cache invalidation path.
+    Reads from the submit-time cache on ``CandidateDocument`` (Perf 3) so the
+    server doesn't re-open the PDF on every request. Falls back to inline
+    PyMuPDF extraction if the cache is empty (e.g. submit-time NER task
+    crashed, or the application predates the cache feature).
     """
     app = db.query(Application).filter(Application.id == application_id).first()
     if not app:
@@ -187,6 +190,32 @@ def get_swot_text(
             detail="No SWOT document uploaded for this application",
         )
 
+    # Cache hit path — no disk I/O, no PyMuPDF.
+    cached = (
+        db.query(CandidateDocument)
+        .join(Candidate, Candidate.id == CandidateDocument.candidate_id)
+        .filter(
+            Candidate.user_id == app.user_id,
+            CandidateDocument.document_type == DocumentType.SWOT.value,
+        )
+        .order_by(CandidateDocument.created_at.desc())
+        .first()
+    )
+    if cached and cached.raw_text:
+        return {
+            "success": True,
+            "data": {
+                "application_id": application_id,
+                "document_id": swot_doc.id,
+                "file_name": swot_doc.file_name,
+                "text": cached.raw_text.strip(),
+                "page_count": cached.page_count,
+                "source": "cache",
+            },
+            "error": None,
+        }
+
+    # Cache miss — fall back to inline extraction (legacy path).
     try:
         result = extract_text_from_pdf(swot_doc.file_path)
     except (FileNotFoundError, ValueError) as e:
@@ -203,6 +232,7 @@ def get_swot_text(
             "file_name": swot_doc.file_name,
             "text": (result.get("raw_text") or "").strip(),
             "page_count": result.get("metadata", {}).get("page_count"),
+            "source": "live",
         },
         "error": None,
     }
@@ -240,7 +270,11 @@ def submit_application(
             },
         )
 
-    # Phase 2B (Task 11.7): submission requires an active recruitment period.
+    # Phase 2B (Task 11.7) + Task 13.2.1: submission requires an active
+    # recruitment period AND the period must currently be in the
+    # SUBMISSION phase. The phase is derived from the calendar; legacy
+    # periods (no submission_end_date) collapse to SUBMISSION while
+    # is_active is True, preserving back-compat.
     active_period = (
         db.query(RecruitmentPeriod)
         .filter(RecruitmentPeriod.is_active == True)  # noqa: E712
@@ -250,6 +284,19 @@ def submit_application(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Tidak ada periode rekrutasi yang aktif saat ini.",
+        )
+
+    phase = get_current_phase(active_period, datetime.now(timezone.utc))
+    if phase != "SUBMISSION":
+        phase_messages = {
+            "UPCOMING": "Periode rekrutasi belum dibuka.",
+            "EVALUATION": "Masa pendaftaran telah ditutup.",
+            "ANNOUNCEMENT": "Masa pendaftaran telah ditutup.",
+            "CLOSED": "Periode rekrutasi telah berakhir.",
+        }
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=phase_messages.get(phase, "Pendaftaran tidak diperbolehkan saat ini."),
         )
 
     uploaded_types: set[str] = {
@@ -276,10 +323,11 @@ def submit_application(
     db.refresh(app)
 
     # Task 10.2: trigger NER anonymization in the background.
-    # Pass a NEW db session — the request-scoped session will be closed
-    # by the time the background task runs.
+    # Pass the SessionLocal factory — the task opens and closes its own
+    # session, since the request-scoped session is already closed by
+    # then.
     background_tasks.add_task(
-        run_submit_anonymization, app.id, next(get_db())
+        run_submit_anonymization, app.id, SessionLocal
     )
 
     return {
@@ -315,7 +363,11 @@ def list_submitted_applications(
     and ``is_recommended`` (True iff active period has ``threshold_n`` and
     ``rank <= threshold_n``). Both are computed at query time.
     """
-    q = db.query(Application)
+    # Fetch Application + User in one round trip (was N+1 — one User SELECT
+    # per row in the old code). joinedload emits a LEFT OUTER JOIN, so a
+    # null user_id (shouldn't happen given the FK, but defensively) still
+    # produces an Application row.
+    q = db.query(Application).options(joinedload(Application.user))
     if status_filter is None:
         q = q.filter(Application.status != ApplicationStatus.DRAFT)
     else:
@@ -342,6 +394,18 @@ def list_submitted_applications(
             # Keep the newest per user (sorted DESC, so first-write wins).
             scored_by_user.setdefault(c.user_id, c)
 
+    # Doc counts in one GROUP BY query instead of N individual COUNT(*)s.
+    app_ids = [a.id for a in rows]
+    if app_ids:
+        doc_counts: dict[int, int] = dict(
+            db.query(Document.application_id, func.count(Document.id))
+            .filter(Document.application_id.in_(app_ids))
+            .group_by(Document.application_id)
+            .all()
+        )
+    else:
+        doc_counts = {}
+
     by_division: dict[str, list[tuple[int, float]]] = {}
     for app in rows:
         scored = scored_by_user.get(app.user_id)
@@ -366,8 +430,8 @@ def list_submitted_applications(
 
     data = []
     for app in rows:
-        user = db.query(User).filter(User.id == app.user_id).first()
-        count = _count_documents(db, app.id)
+        user = app.user  # already loaded via joinedload — no extra round trip
+        count = doc_counts.get(app.id, 0)
         scored = scored_by_user.get(app.user_id) if user else None
 
         rank = rank_by_app_id.get(app.id)

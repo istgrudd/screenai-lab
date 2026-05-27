@@ -3,12 +3,16 @@
 Endpoints:
     POST /api/evaluate          — Trigger batch evaluation for a rubric
     GET  /api/evaluate/status   — Check latest evaluation status
+
+DEPRECATED (Task 14.4): use POST /api/recruiter/evaluate/batch instead.
+Mounted only for legacy Capstone clients.
 """
 
 import asyncio
+import logging
 import traceback
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -21,6 +25,11 @@ from backend.services.rag_pipeline import evaluate_candidate
 from backend.services.scoring import cefr_from_score, store_evaluation_results
 
 router = APIRouter(prefix="/api", tags=["evaluation"])
+logger = logging.getLogger(__name__)
+
+_DEPRECATION_MESSAGE = (
+    "POST /api/evaluate is deprecated; use POST /api/recruiter/evaluate/batch instead."
+)
 
 
 class EvaluateRequest(BaseModel):
@@ -33,6 +42,7 @@ class EvaluateRequest(BaseModel):
 )
 async def run_batch_evaluation(
     payload: EvaluateRequest,
+    response: Response,
     db: Session = Depends(get_db),
 ):
     """Evaluate all candidates with anonymized text against a rubric.
@@ -41,6 +51,12 @@ async def run_batch_evaluation(
     Only processes candidates with status 'anonymized' (not yet scored)
     or re-evaluates candidates already scored with a different rubric.
     """
+    # Task 14.4: deprecation signal. Headers go on the success response;
+    # the warning log fires for every call regardless of outcome.
+    response.headers["Deprecation"] = "true"
+    response.headers["X-Deprecated-Message"] = _DEPRECATION_MESSAGE
+    logger.warning(_DEPRECATION_MESSAGE)
+
     # --- Validate rubric ---
     rubric = db.query(Rubric).filter(Rubric.id == payload.rubric_id).first()
     if not rubric:

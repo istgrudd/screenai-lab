@@ -1,18 +1,22 @@
-import { useState, useEffect } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import {
   AlertCircle,
+  AlertTriangle,
   BarChart3,
+  Bell,
   ExternalLink,
   Filter,
   Inbox,
   Loader2,
   Megaphone,
   Play,
+  RotateCw,
   Sparkles,
   Trophy,
   Users,
+  X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -39,6 +43,7 @@ import {
 } from "@/components/ui/tooltip";
 import { Progress } from "@/components/ui/progress";
 import { Checkbox } from "@/components/ui/checkbox";
+import RecruitmentPhaseCard from "@/components/RecruitmentPhaseCard";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -55,6 +60,8 @@ import {
   getActivePeriod,
   bulkAnnounce,
 } from "@/lib/api";
+import { getCurrentUser, ROLES } from "@/lib/auth";
+import { PHASE_BADGE_CLASS, PHASE_LABEL } from "@/lib/phase";
 
 const DIVISIONS = [
   { id: "all", label: "All divisions" },
@@ -143,6 +150,7 @@ export default function DashboardPage() {
 
   // Task 12.1 — active recruitment period (for threshold_n + period_id).
   const [activePeriod, setActivePeriod] = useState(null);
+  const [periodLoading, setPeriodLoading] = useState(true);
 
   // Task 12.2 — local checkbox state: { [application_id]: bool }.
   const [checked, setChecked] = useState({});
@@ -150,6 +158,24 @@ export default function DashboardPage() {
   // Task 12.3 — publish confirmation + in-flight state.
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [publishing, setPublishing] = useState(false);
+
+  // Task 13.3.3 — evaluation prompt banner (session-only dismiss).
+  const [bannerDismissed, setBannerDismissed] = useState(false);
+  const evaluateButtonRef = useRef(null);
+
+  // Task 13.3.4 — last evaluate response carried `_warning` (non-null when
+  // run outside the EVALUATION phase). Sticky in state so the tooltip
+  // hint stays visible after the toast fades.
+  const [evaluateWarning, setEvaluateWarning] = useState(null);
+
+  // Task 13.5.3 — last evaluate run's skipped_count, plus reset-confirm state.
+  const [lastSkippedCount, setLastSkippedCount] = useState(0);
+  const [reEvaluateOpen, setReEvaluateOpen] = useState(false);
+  const [reEvaluating, setReEvaluating] = useState(false);
+
+  const currentUser = getCurrentUser();
+  const isSuperAdmin = currentUser?.role === ROLES.SUPER_ADMIN;
+  const phase = activePeriod?.current_phase || null;
 
   const fetchData = async () => {
     setLoading(true);
@@ -180,6 +206,8 @@ export default function DashboardPage() {
     } catch {
       // 404 = no active period — that's a legitimate state, not an error.
       setActivePeriod(null);
+    } finally {
+      setPeriodLoading(false);
     }
   };
 
@@ -192,55 +220,142 @@ export default function DashboardPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [divisionFilter, statusFilter]);
 
-  const handleEvaluate = async () => {
+  // Task 13.5.3 — run evaluate batch and surface evaluated/skipped counts.
+  // ``force`` re-evaluates already-scored candidates in the division.
+  const runEvaluate = async ({ force = false } = {}) => {
     if (!selectedDivision) {
       toast.error("Please select a division first.");
       return;
     }
-    setEvaluating(true);
+    if (force) {
+      setReEvaluating(true);
+    } else {
+      setEvaluating(true);
+    }
     try {
-      const result = await evaluateBatch(selectedDivision);
-      toast.success(
-        `Evaluation complete: ${result.results.length} candidate(s) scored.`
-      );
-      if (result.errors.length > 0) {
+      const result = await evaluateBatch(selectedDivision, { force });
+      const evaluated = result.evaluated_count ?? 0;
+      const skipped = result.skipped_count ?? 0;
+      setLastSkippedCount(skipped);
+
+      if (evaluated === 0 && skipped > 0) {
+        toast.info(
+          "Semua kandidat di divisi ini sudah dievaluasi sebelumnya."
+        );
+      } else if (skipped > 0) {
+        toast.success(
+          `Evaluasi selesai. ${evaluated} kandidat dievaluasi, ${skipped} kandidat dilewati (sudah dievaluasi).`
+        );
+      } else {
+        toast.success(
+          `Evaluasi selesai. ${evaluated} kandidat dievaluasi.`
+        );
+      }
+
+      if (result.errors?.length > 0) {
         toast.warning(`${result.errors.length} application(s) had errors.`);
       }
+      // Task 13.3.4 — surface the soft-warn from the backend (non-null when
+      // evaluation runs outside the EVALUATION phase). Persist in state so
+      // the Run Evaluation tooltip keeps reminding the recruiter.
+      if (result._warning) {
+        toast.warning(result._warning);
+        setEvaluateWarning(result._warning);
+      } else {
+        setEvaluateWarning(null);
+      }
+      // Successfully ran evaluation → dismiss the prompt banner for this view.
+      setBannerDismissed(true);
       fetchData();
+      // Active period may now report evaluation_prompt=false → refresh.
+      fetchActivePeriod();
     } catch (err) {
       toast.error(`Evaluation failed: ${err.message}`);
     } finally {
       setEvaluating(false);
+      setReEvaluating(false);
     }
   };
 
+  const handleEvaluate = () => runEvaluate({ force: false });
+
+  const handleConfirmReEvaluate = async () => {
+    setReEvaluateOpen(false);
+    await runEvaluate({ force: true });
+  };
+
+  // Memoize the header stats so checkbox toggles don't re-walk the list.
+  // applications changes only when fetchData runs.
   const submittedCount = applications.length;
-  const scoredCount = applications.filter(
-    (a) => a.evaluation?.composite_score != null
-  ).length;
-  const topScore = applications
-    .map((a) => a.evaluation?.composite_score)
-    .filter((s) => s != null)
-    .sort((a, b) => b - a)[0];
+  const { scoredCount, topScore } = useMemo(() => {
+    let scored = 0;
+    let top = null;
+    for (const a of applications) {
+      const s = a.evaluation?.composite_score;
+      if (s != null) {
+        scored += 1;
+        if (top == null || s > top) top = s;
+      }
+    }
+    return { scoredCount: scored, topScore: top };
+  }, [applications]);
+
+  // ── Task 13.5.3 — re-evaluate visibility ────────────────────────────────
+  // Show the "Evaluasi Ulang Semua" button when the last run skipped some
+  // candidates, OR when the current view already contains evaluated apps in
+  // the selected division (so the recruiter has something to re-evaluate).
+  const evaluatedInSelectedDivision = useMemo(
+    () =>
+      applications.filter(
+        (a) =>
+          a.division === selectedDivision &&
+          a.evaluation?.composite_score != null
+      ).length,
+    [applications, selectedDivision]
+  );
+  const canReEvaluate =
+    selectedDivision != null &&
+    (lastSkippedCount > 0 || evaluatedInSelectedDivision > 0);
 
   // ── Task 12.3 — bulk-publish derived state ─────────────────────────────
-  const checkedIds = applications
-    .filter((a) => checked[a.id] && EVALUATED_STATUSES.has(a.status))
-    .map((a) => a.id);
+  // checkedIds / checkedCount / evaluatedInDivision depend on `checked`, so
+  // they DO recompute on every checkbox toggle (by design). useMemo here
+  // skips the work when only `applications` changed (e.g. a poll refresh).
+  const checkedIds = useMemo(
+    () =>
+      applications
+        .filter((a) => checked[a.id] && EVALUATED_STATUSES.has(a.status))
+        .map((a) => a.id),
+    [applications, checked]
+  );
   const checkedCount = checkedIds.length;
-  const evaluatedInView = applications.filter((a) =>
-    EVALUATED_STATUSES.has(a.status)
+  const evaluatedInView = useMemo(
+    () => applications.filter((a) => EVALUATED_STATUSES.has(a.status)),
+    [applications]
   );
   // Bulk publish targets the divisionFilter — must be a single division.
+  // Task 13.3.4: phase must be ANNOUNCEMENT, unless the current user is a
+  // Super Admin (backend bypasses the lock for them).
+  const phaseAllowsPublish = phase === "ANNOUNCEMENT" || isSuperAdmin;
   const canPublish =
     checkedCount > 0 &&
     divisionFilter !== "all" &&
-    activePeriod != null;
+    activePeriod != null &&
+    phaseAllowsPublish;
   // Y = evaluated apps in the targeted division MINUS checked count.
-  const evaluatedInDivision = evaluatedInView.filter(
-    (a) => divisionFilter === "all" || a.division === divisionFilter
-  );
-  const failCount = Math.max(evaluatedInDivision.length - checkedCount, 0);
+  const failCount = useMemo(() => {
+    const inDivision = evaluatedInView.filter(
+      (a) => divisionFilter === "all" || a.division === divisionFilter
+    ).length;
+    return Math.max(inDivision - checkedCount, 0);
+  }, [evaluatedInView, divisionFilter, checkedCount]);
+
+  // Stable callback identity so the inline `onCheckedChange` prop on each
+  // row's <Checkbox> doesn't force a re-render of every row when any one
+  // toggles.
+  const handleToggleChecked = useCallback((id, value) => {
+    setChecked((prev) => ({ ...prev, [id]: Boolean(value) }));
+  }, []);
 
   const handleConfirmPublish = async () => {
     if (!canPublish) return;
@@ -268,9 +383,26 @@ export default function DashboardPage() {
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Recruiter Dashboard</h1>
+          <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2 flex-wrap">
+            Recruiter Dashboard
+            {/* Task 13.3.4 — phase badge near header. */}
+            {activePeriod && phase && (
+              <Badge
+                variant="outline"
+                className={`text-[10px] uppercase tracking-wide ${PHASE_BADGE_CLASS[phase] || ""}`}
+                title={`Periode: ${activePeriod.name}`}
+              >
+                {PHASE_LABEL[phase] || phase}
+              </Badge>
+            )}
+          </h1>
           <p className="text-muted-foreground mt-1">
             Submitted applications, document completeness, and evaluation results.
+            {activePeriod && (
+              <span className="ml-1 text-xs">
+                · {activePeriod.name}
+              </span>
+            )}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -286,33 +418,125 @@ export default function DashboardPage() {
               ))}
             </SelectContent>
           </Select>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <span tabIndex={!selectedDivision ? 0 : -1}>
-                <Button
-                  onClick={handleEvaluate}
-                  disabled={evaluating || !selectedDivision}
-                >
-                  {evaluating ? (
-                    <>
-                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                      Evaluating…
-                    </>
-                  ) : (
-                    <>
-                      <Play className="w-4 h-4 mr-2" />
-                      Run Evaluation
-                    </>
-                  )}
-                </Button>
-              </span>
-            </TooltipTrigger>
-            {!selectedDivision && (
-              <TooltipContent>Select a division first</TooltipContent>
-            )}
-          </Tooltip>
+          {(() => {
+            // Task 13.3.4 — Run Evaluation: warn (not disable) if outside the
+            // EVALUATION phase, or if the last run returned a backend warning.
+            const phaseWarn = activePeriod && phase && phase !== "EVALUATION";
+            const showWarn = phaseWarn || Boolean(evaluateWarning);
+            const tooltipMsg = showWarn
+              ? "Evaluasi dijalankan di luar window evaluasi resmi."
+              : !selectedDivision
+              ? "Select a division first"
+              : null;
+            return (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span tabIndex={tooltipMsg ? 0 : -1}>
+                    <Button
+                      ref={evaluateButtonRef}
+                      onClick={handleEvaluate}
+                      disabled={evaluating || reEvaluating || !selectedDivision}
+                      variant={showWarn ? "outline" : "default"}
+                      className={
+                        showWarn
+                          ? "border-yellow-500/50 text-yellow-700 hover:bg-yellow-500/10 dark:text-yellow-400"
+                          : ""
+                      }
+                    >
+                      {evaluating ? (
+                        <>
+                          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                          Evaluating…
+                        </>
+                      ) : (
+                        <>
+                          {showWarn ? (
+                            <AlertTriangle className="w-4 h-4 mr-2" />
+                          ) : (
+                            <Play className="w-4 h-4 mr-2" />
+                          )}
+                          Run Evaluation
+                        </>
+                      )}
+                    </Button>
+                  </span>
+                </TooltipTrigger>
+                {tooltipMsg && <TooltipContent>{tooltipMsg}</TooltipContent>}
+              </Tooltip>
+            );
+          })()}
+          {/* Task 13.5.3 — re-evaluate everything in the selected division. */}
+          {canReEvaluate && (
+            <Button
+              variant="outline"
+              onClick={() => setReEvaluateOpen(true)}
+              disabled={evaluating || reEvaluating || !selectedDivision}
+              title="Re-evaluate all candidates in this division"
+            >
+              {reEvaluating ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Mengevaluasi ulang…
+                </>
+              ) : (
+                <>
+                  <RotateCw className="w-4 h-4 mr-2" />
+                  Evaluasi Ulang Semua
+                </>
+              )}
+            </Button>
+          )}
         </div>
       </div>
+
+      {/* Task 13.4.1 — phase timeline card at the top of the dashboard. */}
+      <RecruitmentPhaseCard
+        role="recruiter"
+        period={activePeriod}
+        loading={periodLoading}
+        submittedCount={applications.length}
+      />
+
+      {/* Task 13.3.3 — evaluation prompt banner (dismissible, session-only). */}
+      {activePeriod?.evaluation_prompt && !bannerDismissed && (
+        <div className="rounded-lg border-2 border-yellow-500/40 bg-yellow-500/10 p-4 flex items-start gap-3">
+          <div className="w-9 h-9 rounded-md bg-yellow-500/20 text-yellow-700 dark:text-yellow-400 flex items-center justify-center shrink-0">
+            <Bell className="w-4 h-4" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium text-yellow-800 dark:text-yellow-200">
+              Masa pendaftaran telah berakhir.
+            </p>
+            <p className="text-xs text-yellow-700/80 dark:text-yellow-200/80 mt-0.5">
+              Jalankan evaluasi untuk mulai memproses kandidat.
+            </p>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <Button
+              size="sm"
+              onClick={() => {
+                evaluateButtonRef.current?.scrollIntoView({
+                  behavior: "smooth",
+                  block: "center",
+                });
+                evaluateButtonRef.current?.focus();
+              }}
+              className="bg-yellow-600 hover:bg-yellow-700 text-white"
+            >
+              <Play className="w-3.5 h-3.5 mr-1.5" />
+              Jalankan Evaluasi
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => setBannerDismissed(true)}
+              aria-label="Tutup banner"
+            >
+              <X className="w-3.5 h-3.5" />
+            </Button>
+          </div>
+        </div>
+      )}
 
       {/* Stats */}
       <div className="grid grid-cols-3 gap-4">
@@ -419,13 +643,30 @@ export default function DashboardPage() {
                   Tidak ada periode aktif
                 </span>
               )}
-              <Button
-                onClick={() => setConfirmOpen(true)}
-                disabled={!canPublish}
-              >
-                <Megaphone className="w-4 h-4 mr-2" />
-                Publish Hasil ({checkedCount})
-              </Button>
+              {/* Task 13.3.4 — phase guard: disabled outside ANNOUNCEMENT
+                  unless the user is a Super Admin (backend bypasses). */}
+              {(() => {
+                const phaseLocked = !phaseAllowsPublish && activePeriod != null;
+                const tooltipMsg = phaseLocked
+                  ? "Pengumuman hanya dapat dilakukan pada fase Pengumuman."
+                  : null;
+                return (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span tabIndex={tooltipMsg ? 0 : -1}>
+                        <Button
+                          onClick={() => setConfirmOpen(true)}
+                          disabled={!canPublish}
+                        >
+                          <Megaphone className="w-4 h-4 mr-2" />
+                          Publish Hasil ({checkedCount})
+                        </Button>
+                      </span>
+                    </TooltipTrigger>
+                    {tooltipMsg && <TooltipContent>{tooltipMsg}</TooltipContent>}
+                  </Tooltip>
+                );
+              })()}
             </div>
           )}
         </CardContent>
@@ -482,9 +723,7 @@ export default function DashboardPage() {
                   const checkboxNode = isEvaluated ? (
                     <Checkbox
                       checked={isChecked}
-                      onCheckedChange={(v) =>
-                        setChecked((prev) => ({ ...prev, [a.id]: Boolean(v) }))
-                      }
+                      onCheckedChange={(v) => handleToggleChecked(a.id, v)}
                       onClick={(e) => e.stopPropagation()}
                       aria-label={`Select ${a.candidate?.full_name || "candidate"}`}
                     />
@@ -599,6 +838,38 @@ export default function DashboardPage() {
           Threshold aktif: Top {activePeriod.threshold_n} per divisi
         </p>
       )}
+
+      {/* Task 13.5.3 — Re-evaluate everything confirmation. */}
+      <AlertDialog open={reEvaluateOpen} onOpenChange={setReEvaluateOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Evaluasi Ulang Semua Kandidat</AlertDialogTitle>
+            <AlertDialogDescription>
+              Ini akan mengevaluasi ulang semua kandidat di divisi ini,
+              termasuk yang sudah memiliki skor. Lanjutkan?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={reEvaluating}>Batal</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                handleConfirmReEvaluate();
+              }}
+              disabled={reEvaluating}
+            >
+              {reEvaluating ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Mengevaluasi ulang…
+                </>
+              ) : (
+                "Evaluasi Ulang"
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Task 12.3 — Publish confirmation */}
       <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>

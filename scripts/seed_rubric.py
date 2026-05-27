@@ -19,92 +19,74 @@ import backend.models  # noqa: F401 — register models with Base
 
 
 RUBRIC_DATA = {
-    "name": "Junior Data Analyst Screening",
-    "position": "Junior Data Analyst",
+    "name": "Cyber Security Rubric",
+    "position": "Cyber Security Division",
     "description": (
-        "Rubrik penilaian untuk posisi Junior Data Analyst. "
-        "Mengevaluasi kompetensi teknis, pengalaman proyek, "
-        "kemampuan komunikasi, dan growth mindset kandidat "
-        "fresh graduate / entry-level."
+        "Rubrik evaluasi calon asisten laboratorium Cyber Security. "
+        "Fokus pada ketahanan sistem (Cyber Defense), etika peretasan (Ethical Hacking), "
+        "serta integritas dan kolaborasi tim (Secure & Happy Culture)."
     ),
+    "division": "cyber_security",
     "dimensions": [
         {
-            "name": "Technical Proficiency",
+            "name": "Technical & Security Foundation",
             "weight": 0.35,
             "description": (
-                "Kemampuan teknis kandidat dalam tools dan bahasa pemrograman "
-                "yang relevan untuk data analysis. Mencakup pemahaman dasar "
-                "machine learning dan pengalaman data preprocessing."
+                "Kemampuan teknis dasar dalam infrastruktur jaringan, "
+                "sistem operasi (Linux), dan logika keamanan informasi."
             ),
             "indicators": [
-                "Python programming",
-                "SQL / database querying",
-                "Data tools: Pandas, NumPy, Matplotlib",
-                "Visualization tools: Tableau, Power BI, Google Data Studio",
-                "ML libraries: Scikit-learn, TensorFlow, PyTorch",
-                "Google Colab / Jupyter Notebook usage",
-                "Basic ML concepts: classification, regression, clustering",
-                "Data preprocessing: cleaning, transformation, feature engineering",
-                "Version control: Git/GitHub",
-                "Cloud platforms: GCP, AWS basics",
+                "Linux System Administration (Command Line, Permissions)",
+                "Networking Protocols (TCP/IP, DNS, HTTP/S, SSL/TLS)",
+                "Basic Security Concepts (CIA Triad: Confidentiality, Integrity, Availability)",
+                "Familiaritas dengan security tools (Nmap, Wireshark, Metasploit, atau Burp Suite)",
+                "Pemahaman dasar pemrograman untuk scripting (Python, Bash, atau PowerShell)",
+                "Pengetahuan tentang OWASP Top 10 atau kerentanan umum (Vulnerability Assessment)"
             ],
         },
         {
-            "name": "Analytical & Project Experience",
+            "name": "Analytical Thinking & Incident Logic",
             "weight": 0.25,
             "description": (
-                "Pengalaman kandidat dalam proyek data/ML, termasuk proyek "
-                "akademik (tugas kuliah, skripsi/tugas akhir), kompetisi data, "
-                "atau proyek mandiri. Dinilai dari pendekatan problem-solving "
-                "dan hasil yang terukur."
+                "Menilai cara kandidat menganalisis ancaman dan mendokumentasikan temuan. "
+                "Penting untuk riset keamanan (Scientific) dan audit sistem (Innovation)."
             ),
             "indicators": [
-                "Data analysis or ML projects (academic projects count)",
-                "Measurable outcomes or results from projects",
-                "Problem-solving approach documentation",
-                "Thesis or final project with data analysis component",
-                "Coursework involving statistical analysis or data science",
-                "Competition participation (Kaggle, hackathons, data challenges)",
-                "Capstone or portfolio projects",
-                "Research experience with data methodology",
+                "Pengalaman dalam kompetisi CTF (Capture The Flag) atau bug bounty",
+                "Logika investigasi (kemampuan menganalisis root cause dari sebuah attack)",
+                "Kemampuan dokumentasi teknis (Write-up solusi tantangan atau laporan audit)",
+                "Pemahaman metodologi riset di bidang keamanan (misal: Forensik digital atau Malware analysis)",
+                "Kerapian dalam mendokumentasikan konfigurasi sistem/jaringan"
             ],
         },
         {
-            "name": "Communication & Teamwork",
-            "weight": 0.20,
+            "name": "Continuous Learning & Ethics (Cyber Growth)",
+            "weight": 0.25,
             "description": (
-                "Kemampuan kandidat berkomunikasi, bekerja dalam tim, dan "
-                "menjelaskan konsep teknis. Termasuk pengalaman organisasi "
-                "dan pengalaman lintas fungsi."
+                "Dunia cyber berubah sangat cepat. Mencari kandidat yang proaktif "
+                "memperbarui skill dan memiliki integritas moral tinggi."
             ),
             "indicators": [
-                "Organizational roles or leadership positions",
-                "Team collaboration evidence in projects",
-                "Presentation or public speaking experience",
-                "Ability to explain technical concepts to non-technical audience",
-                "Cross-functional team experience",
-                "Committee or event organizing experience",
-                "Mentoring or teaching experience",
-                "Written communication (reports, documentation, articles)",
+                "Sertifikasi mandiri (CompTIA Security+, CEH, TryHackMe, HTB, atau Cisco)",
+                "Eksplorasi teknologi baru (Cloud Security, IoT Security, atau AI for Security)",
+                "Pemahaman mengenai etika profesi dan legalitas (tidak menyalahgunakan skill)",
+                "Konsistensi belajar melalui platform lab virtual atau komunitas",
+                "Keinginan untuk edukasi publik (Cyber Awareness sharing)"
             ],
         },
         {
-            "name": "Growth Mindset",
-            "weight": 0.20,
+            "name": "Communication & Professional Integrity",
+            "weight": 0.15,
             "description": (
-                "Bukti bahwa kandidat memiliki kemauan belajar mandiri, "
-                "inisiatif untuk mengeksplorasi tools/teknologi baru di luar "
-                "kurikulum, serta keragaman pengembangan keterampilan."
+                "Memastikan kandidat komunikatif dalam menjelaskan risiko "
+                "dan dapat dipercaya dalam menangani data sensitif lab."
             ),
             "indicators": [
-                "Self-learning evidence (online courses, certifications, bootcamps)",
-                "Exposure to new tools beyond coursework curriculum",
-                "Initiative in personal or side projects",
-                "Curiosity demonstrated through diverse skill development",
-                "Continuous learning: multiple courses or certifications over time",
-                "Participation in tech communities, meetups, or workshops",
-                "Open-source contributions or personal blog/portfolio",
-                "Adaptability: experience with multiple domains or technologies",
+                "Kemampuan menjelaskan risiko teknis kepada orang non-teknis",
+                "Pengalaman kerja sama tim dalam proyek infrastruktur atau event",
+                "Tingkat kejujuran dan tanggung jawab dalam laporan (Integritas)",
+                "Kesesuaian dengan budaya lab yang suportif dan saling menjaga (No-blame culture)",
+                "Keterlibatan dalam komunitas cybersecurity atau organisasi kampus"
             ],
         },
     ],

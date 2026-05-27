@@ -138,13 +138,18 @@ def main() -> int:
         db.refresh(u)
 
     # Active period (deactivate any existing first).
+    # Task 13.2.3 — bulk announce requires current_phase == ANNOUNCEMENT for
+    # non-super-admin recruiters, so set submission_end_date and
+    # evaluation_end_date in the past.
     db.query(RecruitmentPeriod).filter(
         RecruitmentPeriod.is_active == True  # noqa: E712
     ).update({RecruitmentPeriod.is_active: False}, synchronize_session=False)
     now = datetime.now(timezone.utc)
     period = RecruitmentPeriod(
         name=PERIOD_NAME,
-        start_date=now - timedelta(days=1),
+        start_date=now - timedelta(days=14),
+        submission_end_date=now - timedelta(days=7),
+        evaluation_end_date=now - timedelta(days=1),
         end_date=now + timedelta(days=7),
         is_active=True,
         threshold_n=2,

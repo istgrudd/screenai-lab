@@ -5,6 +5,7 @@ import {
   CalendarClock,
   ChevronLeft,
   ChevronRight,
+  KeyRound,
   Loader2,
   Power,
   Search,
@@ -39,12 +40,16 @@ import {
 } from "@/components/ui/table";
 
 import {
+  adminResetPassword,
   deactivateUser,
+  getActivePeriod,
+  getActivePeriodStats,
   listUsers,
   reactivateUser,
   updateUserRole,
 } from "@/lib/api";
 import { getCurrentUser } from "@/lib/auth";
+import RecruitmentPhaseCard from "@/components/RecruitmentPhaseCard";
 
 const PAGE_SIZE = 20;
 
@@ -71,6 +76,35 @@ export default function AdminPage() {
   const [appliedQuery, setAppliedQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [busyUserId, setBusyUserId] = useState(null);
+
+  // Task 13.4.1 — phase card at the top of the admin panel.
+  const [activePeriod, setActivePeriod] = useState(null);
+  const [activeStats, setActiveStats] = useState(null);
+  const [periodLoading, setPeriodLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setPeriodLoading(true);
+      try {
+        const p = await getActivePeriod();
+        if (!cancelled) setActivePeriod(p);
+      } catch {
+        if (!cancelled) setActivePeriod(null);
+      }
+      try {
+        const s = await getActivePeriodStats();
+        if (!cancelled) setActiveStats(s);
+      } catch {
+        if (!cancelled) setActiveStats(null);
+      } finally {
+        if (!cancelled) setPeriodLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const fetchPage = useCallback(async () => {
     setLoading(true);
@@ -131,6 +165,27 @@ export default function AdminPage() {
     }
   };
 
+  const handleResetPassword = async (user) => {
+    const newPassword = window.prompt(
+      `Set a new password for ${user.full_name} (${user.email}).\n` +
+        `Minimum 8 characters. Share securely — this is an admin-assisted reset.`
+    );
+    if (newPassword == null) return; // cancelled
+    if (newPassword.length < 8) {
+      toast.error("Password must be at least 8 characters.");
+      return;
+    }
+    setBusyUserId(user.id);
+    try {
+      await adminResetPassword(user.id, newPassword);
+      toast.success(`Password reset for ${user.full_name}.`);
+    } catch (err) {
+      toast.error(err.message || "Password reset failed");
+    } finally {
+      setBusyUserId(null);
+    }
+  };
+
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   return (
@@ -152,6 +207,14 @@ export default function AdminPage() {
           </Link>
         </Button>
       </div>
+
+      {/* Task 13.4.1 — phase timeline + stats. */}
+      <RecruitmentPhaseCard
+        role="super_admin"
+        period={activePeriod}
+        stats={activeStats}
+        loading={periodLoading}
+      />
 
       {/* Filters */}
       <Card>
@@ -290,6 +353,17 @@ export default function AdminPage() {
                               <Power className="w-3.5 h-3.5" />
                             )}
                             {u.is_active ? "Deactivate" : "Reactivate"}
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleResetPassword(u)}
+                            disabled={busy}
+                            className="gap-1"
+                            title="Set a new password for this user"
+                          >
+                            <KeyRound className="w-3.5 h-3.5" />
+                            Reset password
                           </Button>
                         </div>
                         {isSelf && (

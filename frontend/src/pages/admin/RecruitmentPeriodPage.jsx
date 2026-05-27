@@ -45,19 +45,57 @@ import {
   listPeriods,
   updatePeriod,
 } from "@/lib/api";
+import { PHASE_BADGE_CLASS, PHASE_LABEL } from "@/lib/phase";
 
 function toLocalInputValue(iso) {
   if (!iso) return "";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "";
   const pad = (n) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
 function toIsoFromInput(value) {
   if (!value) return null;
   const d = new Date(value);
   return Number.isNaN(d.getTime()) ? null : d.toISOString();
+}
+
+function formatDateTime(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
+/**
+ * Frontend validation of phase ordering — Task 13.3.5.
+ * All four dates required (Opsi A). Returns an object keyed by field with
+ * a human-readable error per failing field, or null if everything's fine.
+ */
+function validatePhaseDates({ startDate, submissionEnd, evaluationEnd, endDate }) {
+  const errors = {};
+  const start = startDate ? new Date(startDate).getTime() : NaN;
+  const sub = submissionEnd ? new Date(submissionEnd).getTime() : NaN;
+  const evl = evaluationEnd ? new Date(evaluationEnd).getTime() : NaN;
+  const end = endDate ? new Date(endDate).getTime() : NaN;
+
+  if (!startDate) errors.startDate = "Wajib diisi";
+  if (!submissionEnd) errors.submissionEnd = "Wajib diisi";
+  if (!evaluationEnd) errors.evaluationEnd = "Wajib diisi";
+  if (!endDate) errors.endDate = "Wajib diisi";
+
+  if (!Number.isNaN(start) && !Number.isNaN(sub) && !(start < sub)) {
+    errors.submissionEnd = "Harus setelah Tanggal Mulai";
+  }
+  if (!Number.isNaN(sub) && !Number.isNaN(evl) && !(sub < evl)) {
+    errors.evaluationEnd = "Harus setelah Akhir Pendaftaran";
+  }
+  if (!Number.isNaN(evl) && !Number.isNaN(end) && !(evl < end)) {
+    errors.endDate = "Harus setelah Akhir Evaluasi";
+  }
+  return Object.keys(errors).length ? errors : null;
 }
 
 function StatusBadge({ active }) {
@@ -70,6 +108,23 @@ function StatusBadge({ active }) {
       <XCircle className="w-3 h-3" /> Tutup
     </Badge>
   );
+}
+
+function PhaseBadge({ phase }) {
+  if (!phase) return <span className="text-muted-foreground text-xs">—</span>;
+  return (
+    <Badge
+      variant="outline"
+      className={`text-[10px] uppercase tracking-wide ${PHASE_BADGE_CLASS[phase] || ""}`}
+    >
+      {PHASE_LABEL[phase] || phase}
+    </Badge>
+  );
+}
+
+function FieldError({ message }) {
+  if (!message) return null;
+  return <p className="text-xs text-destructive">{message}</p>;
 }
 
 function ActivePeriodCard({ period, onClosed }) {
@@ -107,18 +162,39 @@ function ActivePeriodCard({ period, onClosed }) {
           <CardTitle className="text-lg flex items-center gap-2">
             <CalendarClock className="w-5 h-5 text-primary" />
             Periode Aktif
+            <PhaseBadge phase={period.current_phase} />
           </CardTitle>
           <CardDescription>{period.name}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
-          <div className="grid grid-cols-2 gap-3 text-sm">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
             <div>
               <p className="text-xs text-muted-foreground uppercase">Mulai</p>
-              <p className="font-medium">{new Date(period.start_date).toLocaleString()}</p>
+              <p className="font-medium">{formatDateTime(period.start_date)}</p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground uppercase">
+                Akhir Pendaftaran
+              </p>
+              <p className="font-medium">
+                {period.submission_end_date
+                  ? formatDateTime(period.submission_end_date)
+                  : <span className="text-muted-foreground">—</span>}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground uppercase">
+                Akhir Evaluasi
+              </p>
+              <p className="font-medium">
+                {period.evaluation_end_date
+                  ? formatDateTime(period.evaluation_end_date)
+                  : <span className="text-muted-foreground">—</span>}
+              </p>
             </div>
             <div>
               <p className="text-xs text-muted-foreground uppercase">Tutup</p>
-              <p className="font-medium">{new Date(period.end_date).toLocaleString()}</p>
+              <p className="font-medium">{formatDateTime(period.end_date)}</p>
             </div>
             <div>
               <p className="text-xs text-muted-foreground uppercase">Threshold N</p>
@@ -173,28 +249,48 @@ function ActivePeriodCard({ period, onClosed }) {
 function CreatePeriodForm({ onCreated }) {
   const [name, setName] = useState("");
   const [startDate, setStartDate] = useState("");
+  const [submissionEnd, setSubmissionEnd] = useState("");
+  const [evaluationEnd, setEvaluationEnd] = useState("");
   const [endDate, setEndDate] = useState("");
   const [thresholdN, setThresholdN] = useState("");
+  const [errors, setErrors] = useState({});
   const [busy, setBusy] = useState(false);
 
   const reset = () => {
     setName("");
     setStartDate("");
+    setSubmissionEnd("");
+    setEvaluationEnd("");
     setEndDate("");
     setThresholdN("");
+    setErrors({});
   };
 
   const onSubmit = async (e) => {
     e.preventDefault();
-    if (!name.trim() || !startDate || !endDate) {
-      toast.error("Lengkapi nama, tanggal mulai, dan tanggal tutup.");
+    if (!name.trim()) {
+      toast.error("Lengkapi nama periode.");
       return;
     }
+    const dateErrors = validatePhaseDates({
+      startDate,
+      submissionEnd,
+      evaluationEnd,
+      endDate,
+    });
+    if (dateErrors) {
+      setErrors(dateErrors);
+      toast.error("Periksa urutan dan kelengkapan tanggal.");
+      return;
+    }
+    setErrors({});
     setBusy(true);
     try {
       const payload = {
         name: name.trim(),
         start_date: toIsoFromInput(startDate),
+        submission_end_date: toIsoFromInput(submissionEnd),
+        evaluation_end_date: toIsoFromInput(evaluationEnd),
         end_date: toIsoFromInput(endDate),
         threshold_n: thresholdN === "" ? null : Number(thresholdN),
       };
@@ -217,7 +313,9 @@ function CreatePeriodForm({ onCreated }) {
           Buat Periode Baru
         </CardTitle>
         <CardDescription>
-          Membuat periode baru otomatis menonaktifkan periode aktif sebelumnya.
+          Periode terdiri dari empat fase berurutan: Pendaftaran → Evaluasi →
+          Pengumuman. Membuat periode baru otomatis menonaktifkan periode
+          aktif sebelumnya.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -238,20 +336,48 @@ function CreatePeriodForm({ onCreated }) {
             <Input
               id="start"
               type="datetime-local"
+              step={1}
               value={startDate}
               onChange={(e) => setStartDate(e.target.value)}
               disabled={busy}
             />
+            <FieldError message={errors.startDate} />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="sub-end">Akhir Pendaftaran</Label>
+            <Input
+              id="sub-end"
+              type="datetime-local"
+              step={1}
+              value={submissionEnd}
+              onChange={(e) => setSubmissionEnd(e.target.value)}
+              disabled={busy}
+            />
+            <FieldError message={errors.submissionEnd} />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="eval-end">Akhir Evaluasi</Label>
+            <Input
+              id="eval-end"
+              type="datetime-local"
+              step={1}
+              value={evaluationEnd}
+              onChange={(e) => setEvaluationEnd(e.target.value)}
+              disabled={busy}
+            />
+            <FieldError message={errors.evaluationEnd} />
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="end">Tanggal Tutup</Label>
             <Input
               id="end"
               type="datetime-local"
+              step={1}
               value={endDate}
               onChange={(e) => setEndDate(e.target.value)}
               disabled={busy}
             />
+            <FieldError message={errors.endDate} />
           </div>
           <div className="md:col-span-2 space-y-1.5">
             <Label htmlFor="threshold">
@@ -282,15 +408,38 @@ function CreatePeriodForm({ onCreated }) {
 function PeriodRow({ period, onChanged }) {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(period.name);
+  const [submissionEnd, setSubmissionEnd] = useState(
+    toLocalInputValue(period.submission_end_date)
+  );
+  const [evaluationEnd, setEvaluationEnd] = useState(
+    toLocalInputValue(period.evaluation_end_date)
+  );
   const [endDate, setEndDate] = useState(toLocalInputValue(period.end_date));
   const [thresholdN, setThresholdN] = useState(period.threshold_n ?? "");
+  const [errors, setErrors] = useState({});
   const [busy, setBusy] = useState(false);
 
+  const startInput = toLocalInputValue(period.start_date);
+
   const onSave = async () => {
+    const dateErrors = validatePhaseDates({
+      startDate: startInput,
+      submissionEnd,
+      evaluationEnd,
+      endDate,
+    });
+    if (dateErrors) {
+      setErrors(dateErrors);
+      toast.error("Periksa urutan tanggal.");
+      return;
+    }
+    setErrors({});
     setBusy(true);
     try {
       await updatePeriod(period.id, {
         name: name.trim(),
+        submission_end_date: toIsoFromInput(submissionEnd),
+        evaluation_end_date: toIsoFromInput(evaluationEnd),
         end_date: toIsoFromInput(endDate),
         threshold_n: thresholdN === "" ? null : Number(thresholdN),
       });
@@ -310,17 +459,40 @@ function PeriodRow({ period, onChanged }) {
         <TableCell>
           <Input value={name} onChange={(e) => setName(e.target.value)} disabled={busy} />
         </TableCell>
-        <TableCell className="text-xs whitespace-nowrap">
-          {new Date(period.start_date).toLocaleString()}
+        <TableCell className="text-xs whitespace-nowrap text-muted-foreground">
+          {formatDateTime(period.start_date)}
         </TableCell>
-        <TableCell>
+        <TableCell className="space-y-1">
           <Input
             type="datetime-local"
+            step={1}
+            value={submissionEnd}
+            onChange={(e) => setSubmissionEnd(e.target.value)}
+            disabled={busy}
+          />
+          <FieldError message={errors.submissionEnd} />
+        </TableCell>
+        <TableCell className="space-y-1">
+          <Input
+            type="datetime-local"
+            step={1}
+            value={evaluationEnd}
+            onChange={(e) => setEvaluationEnd(e.target.value)}
+            disabled={busy}
+          />
+          <FieldError message={errors.evaluationEnd} />
+        </TableCell>
+        <TableCell className="space-y-1">
+          <Input
+            type="datetime-local"
+            step={1}
             value={endDate}
             onChange={(e) => setEndDate(e.target.value)}
             disabled={busy}
           />
+          <FieldError message={errors.endDate} />
         </TableCell>
+        <TableCell><PhaseBadge phase={period.current_phase} /></TableCell>
         <TableCell><StatusBadge active={period.is_active} /></TableCell>
         <TableCell>
           <Input
@@ -352,11 +524,22 @@ function PeriodRow({ period, onChanged }) {
     <TableRow>
       <TableCell className="font-medium">{period.name}</TableCell>
       <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
-        {new Date(period.start_date).toLocaleString()}
+        {formatDateTime(period.start_date)}
       </TableCell>
       <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
-        {new Date(period.end_date).toLocaleString()}
+        {period.submission_end_date
+          ? formatDateTime(period.submission_end_date)
+          : "—"}
       </TableCell>
+      <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
+        {period.evaluation_end_date
+          ? formatDateTime(period.evaluation_end_date)
+          : "—"}
+      </TableCell>
+      <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
+        {formatDateTime(period.end_date)}
+      </TableCell>
+      <TableCell><PhaseBadge phase={period.current_phase} /></TableCell>
       <TableCell><StatusBadge active={period.is_active} /></TableCell>
       <TableCell>{period.threshold_n ?? "—"}</TableCell>
       <TableCell>{period.application_count ?? 0}</TableCell>
@@ -430,7 +613,10 @@ export default function RecruitmentPeriodPage() {
                 <TableRow>
                   <TableHead>Nama</TableHead>
                   <TableHead>Mulai</TableHead>
+                  <TableHead>Akhir Pendaftaran</TableHead>
+                  <TableHead>Akhir Evaluasi</TableHead>
                   <TableHead>Tutup</TableHead>
+                  <TableHead>Fase</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Threshold N</TableHead>
                   <TableHead>Total Aplikasi</TableHead>
