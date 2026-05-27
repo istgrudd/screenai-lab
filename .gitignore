@@ -55,6 +55,7 @@ frontend/dist/
 .windsurfrules
 AGENTS.md
 GEMINI.md
+CLAUDE.md
 .claude/settings.json
 .kiro/steering/code-review-graph.md
 analysis.md
