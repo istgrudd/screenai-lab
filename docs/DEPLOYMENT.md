@@ -225,7 +225,7 @@ If only the frontend changed (and `VITE_API_BASE_URL` hasn't changed): `docker c
 | Source | What's in it | How |
 |---|---|---|
 | PostgreSQL (`postgres_data` volume) | All application data — users, applications, evaluations, audit logs | `pg_dump` (below) |
-| `./data/uploads/` on the host | Candidate-submitted PDFs/images | `rsync` / filesystem snapshot |
+| `./uploads/` on the host | Candidate-submitted PDFs/images | `rsync` / filesystem snapshot |
 | `./models/` on the host | HuggingFace model cache | Optional — re-downloadable |
 
 ### Backup
@@ -236,13 +236,13 @@ docker compose exec -T db pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" \
     > "/var/backups/screenai-lab/db-$(date +%F).sql"
 
 # Uploads — rsync off-host
-rsync -avz ./data/uploads/ backup-host:/backups/screenai-lab/uploads/
+rsync -avz ./uploads/ backup-host:/backups/screenai-lab/uploads/
 ```
 
 A sample cron line (runs daily at 03:00):
 
 ```cron
-0 3 * * * cd /opt/screenai-lab && docker compose exec -T db pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > /var/backups/screenai-lab/db-$(date +\%F).sql && rsync -avz /opt/screenai-lab/data/uploads/ backup-host:/backups/screenai-lab/uploads/
+0 3 * * * cd /opt/screenai-lab && docker compose exec -T db pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > /var/backups/screenai-lab/db-$(date +\%F).sql && rsync -avz /opt/screenai-lab/uploads/ backup-host:/backups/screenai-lab/uploads/
 ```
 
 ### Restore
@@ -261,7 +261,7 @@ docker compose exec -T db psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
     < /var/backups/screenai-lab/db-2026-05-12.sql
 
 # Restore uploads.
-rsync -avz backup-host:/backups/screenai-lab/uploads/ ./data/uploads/
+rsync -avz backup-host:/backups/screenai-lab/uploads/ ./uploads/
 
 # Bring the backend back.
 docker compose start backend
