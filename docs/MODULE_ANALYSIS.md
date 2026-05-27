@@ -365,7 +365,7 @@ For endpoint-level detail see [API_REFERENCE.md](API_REFERENCE.md). For runtime 
 **Dependencies**
 
 - `Rubric` and `Dimension` ORM rows.
-- DeepSeek V4 Flash through OpenAI-compatible SDK.
+- Configured DeepSeek model through the OpenAI-compatible SDK.
 
 **Business rules**
 
@@ -380,7 +380,7 @@ For endpoint-level detail see [API_REFERENCE.md](API_REFERENCE.md). For runtime 
 
 **Notable edge cases**
 
-- `call_llm_json` retries on API or JSON parse failures.
+- `call_llm_json_async` is used by batch evaluation and retries on API or JSON parse failures without blocking the event loop; the sync `call_llm_json` helper remains for compatibility.
 - LangChain/ChromaDB remain installed for compatibility/future retrieval, but are not the current active retrieval mechanism.
 
 ---
@@ -420,7 +420,7 @@ For endpoint-level detail see [API_REFERENCE.md](API_REFERENCE.md). For runtime 
 - `force=true`: re-score already-scored linked candidates, but still only applications currently in `submitted` status.
 - Evaluation outside `EVALUATION` phase is allowed and returns a soft warning.
 - Successful candidate evaluation sets application status to `screening`.
-- LLM calls are bounded with an internal semaphore to avoid too many concurrent DeepSeek calls.
+- LLM calls use an async client path and are bounded with an internal semaphore to avoid too many concurrent DeepSeek calls.
 
 **`_evaluate_one` step list**
 

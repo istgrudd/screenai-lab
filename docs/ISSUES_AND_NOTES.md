@@ -107,8 +107,11 @@ No other `TODO/FIXME/XXX/HACK` comments exist in `backend/` or `frontend/src/`.
 ### 🟨 ChromaDB persist directory grows unbounded
 - No cleanup on rubric delete, no eviction strategy. Today's pipeline doesn't actually use vector retrieval at evaluation time, so this is dormant — but if/when retrieval is wired in, plan for cleanup.
 
-### ✅ DeepSeek calls are sequential per application — **Resolved in Batch 5**
-- [evaluation_service.py](../backend/services/evaluation_service.py)::`run_evaluation_pipeline` runs `_evaluate_one` through an `asyncio.Semaphore(5)` + `asyncio.gather`. Up to 5 LLM round-trips overlap; the sync SQLAlchemy Session remains safe because every DB op runs in the non-await sections of `_evaluate_one`. Expected N-candidate wall-clock: `ceil(N/5) × LLM_latency` instead of `N × LLM_latency`.
+### ✅ DeepSeek calls are sequential per application — **Resolved in Batch 5, async client fixed in 2026-05-27 report**
+- [evaluation_service.py](../backend/services/evaluation_service.py)::`run_evaluation_pipeline` runs `_evaluate_one` through an `asyncio.Semaphore(5)` + `asyncio.gather`.
+- [llm_client.py](../backend/utils/llm_client.py) now provides an `AsyncOpenAI` path (`call_llm_json_async` -> `call_llm_async`), and [rag_pipeline.py](../backend/services/rag_pipeline.py)::`evaluate_candidate` awaits that path. DeepSeek round-trips are therefore genuinely awaitable and can overlap up to `_LLM_CONCURRENCY`.
+- Async retry backoff uses `asyncio.sleep`, not blocking `time.sleep`; the sync `call_llm` / `call_llm_json` path remains for compatibility.
+- The sync SQLAlchemy Session remains safe because DB operations happen in non-await sections of `_evaluate_one`. Expected N-candidate wall-clock for the LLM portion is approximately `ceil(N/5) × LLM_latency` instead of `N × LLM_latency`.
 
 ### ✅ SWOT-text endpoint re-extracts every call — **Resolved in Batch 5**
 - [submit_anonymization.py](../backend/services/submit_anonymization.py) now extracts SWOT raw_text at submit-time and caches it on a `CandidateDocument(document_type="swot")` row. [GET /applications/{id}/swot-text](../backend/routers/applications.py) reads from this cache first; falls back to inline PyMuPDF if the cache row is missing (e.g. the submit-time task crashed before reaching SWOT).
@@ -180,7 +183,7 @@ Phase 1 / 2 features that **are** done and verified by reading source:
 - The Lab-pipeline equivalent (`POST /api/documents/upload/{doc_type}`) is already covered by `smoke_test_applications.py`. Recommendation: delete this script when Phase 2 Task 14.4's legacy-endpoint removal lands.
 
 ### 🟨 `_LLM_CONCURRENCY` is a hard-coded constant
-- [evaluation_service.py:41](../backend/services/evaluation_service.py#L41) caps in-flight DeepSeek calls at 5. The right value depends on DeepSeek's per-account rate limit, which isn't accessible to the code. If a future operator hits 429s during a large batch, they'll need to edit the constant and redeploy. Cheap follow-up: surface as an env var on `Settings`.
+- [evaluation_service.py](../backend/services/evaluation_service.py) caps in-flight DeepSeek calls at 5. The right value depends on DeepSeek's per-account rate limit, which isn't accessible to the code. If a future operator hits 429s during a large batch, they'll need to edit the constant and redeploy. Cheap follow-up: surface `_LLM_CONCURRENCY` as an env var on `Settings`.
 
 ---
 

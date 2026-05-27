@@ -277,8 +277,8 @@ sequenceDiagram
     participant KHS as khs_parser
     participant ANO as anonymizer<br/>(fallback)
     participant RAG as rag_pipeline.<br/>evaluate_candidate
-    participant LLM as llm_client.call_llm_json
-    participant DS as DeepSeek V4 Flash
+    participant LLM as llm_client.call_llm_json_async
+    participant DS as DeepSeek model
     participant SC as scoring.store_evaluation_results
 
     ES->>DB: load Application + User
@@ -297,8 +297,8 @@ sequenceDiagram
     ES->>RAG: evaluate_candidate(<br/>{anonymized_text}, rubric_id, db)
     RAG->>DB: load Rubric + Dimensions
     RAG->>RAG: build SYSTEM_PROMPT<br/>+ rubric_context<br/>+ user_prompt
-    RAG->>LLM: call_llm_json(...)
-    LLM->>DS: chat.completions.create<br/>(temp=0.1, max=4096)
+    RAG->>LLM: await call_llm_json_async(...)
+    LLM->>DS: await chat.completions.create<br/>(temp=0.1, max=4096)
     DS-->>LLM: response.choices[0].message.content
     LLM->>LLM: strip ```json fence<br/>+ json.loads (3 retries)
     LLM-->>RAG: dict (dimension_scores + summary)

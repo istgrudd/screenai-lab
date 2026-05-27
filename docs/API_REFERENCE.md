@@ -772,14 +772,16 @@ Non-standard envelope:
 
 ```text
 KTM validate -> KHS parse -> ensure Candidate -> cached/inline NER
--> build rubric-augmented prompt -> DeepSeek V4 Flash -> store DimensionScore rows
+-> build rubric-augmented prompt -> async DeepSeek LLM call -> store DimensionScore rows
 ```
 
 **Errors**
 
 - `404` no rubric for division.
 - `400` rubric has zero dimensions.
-- `422` other pipeline `ValueError`.
+- `400` rubric weights do not sum to 1.0.
+- `500` unrecognized setup errors are logged server-side and returned with a sanitized detail.
+- Per-candidate pipeline failures are collected in `data.errors` while the batch response can still be `200`.
 
 ### 👀 `GET /api/recruiter/results/{application_id}`
 

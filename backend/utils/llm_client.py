@@ -4,16 +4,18 @@ Provides structured JSON output with retry logic for the
 recruitment screening pipeline.
 """
 
+import asyncio
 import json
 import time
 
-from openai import OpenAI
+from openai import AsyncOpenAI, OpenAI
 
 from backend.config import settings
 
 
 # Module-level singleton
 _client: OpenAI | None = None
+_async_client: AsyncOpenAI | None = None
 
 
 def get_llm_client() -> OpenAI:
@@ -25,6 +27,17 @@ def get_llm_client() -> OpenAI:
             base_url=settings.deepseek_base_url,
         )
     return _client
+
+
+def get_async_llm_client() -> AsyncOpenAI:
+    """Return the async OpenAI-compatible client for DeepSeek V4."""
+    global _async_client
+    if _async_client is None:
+        _async_client = AsyncOpenAI(
+            api_key=settings.deepseek_api_key,
+            base_url=settings.deepseek_base_url,
+        )
+    return _async_client
 
 
 def call_llm(
@@ -105,6 +118,77 @@ def call_llm_json(
 
     for attempt in range(1, max_retries + 1):
         raw = call_llm(system_prompt, user_prompt, max_retries=1, **kwargs)
+
+        try:
+            return _parse_json_response(raw)
+        except (json.JSONDecodeError, ValueError) as e:
+            print(f"[LLM] JSON parse attempt {attempt}/{max_retries} failed: {e}")
+            if attempt < max_retries:
+                print("[LLM] Retrying with stricter prompt...")
+
+    raise ValueError(
+        f"Failed to get valid JSON from LLM after {max_retries} attempts. "
+        f"Last raw response: {raw[:500]}"
+    )
+
+
+async def call_llm_async(
+    system_prompt: str,
+    user_prompt: str,
+    model: str = "deepseek-v4-pro",
+    temperature: float = 0.1,
+    max_tokens: int = 4096,
+    max_retries: int = 3,
+) -> str:
+    """Call the DeepSeek V4 Pro LLM asynchronously and return response text.
+
+    Mirrors call_llm(), but uses AsyncOpenAI and non-blocking retry backoff so
+    batch evaluation coroutines can overlap while waiting on DeepSeek I/O.
+    """
+    client = get_async_llm_client()
+    last_error = None
+
+    for attempt in range(1, max_retries + 1):
+        try:
+            response = await client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
+            return response.choices[0].message.content
+
+        except Exception as e:
+            last_error = e
+            print(f"[LLM] Attempt {attempt}/{max_retries} failed: {e}")
+            if attempt < max_retries:
+                wait = 2 ** attempt  # exponential backoff: 2, 4, 8 seconds
+                print(f"[LLM] Retrying in {wait}s...")
+                await asyncio.sleep(wait)
+
+    raise RuntimeError(
+        f"LLM call failed after {max_retries} attempts. Last error: {last_error}"
+    )
+
+
+async def call_llm_json_async(
+    system_prompt: str,
+    user_prompt: str,
+    **kwargs,
+) -> dict:
+    """Call the LLM asynchronously and parse the response as JSON."""
+    max_retries = kwargs.pop("max_retries", 3)
+
+    for attempt in range(1, max_retries + 1):
+        raw = await call_llm_async(
+            system_prompt,
+            user_prompt,
+            max_retries=1,
+            **kwargs,
+        )
 
         try:
             return _parse_json_response(raw)

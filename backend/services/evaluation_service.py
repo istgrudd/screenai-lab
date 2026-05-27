@@ -34,11 +34,11 @@ from backend.services.scoring import store_evaluation_results, validate_rubric_w
 
 logger = logging.getLogger(__name__)
 
-# Bound the number of in-flight DeepSeek calls inside a single batch. The
-# event loop already serializes the SQLAlchemy work between awaits, so the
-# semaphore only gates the LLM round-trip — the slow part. Keep this small
-# enough to stay under DeepSeek rate limits but large enough that batch
-# wall-clock scales sub-linearly with N.
+# Bound the number of in-flight DeepSeek calls inside a single batch. The LLM
+# path is awaitable (AsyncOpenAI), so these round-trips can overlap. The sync
+# SQLAlchemy work still runs in the non-await sections of each coroutine.
+# Keep this small enough to stay under DeepSeek rate limits but large enough
+# that batch wall-clock scales sub-linearly with N.
 _LLM_CONCURRENCY = 5
 
 
@@ -140,10 +140,9 @@ async def run_evaluation_pipeline(
     if not applications:
         return {"queued": 0, "results": [], "errors": [], "skipped": skipped}
 
-    # Bounded-concurrency evaluation. The SQLAlchemy Session is sync and the
-    # only `await` inside _evaluate_one is the DeepSeek call, so two coroutines
-    # never touch the session at the same Python instruction — but they DO
-    # overlap their LLM round-trips, which is the win.
+    # Bounded-concurrency evaluation. The SQLAlchemy Session is sync and DB
+    # work happens between awaits; the DeepSeek request itself is awaitable,
+    # so up to _LLM_CONCURRENCY LLM round-trips can overlap inside this batch.
     semaphore = asyncio.Semaphore(_LLM_CONCURRENCY)
 
     async def _bounded(app: Application) -> tuple[str, dict]:

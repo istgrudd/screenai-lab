@@ -13,7 +13,7 @@
 - A **candidate self-service portal**: registration → profile → multi-document upload → review → submit.
 - A **phase-aware recruitment period**: `UPCOMING → SUBMISSION → EVALUATION → ANNOUNCEMENT → CLOSED`.
 - A **submit-time anonymization pipeline**: CV + Motivation Letter are anonymized through IndoBERT NER in a FastAPI BackgroundTask.
-- A **rubric-augmented LLM scoring pipeline**: cached anonymized candidate text, KHS summary, Motivation Letter, and division rubric are sent to DeepSeek V4 Flash for structured scoring.
+- A **rubric-augmented LLM scoring pipeline**: cached anonymized candidate text, KHS summary, Motivation Letter, and division rubric are sent to the configured DeepSeek model for structured scoring.
 - A **recruiter / super-admin console**: filtering, evaluation, re-evaluation, score override, threshold highlight, manual checklist, and bulk announcement.
 
 The repo was forked from the Capstone project [`istgrudd/screenai`](https://github.com/istgrudd/screenai). Legacy Capstone endpoints (`POST /api/upload`, `POST /api/evaluate`) remain mounted for compatibility, but the Lab pipeline is the primary path.
@@ -62,7 +62,7 @@ graph LR
     end
 
     subgraph ExternalAI[External AI services]
-        DS[DeepSeek V4 Flash<br/>api.deepseek.com/v1]
+        DS[DeepSeek model<br/>api.deepseek.com/v1]
         HF[HuggingFace<br/>IndoBERT model download]
     end
 
@@ -87,7 +87,7 @@ browser HTTPS -> host Nginx/Caddy -> frontend container :80
 Key data paths:
 
 1. **Submit-time NER**: `submit_application` commits the application, then schedules a background task that opens its own `SessionLocal`, extracts CV + Motivation Letter, anonymizes text, and caches it in `candidate_documents.anonymized_text`.
-2. **Evaluation**: recruiter triggers `POST /api/recruiter/evaluate/batch`; the pipeline checks NER cache, falls back to inline NER when needed, parses KHS, validates KTM, builds a rubric-augmented prompt, calls DeepSeek V4 Flash, persists `DimensionScore`, and updates `Candidate.composite_score`.
+2. **Evaluation**: recruiter triggers `POST /api/recruiter/evaluate/batch`; the pipeline checks NER cache, falls back to inline NER when needed, parses KHS, validates KTM, builds a rubric-augmented prompt, awaits the async DeepSeek client, persists `DimensionScore`, and updates `Candidate.composite_score`.
 3. **Phase derivation**: `backend/utils/period_utils.py::get_current_phase` derives the active phase from calendar boundaries. No cron/scheduler is required.
 4. **Announcement**: recruiter selects passing applications and calls `POST /api/announcements/bulk`; the backend updates pass/fail statuses atomically and writes `AuditLog` rows.
 
@@ -239,7 +239,7 @@ screenai-lab/
 | bcrypt | Password hashing |
 | slowapi | Rate limiting |
 | PyMuPDF | PDF text extraction |
-| OpenAI SDK | DeepSeek V4 Flash OpenAI-compatible client |
+| OpenAI SDK | DeepSeek OpenAI-compatible sync and async clients |
 | transformers + torch | IndoBERT NER pipeline |
 | LangChain + ChromaDB | Dependencies available for future vector retrieval; not active retrieval path today |
 | psycopg2-binary | PostgreSQL driver |
@@ -271,11 +271,11 @@ screenai-lab/
 
 ## 6. External Services & Integrations
 
-### DeepSeek V4 Flash
+### DeepSeek LLM
 
 - **Endpoint:** `DEEPSEEK_BASE_URL`, default `https://api.deepseek.com/v1`.
 - **Auth:** `DEEPSEEK_API_KEY`.
-- **Client:** OpenAI-compatible SDK wrapper in `backend/utils/llm_client.py`.
+- **Client:** OpenAI-compatible SDK wrapper in `backend/utils/llm_client.py`; batch evaluation uses the `AsyncOpenAI` path.
 - **Used by:** `backend/services/rag_pipeline.py` for rubric-augmented JSON scoring.
 
 ### HuggingFace Transformers

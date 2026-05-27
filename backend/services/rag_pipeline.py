@@ -14,7 +14,7 @@ directly into the prompt.
 from sqlalchemy.orm import Session
 
 from backend.models.rubric import Rubric, Dimension
-from backend.utils.llm_client import call_llm_json
+from backend.utils.llm_client import call_llm_json_async
 
 
 # ---------------------------------------------------------------------------
@@ -152,7 +152,7 @@ async def evaluate_candidate(
     user_prompt = _build_user_prompt(cv_text, rubric_context)
 
     # --- 3. Call LLM ---
-    llm_response = call_llm_json(
+    llm_response = await call_llm_json_async(
         system_prompt=SYSTEM_PROMPT,
         user_prompt=user_prompt,
         temperature=0.1,
