@@ -1,12 +1,14 @@
-"""RAG pipeline orchestration service.
+"""Rubric-augmented LLM scoring service.
 
-Evaluates a candidate's anonymized CV against a rubric using:
-1. Rubric context retrieval (dimensions + indicators)
-2. Prompt augmentation with CV text + rubric context
-3. LLM inference via DeepSeek V3 for structured scoring
+Evaluates a candidate's anonymized text against a rubric using:
+1. Direct rubric context construction from database dimensions + indicators.
+2. Prompt augmentation with candidate text + rubric context.
+3. LLM inference via the configured DeepSeek model for structured scoring.
 
-The pipeline is designed for Indonesian-language CVs and produces
-evidence-based scoring with justifications.
+Note: despite the historical filename, the current production path does not
+perform live vector retrieval from ChromaDB. LangChain/ChromaDB remain available
+for compatibility/future retrieval, while this module inlines rubric context
+directly into the prompt.
 """
 
 from sqlalchemy.orm import Session
@@ -59,7 +61,7 @@ PANDUAN SKOR:
 
 
 def _build_rubric_context(rubric: Rubric) -> str:
-    """Build rubric context string for the prompt."""
+    """Build direct rubric context string for the prompt."""
     lines = [
         f"RUBRIK EVALUASI: {rubric.name}",
         f"POSISI: {rubric.position}",
@@ -80,7 +82,7 @@ def _build_rubric_context(rubric: Rubric) -> str:
 
 
 def _build_user_prompt(anonymized_cv: str, rubric_context: str) -> str:
-    """Build the user prompt with CV text and rubric context."""
+    """Build the user prompt with candidate text and rubric context."""
     return f"""{rubric_context}
 
 ========================================
@@ -103,7 +105,7 @@ async def evaluate_candidate(
     db: Session,
     certificate_data: dict | None = None,
 ) -> dict:
-    """Evaluate a candidate's CV against a rubric using the RAG pipeline.
+    """Evaluate a candidate's text with rubric-augmented LLM scoring.
 
     Args:
         anonymized_cv: Dict with at minimum "anonymized_text" key.
