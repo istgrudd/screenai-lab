@@ -1,394 +1,340 @@
 # Architecture
 
-> Snapshot of the ScreenAI Lab system as of branch `lab/setup`, commit `9060bc56f1f8` (build date 2026-05-08).
+> Snapshot of the ScreenAI Lab system as of the current `main` branch.
+>
+> Product-level source of truth: [PRD.md](../PRD.md). Deployment source of truth: [DEPLOYMENT.md](DEPLOYMENT.md).
 
 ---
 
 ## 1. Overview
 
-**ScreenAI Lab** is the AI-powered recruitment screening system for the **MBC (Multimedia & Business Computing) Laboratory** at Telkom University. It replaces a manual, paper-driven recruiting cycle for four divisions (Big Data, Cyber Security, Game Technology, GIS) with:
+**ScreenAI Lab** is the AI-powered recruitment screening system for the **MBC Laboratory, Telkom University**. It replaces a manual recruiting workflow with:
 
-- A **candidate self-service portal** (registration → profile → multi-document upload → review → submit).
-- An **AI evaluation pipeline** that anonymizes CVs (IndoBERT NER), parses transcripts (KHS), validates student IDs (KTM), and scores against a configurable per-division rubric using **DeepSeek V4 Flash** with rubric context retrieval (RAG).
-- A **recruiter / super-admin console** for filtering candidates by division, running batch evaluation, overriding individual scores, and bulk-publishing pass/fail results.
-- A **time-boxed `RecruitmentPeriod`** with four explicit phases (`UPCOMING → SUBMISSION → EVALUATION → ANNOUNCEMENT → CLOSED`) that gates which actions are allowed when.
+- A **candidate self-service portal**: registration → profile → multi-document upload → review → submit.
+- A **phase-aware recruitment period**: `UPCOMING → SUBMISSION → EVALUATION → ANNOUNCEMENT → CLOSED`.
+- A **submit-time anonymization pipeline**: CV + Motivation Letter are anonymized through IndoBERT NER in a FastAPI BackgroundTask.
+- A **rubric-augmented LLM scoring pipeline**: cached anonymized candidate text, KHS summary, Motivation Letter, and division rubric are sent to DeepSeek V4 Flash for structured scoring.
+- A **recruiter / super-admin console**: filtering, evaluation, re-evaluation, score override, threshold highlight, manual checklist, and bulk announcement.
 
-The repo was forked from the Capstone project [`istgrudd/screenai`](https://github.com/istgrudd/screenai). The legacy upload flow (`POST /api/upload`, `POST /api/evaluate`) is still mounted but is being phased out in favour of the Lab pipeline (`POST /api/applications/{id}/submit`, `POST /api/recruiter/evaluate/batch`). Phase status (per [CLAUDE.md](../CLAUDE.md)):
+The repo was forked from the Capstone project [`istgrudd/screenai`](https://github.com/istgrudd/screenai). Legacy Capstone endpoints (`POST /api/upload`, `POST /api/evaluate`) remain mounted for compatibility, but the Lab pipeline is the primary path.
 
 | Phase | Description | Status |
 |---|---|---|
 | 0 | Fork & cleanup | ✅ Complete |
-| 1 | Candidate Portal MVP (Auth + Upload + Status + Admin) | ✅ Complete |
-| 2 | Full Recruitment Flow (NER submit-time + Period + Evaluation + Selection) | 🔄 In Progress |
-| 3 | Deployment (VPS lab / cloud) | 📋 Planned |
+| 1 | Candidate Portal MVP | ✅ Complete |
+| 2 | Full Recruitment Flow | ✅ Complete |
+| 3 | Docker/VPS deployment | 🔄 In Progress — assets ready, production cutover pending |
 
 ---
 
 ## 2. High-Level Architecture
 
+Production is designed for a **single self-hosted VPS** using Docker Compose. TLS is terminated by a host-level reverse proxy outside Docker.
+
 ```mermaid
 graph LR
-    subgraph "Client"
-        BR[Browser<br/>React 19 + Vite]
+    subgraph Client
+        BR[Browser<br/>React SPA]
     end
 
-    subgraph "VPS Lab (self-hosted)"
-        RP[Reverse Proxy<br/>Nginx / Caddy<br/>TLS]
-        ST[Static Frontend<br/>vite build output]
-        API[FastAPI app<br/>backend/main.py<br/>uvicorn via systemd]
-        BG[BackgroundTasks<br/>NER anonymization]
-        RP --> ST
-        RP --> API
-        API -.spawns.-> BG
+    subgraph VPS[Self-hosted VPS]
+        RP[Host Nginx/Caddy<br/>TLS termination]
+
+        subgraph Docker[Docker Compose network]
+            FE[frontend container<br/>nginx + React build<br/>port 80 published]
+            API[backend container<br/>FastAPI + uvicorn<br/>port 8000 internal]
+            DB[(db container<br/>PostgreSQL 16<br/>port 5432 internal)]
+            BG[FastAPI BackgroundTasks<br/>submit-time NER]
+
+            FE -- /api proxy --> API
+            API <--> DB
+            API -. schedules .-> BG
+        end
+
+        RP -- plain HTTP --> FE
     end
 
-    subgraph "Persistent State"
-        DB[(SQLite dev /<br/>PostgreSQL prod<br/>self-hosted on VPS)]
-        FS[Local FS<br/>uploads/]
-        CH[(ChromaDB<br/>backend/vectorstore)]
+    subgraph HostStorage[Host-mounted / persisted state]
+        DATA[./data<br/>SQLite dev, raw/extracted/anonymized data]
+        MODELS[./models<br/>HuggingFace cache]
+        PGVOL[postgres_data volume]
     end
 
-    subgraph "External AI"
+    subgraph ExternalAI[External AI services]
         DS[DeepSeek V4 Flash<br/>api.deepseek.com/v1]
-        HF[HuggingFace<br/>IndoBERT NER<br/>MiniLM embeddings]
+        HF[HuggingFace<br/>IndoBERT model download]
     end
 
-    BR -- HTTPS / Bearer JWT --> RP
-    API <--> DB
-    API <--> FS
-    BG --> FS
-    BG --> HF
-    API --> CH
+    BR -- HTTPS --> RP
     API --> DS
     API --> HF
+    BG --> HF
+    API --- DATA
+    API --- MODELS
+    DB --- PGVOL
+```
+
+Runtime path:
+
+```text
+browser HTTPS -> host Nginx/Caddy -> frontend container :80
+                                        ├─ serve React SPA
+                                        └─ /api -> backend container :8000 -> db container :5432
 ```
 
 Key data paths:
 
-- **Submit-time NER:** `submit_application` commits the application, then schedules a `BackgroundTask` that runs IndoBERT NER on the candidate's CV + Motivation Letter and caches the anonymized text in `candidate_documents.anonymized_text`.
-- **Evaluation:** the recruiter triggers `POST /api/recruiter/evaluate/batch` per division. The pipeline checks the cache, calls KHS parser + KTM validator, retrieves rubric context, builds a Bahasa Indonesia prompt, calls DeepSeek, persists `DimensionScore` rows, and updates `Candidate.composite_score`.
-- **Phase derivation:** the active `RecruitmentPeriod` has `start_date`, `submission_end_date`, `evaluation_end_date`, `end_date`. `backend/utils/period_utils.py::get_current_phase` derives `UPCOMING / SUBMISSION / EVALUATION / ANNOUNCEMENT / CLOSED` purely from the calendar (never from `is_active`).
+1. **Submit-time NER**: `submit_application` commits the application, then schedules a background task that opens its own `SessionLocal`, extracts CV + Motivation Letter, anonymizes text, and caches it in `candidate_documents.anonymized_text`.
+2. **Evaluation**: recruiter triggers `POST /api/recruiter/evaluate/batch`; the pipeline checks NER cache, falls back to inline NER when needed, parses KHS, validates KTM, builds a rubric-augmented prompt, calls DeepSeek V4 Flash, persists `DimensionScore`, and updates `Candidate.composite_score`.
+3. **Phase derivation**: `backend/utils/period_utils.py::get_current_phase` derives the active phase from calendar boundaries. No cron/scheduler is required.
+4. **Announcement**: recruiter selects passing applications and calls `POST /api/announcements/bulk`; the backend updates pass/fail statuses atomically and writes `AuditLog` rows.
 
 ---
 
-## 3. Directory Tree
+## 3. Deployment Model
 
-Annotated view (only meaningful files / dirs).
+### Canonical production path
 
+| Component | Production runtime | Notes |
+|---|---|---|
+| Frontend | Docker container built from `frontend/Dockerfile` | nginx serves SPA and proxies `/api/` to backend service |
+| Backend | Docker container built from `backend/Dockerfile` | `uvicorn backend.main:app --host 0.0.0.0 --port 8000` |
+| Database | Docker Compose service `db` | `postgres:16-alpine`, internal hostname `db` |
+| TLS | Host OS, outside Docker | Nginx/Caddy terminates HTTPS and forwards to frontend container port 80 |
+| Migrations | Backend lifespan | `alembic upgrade head` runs on FastAPI startup |
+| Rubric seeding | Backend lifespan | one empty rubric per division, idempotent |
+
+Manual `uvicorn` via systemd/supervisor is not the recommended production path anymore. It can still be used for local experiments or emergency fallback, but Docker Compose is the canonical deployment documented in [DEPLOYMENT.md](DEPLOYMENT.md).
+
+### Important production env values
+
+```env
+ENVIRONMENT=production
+SECRET_KEY=<strong random value>
+ALLOWED_ORIGINS=https://your-domain.example
+DEEPSEEK_API_KEY=<key>
+DATABASE_URL=postgresql://screenai:<password>@db:5432/screenai_lab
+POSTGRES_USER=screenai
+POSTGRES_PASSWORD=<same password>
+POSTGRES_DB=screenai_lab
+VITE_API_BASE_URL=/api
 ```
+
+Notes:
+
+- `DATABASE_URL` must use `db` as hostname in Docker Compose, not `localhost`.
+- `VITE_API_BASE_URL` is build-time. Rebuild the frontend when it changes.
+- TLS is intentionally outside Docker so cert renewal is independent from app containers.
+
+---
+
+## 4. Directory Tree
+
+Annotated view of meaningful paths:
+
+```text
 screenai-lab/
-├── README.md                — Setup + quick-start
-├── PRD.md                   — Product requirements (Phase 1–3)
-├── CLAUDE.md                — Execution plan (Phase 2 task breakdown)
-├── AGENTS.md / GEMINI.md    — MCP code-review-graph usage notes (duplicates)
-├── analysis.md              — Earlier codebase analysis
-├── alembic.ini              — Alembic config (script_location = backend/alembic)
-├── requirements.txt         — Python deps (22 packages)
-├── runtime.txt              — `python-3.11` (Python version hint for buildpack-style tooling; informational on VPS)
-├── .env.example             — 11 backend keys + 1 frontend key (VITE_RECRUITMENT_DEADLINE)
-├── .gitignore               — Standard Python/Node + data/ + uploads/ + models/ + venv/
+├── README.md                 — quick start + canonical deployment summary
+├── PRD.md                    — product requirements and phase status
+├── CLAUDE.md                 — execution plan / implementation roadmap
+├── docker-compose.yml        — canonical VPS deployment topology
+├── .env.example              — local dev + Docker/VPS production env template
+├── requirements.txt          — Python dependencies
+├── alembic.ini               — Alembic config
 │
 ├── backend/
-│   ├── main.py              — FastAPI app entry, lifespan, CORS, router registration
-│   ├── config.py            — pydantic-settings Settings (loads .env)
-│   ├── database.py          — SQLAlchemy engine, SessionLocal, Base, init_db (Alembic upgrade head)
+│   ├── Dockerfile            — backend image (Python 3.11 slim)
+│   ├── main.py               — FastAPI app entry, lifespan, CORS, router registration
+│   ├── config.py             — pydantic-settings Settings
+│   ├── database.py           — SQLAlchemy engine/session + Alembic auto-upgrade
 │   │
-│   ├── alembic/
-│   │   ├── env.py           — Alembic runtime config
-│   │   └── versions/        — 6 migration files (initial → phase dates → whatsapp)
+│   ├── alembic/              — migration environment + version files
 │   │
 │   ├── middleware/
-│   │   └── auth_middleware.py — OAuth2 bearer extraction + require_role factory
+│   │   ├── auth_middleware.py — bearer JWT + require_role
+│   │   └── rate_limit.py      — slowapi key function / limiter
 │   │
-│   ├── models/              — SQLAlchemy ORM models
-│   │   ├── user.py          — User + UserRole enum (super_admin / recruiter / candidate)
-│   │   ├── application.py   — Application + ApplicationStatus + Division enums
-│   │   ├── document.py      — Document + DocumentType enum (CV/KHS/KTM/ML/SWOT/SUPPORTING_DOCS)
-│   │   ├── candidate.py     — Candidate + CandidateDocument + DimensionScore (AI pipeline)
-│   │   ├── rubric.py        — Rubric + Dimension
-│   │   ├── period.py        — RecruitmentPeriod (with current_phase property)
-│   │   └── audit.py         — AuditLog
+│   ├── models/
+│   │   ├── user.py            — User + UserRole
+│   │   ├── application.py     — Application + status/division enums
+│   │   ├── document.py        — Document + DocumentType
+│   │   ├── candidate.py       — Candidate, CandidateDocument, DimensionScore
+│   │   ├── rubric.py          — Rubric + Dimension
+│   │   ├── period.py          — RecruitmentPeriod + current_phase property
+│   │   └── audit.py           — AuditLog
 │   │
-│   ├── routers/             — FastAPI APIRouter modules
-│   │   ├── auth.py          — register / login / logout / me
-│   │   ├── users.py         — /me (self-service) + super-admin user mgmt
-│   │   ├── applications.py  — Application CRUD + submit + recruiter list
-│   │   ├── documents.py     — Document upload / list / download / verify
-│   │   ├── periods.py       — RecruitmentPeriod CRUD + close
-│   │   ├── rubrics.py       — Rubric CRUD
-│   │   ├── candidates.py    — Candidate detail + score override + my-applications
-│   │   ├── evaluate_batch.py — Division-based batch eval + per-app result
-│   │   ├── evaluation.py    — Legacy /api/evaluate (rubric-based)
-│   │   ├── upload.py        — Legacy /api/upload (Capstone CV+EPrT batch)
-│   │   └── announcements.py — Per-app + bulk announce + GET /my
+│   ├── routers/
+│   │   ├── auth.py            — register / login / logout / me / admin reset password
+│   │   ├── users.py           — self-service profile + super-admin user management
+│   │   ├── applications.py    — application CRUD + submit + recruiter list
+│   │   ├── documents.py       — upload / list / download / verify
+│   │   ├── periods.py         — RecruitmentPeriod CRUD + active stats
+│   │   ├── rubrics.py         — rubric CRUD
+│   │   ├── candidates.py      — candidate detail + score override + history
+│   │   ├── evaluate_batch.py  — division-based batch evaluation
+│   │   ├── evaluation.py      — deprecated legacy /api/evaluate
+│   │   ├── upload.py          — deprecated legacy /api/upload
+│   │   └── announcements.py   — individual + bulk announce + candidate result
 │   │
-│   ├── services/            — Business logic
-│   │   ├── auth_service.py            — JWT create/decode + authenticate_user
-│   │   ├── extractor.py               — PyMuPDF PDF→text + EPrT certificate detection
-│   │   ├── normalizer.py              — text cleanup + section segmentation (referenced)
-│   │   ├── anonymizer.py              — NER + regex anonymization with indexed tokens
-│   │   ├── ner_utils.py               — IndoBERT pipeline singleton (referenced)
-│   │   ├── khs_parser.py              — IPK + course extraction from KHS PDF
-│   │   ├── ktm_validator.py           — Rule-based KTM ID validation
-│   │   ├── submit_anonymization.py    — Submit-time BackgroundTask (Task 10.1)
-│   │   ├── evaluation_service.py      — run_evaluation_pipeline + _evaluate_one
-│   │   ├── rag_pipeline.py            — Bahasa-Indonesia prompt + DeepSeek call + JSON validate
-│   │   ├── scoring.py                 — Persist DimensionScores + CEFR map (EPrT bonus)
-│   │   ├── rubric_seeding.py          — Idempotent seed of 4 empty division rubrics
-│   │   └── xai.py                     — Phase 4 stub (TODO)
+│   ├── services/
+│   │   ├── auth_service.py         — JWT + password auth
+│   │   ├── extractor.py            — PyMuPDF PDF extraction + EPrT helper
+│   │   ├── normalizer.py           — text cleanup + section segmentation
+│   │   ├── anonymizer.py           — NER + regex anonymization
+│   │   ├── khs_parser.py           — KHS parser
+│   │   ├── ktm_validator.py        — KTM validator
+│   │   ├── submit_anonymization.py — BackgroundTask submit-time processing
+│   │   ├── evaluation_service.py   — full evaluation orchestration
+│   │   ├── rag_pipeline.py         — rubric-augmented prompt + DeepSeek JSON parsing
+│   │   ├── scoring.py              — persist scores + validate weights
+│   │   ├── rubric_seeding.py       — idempotent division-rubric seed
+│   │   └── xai.py                  — future formal XAI module stub
 │   │
-│   ├── utils/
-│   │   ├── llm_client.py              — DeepSeek V4 Flash via OpenAI SDK (retry + JSON parse)
-│   │   ├── security.py                — bcrypt hash_password / verify_password
-│   │   ├── period_utils.py            — Pure get_current_phase(period, now) → phase literal
-│   │   ├── file_storage.py            — save_upload / delete_stored_file + per-doc limits
-│   │   ├── ner_utils.py               — IndoBERT pipeline (referenced)
-│   │   └── pdf_utils.py               — PDF helpers (referenced)
-│   │
-│   └── vectorstore/         — ChromaDB persist dir (auto-created)
+│   └── utils/
+│       ├── llm_client.py           — DeepSeek OpenAI-compatible client
+│       ├── security.py             — bcrypt helpers
+│       ├── period_utils.py         — pure phase derivation
+│       └── file_storage.py         — upload validation + persistence helpers
 │
 ├── frontend/
-│   ├── package.json         — React 19 + Vite 8 + Tailwind 4 + shadcn/ui
-│   ├── vite.config.js       — React plugin + Tailwind plugin + `@` alias
-│   ├── jsconfig.json        — `@/*` → `./src/*` for editor support
-│   ├── eslint.config.js     — Flat config, ignores dist/
-│   ├── components.json      — shadcn/ui registry
-│   ├── index.html           — Root with #root + favicon
-│   ├── .env.example         — VITE_RECRUITMENT_DEADLINE (currently unused)
-│   │
+│   ├── Dockerfile            — Vite build + nginx runtime
+│   ├── nginx.conf            — SPA static serving + /api proxy
+│   ├── package.json          — React 19 + Vite 8 + Tailwind 4
 │   └── src/
-│       ├── main.jsx         — Entry; renders <App />
-│       ├── App.jsx          — BrowserRouter + Sidebar + role-aware route tree
-│       ├── index.css        — Tailwind + theme tokens (oklch)
-│       │
-│       ├── lib/
-│       │   ├── api.js       — Single fetch wrapper + 30+ endpoint helpers
-│       │   ├── auth.js      — JWT in localStorage + decodeJwt + role constants
-│       │   ├── phase.js     — PHASES / labels / badge classes
-│       │   └── utils.js     — cn() helper (clsx + tailwind-merge)
-│       │
-│       ├── components/
-│       │   ├── ProtectedRoute.jsx       — Auth + role guard, 403 page
-│       │   ├── RecruitmentPhaseCard.jsx — Phase timeline + countdown (consumes /periods/active)
-│       │   ├── RecruitmentJourney.jsx   — Status-flow tracker for candidates
-│       │   ├── DocumentUploadStep.jsx   — Single-doc step (drag-drop + validation)
-│       │   ├── DocumentPreviewDialog.jsx — Modal blob viewer
-│       │   ├── OverrideDialog.jsx       — Recruiter score override modal
-│       │   ├── JustificationCard.jsx    — AI reasoning display
-│       │   ├── SwotHighlightPanel.jsx   — SWOT text highlight
-│       │   ├── StaffProfileForm.jsx     — Recruiter/admin profile form
-│       │   └── ui/                      — shadcn/ui primitives (~20 files)
-│       │
-│       └── pages/
-│           ├── LoginPage.jsx                   — Public login
-│           ├── RegisterPage.jsx                — Public register (Telkom-style fields)
-│           ├── DashboardPage.jsx               — Recruiter dashboard (filter+evaluate+publish)
-│           ├── CandidateDetailPage.jsx         — Recruiter candidate detail
-│           ├── RubricConfigPage.jsx            — Rubric CRUD (recruiter+admin)
-│           ├── UploadPage.jsx                  — Legacy Capstone upload (off-nav)
-│           ├── MyApplicationsPage.jsx          — Candidate history
-│           │
-│           ├── candidate/
-│           │   ├── DashboardPage.jsx           — Candidate landing
-│           │   ├── ProfilePage.jsx             — Profile + division select
-│           │   ├── DocumentsPage.jsx           — 6-step upload wizard
-│           │   ├── ReviewPage.jsx              — Final review + submit gate
-│           │   ├── SubmittedPage.jsx           — Post-submit confirmation
-│           │   └── ResultPage.jsx              — Pass/fail banner + scores
-│           │
-│           ├── recruiter/
-│           │   └── ProfilePage.jsx             — Self-service profile
-│           │
-│           └── admin/
-│               ├── AdminPage.jsx               — User management
-│               ├── RecruitmentPeriodPage.jsx   — Period CRUD + close
-│               └── ProfilePage.jsx             — Self-service profile
+│       ├── App.jsx           — BrowserRouter + role-aware route tree
+│       ├── lib/              — API/auth/phase/utils helpers
+│       ├── components/       — protected route, upload step, phase card, UI primitives
+│       └── pages/            — candidate, recruiter, admin pages
 │
-├── data/                    — Local-only state (gitignored)
-│   ├── screenai_lab.db      — SQLite dev DB
-│   ├── raw_pdfs/            — Legacy Capstone PDF input
-│   ├── extracted/           — Raw extraction JSON
-│   └── anonymized/          — Anonymized JSON
+├── docs/
+│   ├── DEPLOYMENT.md         — canonical Docker/VPS deployment guide
+│   ├── ARCHITECTURE.md       — this file
+│   ├── API_REFERENCE.md      — endpoint reference
+│   ├── MODULE_ANALYSIS.md    — module notes
+│   ├── FLOW_DIAGRAMS.md      — Mermaid diagrams
+│   └── reports/              — batch reports / cleanup reports
 │
-├── uploads/                 — Candidate uploads: {application_id}/{doc_type}.{ext}
-│
-└── scripts/                 — Smoke tests + seed scripts
-    ├── seed_rubric.py
-    ├── smoke_test_auth.py
-    ├── smoke_test_applications.py
-    ├── smoke_test_upload.py
-    ├── smoke_test_evaluation.py
-    ├── smoke_test_periods.py
-    ├── smoke_test_bulk_announce.py
-    ├── smoke_test_submit_ner.py
-    ├── smoke_test_phase2_parsers.py
-    ├── smoke_test_anonymize.py
-    ├── integration_test_phase3.py
-    ├── create_sample_cv.py
-    └── check_db.py
+├── data/                     — local/manual runtime state (gitignored)
+├── uploads/                  — candidate uploads in local/manual runs (gitignored)
+├── models/                   — HuggingFace cache (gitignored)
+└── scripts/                  — smoke tests + helper scripts
 ```
-
-> **Note:** A top-level `models/` directory exists at the repo root (separate from `backend/models/`). This is the HuggingFace cache target referenced by `Settings.ner_cache_dir = "./models/ner"` and is not part of the application source tree.
 
 ---
 
-## 4. Tech Stack
+## 5. Tech Stack
 
-### Backend (Python 3.11)
+### Backend
 
-| Package | Version | Role |
-|---|---|---|
-| fastapi | ≥0.110 | HTTP framework + dependency injection |
-| uvicorn[standard] | ≥0.29 | ASGI server (run on VPS, typically via systemd) |
-| sqlalchemy | ≥2.0 | ORM (DeclarativeBase, Session) |
-| alembic | ≥1.13 | Schema migrations (auto-run on startup) |
-| pydantic | ≥2.0 | Schema validation (request/response) |
-| pydantic-settings | ≥2.0 | `.env` → `Settings` |
-| python-multipart | ≥0.0.9 | File upload parsing |
-| python-jose[cryptography] | ≥3.3 | JWT encode/decode (HS256) |
-| bcrypt | ==4.0.1 | Password hashing (pinned) |
-| python-dotenv | ≥1.0 | `.env` loader |
-| email-validator | ≥2.0 | EmailStr field type |
-| psycopg2-binary | ≥2.9 | Postgres driver (self-hosted Postgres on VPS) |
-| pymupdf | ≥1.24 | PDF text extraction (fitz) |
-| openai | ≥1.0 | DeepSeek V4 Flash client (OpenAI-compat) |
-| transformers | ≥4.40 | IndoBERT NER pipeline |
-| torch | ≥2.2 | NER model backend |
-| langchain / langchain-community / langchain-openai | ≥0.2 / ≥0.2 / ≥0.1 | RAG infra (some unused; reserved) |
-| chromadb | ≥0.5 | Vector store (sentence-transformers/all-MiniLM-L6-v2) |
+| Package | Role |
+|---|---|
+| FastAPI | HTTP framework + dependency injection |
+| Uvicorn | ASGI server inside backend container |
+| SQLAlchemy | ORM |
+| Alembic | Schema migrations, auto-run on startup |
+| Pydantic / pydantic-settings | Request/response validation + env config |
+| python-jose | JWT encode/decode |
+| bcrypt | Password hashing |
+| slowapi | Rate limiting |
+| PyMuPDF | PDF text extraction |
+| OpenAI SDK | DeepSeek V4 Flash OpenAI-compatible client |
+| transformers + torch | IndoBERT NER pipeline |
+| LangChain + ChromaDB | Dependencies available for future vector retrieval; not active retrieval path today |
+| psycopg2-binary | PostgreSQL driver |
 
-### Frontend (Node)
+### Frontend
 
-| Package | Version | Role |
-|---|---|---|
-| react / react-dom | ^19.2.4 | UI framework |
-| react-router-dom | ^7.14.1 | Client-side routing |
-| vite | ^8.0.4 | Dev server + bundler |
-| @vitejs/plugin-react | ^6.0.1 | JSX transpile + fast refresh |
-| tailwindcss / @tailwindcss/vite | ^4.2.2 | Utility CSS |
-| shadcn / radix-ui | ^4.3 / ^1.4 | Component primitives |
-| lucide-react | ^1.8 | Icon set |
-| sonner | ^2.0.7 | Toast notifications |
-| recharts | ^3.8.1 | Radar + bar charts (CandidateDetailPage) |
-| clsx / tailwind-merge | ^2.1 / ^3.5 | `cn()` helper |
-| class-variance-authority | ^0.7.1 | Variant typing |
-| next-themes | ^0.4.6 | Theme support |
-| @fontsource-variable/geist | ^5.2.8 | Variable font |
-| eslint + plugins | ^9.39.4 | Linting (flat config) |
+| Package | Role |
+|---|---|
+| React / React DOM | UI framework |
+| React Router | Client-side routing |
+| Vite | Dev server + production bundler |
+| Tailwind CSS | Utility CSS |
+| shadcn/radix-ui | UI primitives |
+| lucide-react | Icons |
+| sonner | Toast notifications |
+| recharts | Charts in candidate detail |
 
 ### AI / ML Pipeline
 
-| Component | Source | Default config |
-|---|---|---|
-| LLM | DeepSeek V4 Flash via `openai` SDK | `deepseek-v4-flash`, temperature `0.1`, max 4096 tokens, 3 retries with exponential backoff |
-| NER | IndoBERT NER fine-tune | `ageng-anugrah/indobert-large-p2-finetuned-ner` (HuggingFace) |
-| Embeddings | sentence-transformers | `sentence-transformers/all-MiniLM-L6-v2` |
-| Vector store | ChromaDB | persisted at `./backend/vectorstore` |
-| PDF extraction | PyMuPDF (`fitz`) | `page.get_text("text")` |
-
-### Infra / DevOps
-
-| Concern | Tooling |
+| Component | Default config |
 |---|---|
-| Backend deploy | VPS lab (self-hosted) — `uvicorn backend.main:app` managed by systemd / supervisor, fronted by Nginx or Caddy with TLS. Healthcheck: `/api/health`. |
-| Process spec | Operator-defined systemd unit (or supervisor.conf) running `uvicorn backend.main:app --host 127.0.0.1 --port 8000`. |
-| Python pin | `runtime.txt`: `python-3.11` (informational — install with `pyenv` / system package on VPS) |
-| Frontend deploy | VPS lab (self-hosted) — `npm run build` on the build host, then `frontend/dist/` served as static assets by the same reverse proxy (or a separate Nginx vhost). |
-| Database (dev) | SQLite at `./data/screenai_lab.db` |
-| Database (prod) | Self-hosted PostgreSQL on the VPS — operator installs Postgres, creates `screenai_lab` DB + role, sets `DATABASE_URL` in the `.env` / systemd `Environment=` line. Legacy `postgres://` is normalized in [database.py:11](../backend/database.py#L11). |
-| Migrations | Alembic — `alembic upgrade head` runs in [database.py::init_db](../backend/database.py#L50) on FastAPI startup |
-| File storage | Local disk under `./uploads/{application_id}/{doc_type}.{ext}` (back up via filesystem snapshot or rsync) |
-| Vector store | Local disk under `./backend/vectorstore` |
-| CI/CD | None at present (no `.github/workflows/`) |
-| Smoke tests | `scripts/smoke_test_*.py` — standalone, hit live API |
+| LLM | `deepseek-v4-flash`, temperature `0.1`, max 4096 tokens, 3 retries |
+| NER | `ageng-anugrah/indobert-large-p2-finetuned-ner` |
+| Embeddings | `sentence-transformers/all-MiniLM-L6-v2` |
+| Vector store | ChromaDB at `CHROMA_PERSIST_DIR`; reserved/future retrieval |
+| PDF extraction | PyMuPDF `page.get_text("text")` |
 
 ---
 
-## 5. External Services & Integrations
+## 6. External Services & Integrations
 
-### DeepSeek V4 Flash (LLM)
-- **Endpoint:** `https://api.deepseek.com/v1` (env: `DEEPSEEK_BASE_URL`).
-- **Auth:** Bearer API key (env: `DEEPSEEK_API_KEY`). No default — server starts with empty key but evaluation calls will fail.
-- **Client:** OpenAI-compatible (`openai` SDK). Singleton in [backend/utils/llm_client.py:19](../backend/utils/llm_client.py#L19).
-- **Model name:** `deepseek-v4-flash` (hard-coded default in [llm_client.py:33](../backend/utils/llm_client.py#L33)).
-- **Behaviour:** 3 retries with exponential backoff (2s, 4s, 8s). `call_llm_json` strips ```` ```json … ``` ```` fences before parsing.
-- **Used by:** `backend/services/rag_pipeline.py` (single user prompt per candidate, in Bahasa Indonesia).
+### DeepSeek V4 Flash
+
+- **Endpoint:** `DEEPSEEK_BASE_URL`, default `https://api.deepseek.com/v1`.
+- **Auth:** `DEEPSEEK_API_KEY`.
+- **Client:** OpenAI-compatible SDK wrapper in `backend/utils/llm_client.py`.
+- **Used by:** `backend/services/rag_pipeline.py` for rubric-augmented JSON scoring.
+
+### HuggingFace Transformers
+
+- **Model:** `NER_MODEL_NAME`, default `ageng-anugrah/indobert-large-p2-finetuned-ner`.
+- **Cache:** `./models/ner` by default.
+- **Runtime:** first NER/evaluation call may download the model; Docker deployment mounts `./models` so restarts reuse the cache.
 
 ### ChromaDB
-- **Persistence:** `CHROMA_PERSIST_DIR` (default `./backend/vectorstore`). Directory is auto-created in `Settings.ensure_data_dirs`.
-- **Embedding model:** `EMBEDDING_MODEL_NAME = sentence-transformers/all-MiniLM-L6-v2` (env-configurable).
-- **Note:** the codebase imports `chromadb` and `langchain` but the *current* RAG implementation in [rag_pipeline.py](../backend/services/rag_pipeline.py) inlines rubric context directly into the LLM prompt (no live retrieval at evaluation time). The vector store is reserved for richer retrieval in later phases.
 
-### HuggingFace Transformers (NER)
-- **Model:** `NER_MODEL_NAME = ageng-anugrah/indobert-large-p2-finetuned-ner`.
-- **Cache:** `Settings.ner_cache_dir = "./models/ner"`.
-- **Pipeline:** wrapped in `backend/utils/ner_utils.py::run_ner` (singleton).
-- **Output:** entity groups `PER` / `LOC` / `ORG` (mapped to canonical `PERSON / LOC / ORG`); regex pass adds `PHONE / EMAIL / NIK / NIM / URL`.
-
-### PyMuPDF
-- **Use:** PDF text extraction (`extract_text_from_pdf`), KHS parsing, KTM validation, EPrT certificate detection.
-- **Mode:** `page.get_text("text")` — preserves natural reading order.
-
-### VPS Lab (backend hosting target)
-- **Runtime:** `uvicorn backend.main:app --host 127.0.0.1 --port 8000` managed by systemd (recommended) or supervisor — the unit / conf file is operator-owned and not committed to the repo.
-- **Reverse proxy:** Nginx or Caddy terminates TLS, proxies HTTPS → `127.0.0.1:8000`, and optionally serves the built frontend (`frontend/dist/`) on the same domain.
-- **Healthcheck:** `/api/health` — operators can wire this to uptime monitoring (cron + curl, Uptime Kuma, etc).
-- **Restart policy:** systemd `Restart=on-failure` is the equivalent of the previous managed-platform policy.
-- **Postgres:** install PostgreSQL on the VPS (or a sibling DB host on the LAN), create the `screenai_lab` database + role manually, then set `DATABASE_URL=postgresql://...` in the `.env` consumed by the systemd unit. Legacy `postgres://` is still normalized to `postgresql://` in [backend/database.py:11](../backend/database.py#L11).
-
-### VPS Lab (frontend hosting target)
-- Build with `npm run build` against a `.env` containing the production `VITE_API_BASE_URL` (since Vite inlines env values at build time). Ship the resulting `frontend/dist/` directory to the VPS — typically served by the same reverse proxy as the backend, on the same domain or a sibling subdomain.
-- Production CORS will need `ALLOWED_ORIGINS` set on the backend.
+- **Persistence:** `CHROMA_PERSIST_DIR`, default `./backend/vectorstore`.
+- **Current status:** dependency exists and directory is created, but evaluation currently inlines rubric context directly into the LLM prompt.
 
 ---
 
-## 6. Environment Variables
+## 7. Environment Variables
 
-All variables consumed at runtime. **Backend** scope variables flow through [`backend/config.py`](../backend/config.py) (a `pydantic-settings` `Settings` model that reads from `.env` and OS env). **Frontend** scope variables must be prefixed `VITE_` and are inlined at build time by Vite.
+Variables are defined in `.env.example`. Backend variables are read by `backend/config.py`; frontend variables prefixed with `VITE_` are inlined by Vite at build time.
 
-| Variable | Scope | Required | Default | Consumed at | Purpose |
-|---|---|---|---|---|---|
-| `ENVIRONMENT` | backend | no | `development` | [config.py:34](../backend/config.py#L34) | Free-form environment label |
-| `APP_PORT` | backend | no | `8000` | [config.py:32](../backend/config.py#L32), startup banner | Local dev port (production uses whatever port the systemd unit binds to) |
-| `DEEPSEEK_API_KEY` | backend | **yes (for evaluation)** | `""` | [llm_client.py:24](../backend/utils/llm_client.py#L24) | DeepSeek auth |
-| `DEEPSEEK_BASE_URL` | backend | no | `https://api.deepseek.com/v1` | [llm_client.py:25](../backend/utils/llm_client.py#L25) | DeepSeek endpoint override |
-| `DATABASE_URL` | backend | no | `sqlite:///./data/screenai_lab.db` | [database.py:10](../backend/database.py#L10) | DB connection (set manually to the VPS Postgres URL in production) |
-| `CHROMA_PERSIST_DIR` | backend | no | `./backend/vectorstore` | [config.py:22](../backend/config.py#L22) | ChromaDB persistence |
-| `NER_MODEL_NAME` | backend | no | `ageng-anugrah/indobert-large-p2-finetuned-ner` | [config.py:25](../backend/config.py#L25) | HuggingFace NER model id |
-| `EMBEDDING_MODEL_NAME` | backend | no | `sentence-transformers/all-MiniLM-L6-v2` | [config.py:29](../backend/config.py#L29) | Sentence embedding model |
-| `FRONTEND_URL` | backend | no | `http://localhost:5173` | [config.py:33](../backend/config.py#L33), CORS fallback | Single-origin CORS (dev) |
-| `ALLOWED_ORIGINS` | backend | no (prod) | `""` | [config.py:36](../backend/config.py#L36), [config.py:44](../backend/config.py#L44) | Comma-separated production CORS list (overrides `FRONTEND_URL` when non-empty) |
-| `SECRET_KEY` | backend | **yes (prod)** | `dev-secret-change-me-in-production-min-32-chars` | [config.py:39](../backend/config.py#L39), [auth_service.py:31](../backend/services/auth_service.py#L31) | JWT HS256 signing key |
-| `ACCESS_TOKEN_EXPIRE_MINUTES` | backend | no | `480` | [config.py:41](../backend/config.py#L41) | JWT lifetime (8 hours) |
-
-> **Note on env var coverage:** `Settings` also defines `ner_cache_dir`, `raw_pdfs_dir`, `extracted_dir`, `anonymized_dir`, `upload_dir`, `jwt_algorithm` — these are **not** wired through `.env` (no env override path), they live as in-code defaults in [config.py](../backend/config.py). They behave like hard-coded constants today.
-
----
-
-## 7. Data Flow at a Glance
-
-1. **Sign-up & profile.** Candidate registers → JWT issued → `GET /users/me` returns enriched profile with derived `division`/`application_status`.
-2. **Application creation.** Candidate selects a division → `POST /applications` creates a `DRAFT` row (one per user, enforced by `uq_applications_user_id`).
-3. **Document uploads.** Six required types (`cv`, `khs`, `ktm`, `motivation_letter`, `swot`, `supporting_docs`). Server enforces per-doc MIME + size limits ([file_storage.py](../backend/utils/file_storage.py)).
-4. **Submit gate.** Submission requires (a) an active period in `SUBMISSION` phase ([applications.py:260](../backend/routers/applications.py#L260)) and (b) one Document per `DocumentType`. Status flips to `submitted`, file mutations refuse afterward.
-5. **Submit-time NER.** A FastAPI BackgroundTask runs `run_submit_anonymization(application_id)` — extracts CV + ML, normalizes, runs IndoBERT NER, caches `anonymized_text` on `CandidateDocument`. Errors are logged, never raised.
-6. **Recruiter triggers evaluation.** `POST /api/recruiter/evaluate/batch` per division. Pipeline checks NER cache; on hit, skips inline NER. Calls KHS parser, KTM validator, builds Bahasa-Indonesia prompt with rubric context, calls DeepSeek, parses JSON, persists `DimensionScore` + composite score (with EPrT CEFR bonus). Status moves to `screening`.
-7. **Bulk publish.** Recruiter selects passing applications per division → `POST /api/announcements/bulk` → atomic transaction sets `announced_pass` / `announced_fail` for the entire scope and writes `AuditLog` entries.
-
-A complete set of Mermaid sequence/flow diagrams lives in [FLOW_DIAGRAMS.md](FLOW_DIAGRAMS.md).
+| Variable | Scope | Production note |
+|---|---|---|
+| `ENVIRONMENT` | backend | Set to `production` to activate startup guards |
+| `SECRET_KEY` | backend | Strong random JWT signing key; placeholder refused in production |
+| `ALLOWED_ORIGINS` | backend | Required in production; exact browser origin(s) |
+| `DATABASE_URL` | backend | Docker prod: `postgresql://USER:PASSWORD@db:5432/DBNAME` |
+| `POSTGRES_USER` | db | Must match `DATABASE_URL` |
+| `POSTGRES_PASSWORD` | db | Must match `DATABASE_URL` |
+| `POSTGRES_DB` | db | Must match `DATABASE_URL` |
+| `DEEPSEEK_API_KEY` | backend | Required for evaluation calls |
+| `VITE_API_BASE_URL` | frontend build | Same-domain Docker path: `/api`; rebuild when changed |
+| `FRONTEND_URL` | backend | Dev CORS fallback when `ALLOWED_ORIGINS` empty |
+| `CHROMA_PERSIST_DIR` | backend | Optional override |
+| `NER_MODEL_NAME` | backend | Optional override |
+| `EMBEDDING_MODEL_NAME` | backend | Optional override |
 
 ---
 
-## 8. Storage Layout
+## 8. Data Flow at a Glance
 
-### File system
+1. **Sign-up & profile**: Candidate registers → JWT issued → profile fields stored on `users`.
+2. **Application creation**: Candidate selects division → `POST /api/applications` creates a `DRAFT` application.
+3. **Document uploads**: Six required document types are uploaded through `/api/documents/upload/{doc_type}` with size, MIME, and magic-byte validation.
+4. **Submit gate**: Submission requires an active period in `SUBMISSION` and all required documents. Status flips to `submitted`, file mutations are locked.
+5. **Submit-time NER**: BackgroundTask extracts/anonymizes CV + Motivation Letter and caches results.
+6. **Recruiter evaluation**: Batch evaluation checks cache, parses KHS, validates KTM, builds prompt, calls DeepSeek, stores scores, and moves application to `screening`.
+7. **Manual selection**: Recruiter checks candidates that pass.
+8. **Bulk publish**: Backend updates pass/fail statuses atomically and writes audit logs.
+9. **Candidate result**: Candidate dashboard/result page reads announcement status.
 
-```
+---
+
+## 9. Storage Layout
+
+### Local/manual runtime
+
+```text
 data/
-├── screenai_lab.db          ← SQLite dev DB (legacy filename `app.db` in .env.example)
-├── raw_pdfs/                ← Legacy Capstone PDF dump
-├── extracted/               ← <anon_id>.json — extracted text bundles
-└── anonymized/              ← <anon_id>.json — anonymized text bundles
+├── screenai_lab.db       # SQLite dev DB
+├── raw_pdfs/             # legacy Capstone PDF dump
+├── extracted/            # extracted JSON
+└── anonymized/           # anonymized JSON
 
 uploads/
 └── {application_id}/
@@ -399,32 +345,35 @@ uploads/
     ├── swot.pdf
     └── supporting_docs.pdf
 
-backend/vectorstore/         ← ChromaDB persist dir (auto-created)
-
-models/ner/                  ← HuggingFace cache for IndoBERT (auto-created)
+models/ner/               # HuggingFace cache
+backend/vectorstore/      # ChromaDB directory
 ```
 
-### Database
+### Docker production
 
-| Table | Purpose | Key columns |
-|---|---|---|
-| `users` | Auth + RBAC | `email` (unique), `password_hash`, `role`, `nim` (unique nullable), `whatsapp` |
-| `applications` | Candidate submission shell | `user_id` (unique), `division`, `status`, `submitted_at`, `period_id` |
-| `documents` | Phase-1 portal uploads | `(application_id, doc_type)` unique; `file_path`, `is_verified` |
-| `recruitment_periods` | Time-boxed period | `start_date`, `submission_end_date`, `evaluation_end_date`, `end_date`, `is_active`, `threshold_n` |
-| `rubrics` | Per-division scoring template | `division`, `name`, `position` |
-| `dimensions` | Rubric sub-criteria | `rubric_id`, `name`, `weight`, `indicators` (JSON) |
-| `candidates` | AI pipeline candidate (1:1 with user) | `anonymous_id`, `composite_score`, `language_score`, `language_bonus`, `status`, `profile_summary` |
-| `candidate_documents` | AI-pipeline doc with extracted/anonymized text | `candidate_id`, `document_type`, `raw_text`, `anonymized_text`, `entities_json` |
-| `dimension_scores` | One row per (candidate, dimension, rubric) | `score`, `weighted_score`, `justification`, `evidence_json`, `is_override` |
-| `audit_logs` | Free-form audit trail | `recruiter_id`, `candidate_id`, `action_type`, `old_value`, `new_value`, `reason` |
+- PostgreSQL data is stored in the `postgres_data` Docker volume.
+- `./data` is mounted into `/app/data`.
+- `./models` is mounted into `/app/models`.
+- Candidate upload persistence must be verified against `settings.upload_dir`. If `upload_dir` remains `./uploads` inside the backend container, Compose should mount `./uploads:/app/uploads` or set `UPLOAD_DIR=/app/data/uploads` once `upload_dir` is env-configurable.
 
-**Important constraints:**
+---
 
-- One application per user — `UniqueConstraint("user_id", name="uq_applications_user_id")` on `applications`.
-- One document per `(application_id, doc_type)` — `uq_documents_app_type`.
-- `anonymous_id` is unique on `candidates`.
-- Single-active period invariant is **application-level** (not DB-level): `_deactivate_others` is called inside the same transaction whenever a period is created or flipped active. There is no partial unique index — see [ISSUES_AND_NOTES.md](ISSUES_AND_NOTES.md).
-- `Application.period_id` is nullable to allow drafts created before a period exists; the submit endpoint stamps it from the active period at submit time.
+## 10. Known Limitations
 
-A per-module deep-dive lives in [MODULE_ANALYSIS.md](MODULE_ANALYSIS.md), and full endpoint-by-endpoint specs in [API_REFERENCE.md](API_REFERENCE.md).
+- Formal `xai.py` implementation is still future work; current explanations come from stored LLM justifications.
+- Current scoring path is rubric-augmented prompting, not live vector retrieval.
+- OCR for scanned PDFs/images is not part of the main pipeline yet.
+- JWT is stored in localStorage; HttpOnly cookie + CSRF is a security backlog.
+- Horizontal scaling would require shared file storage and shared rate-limit state.
+- Candidate upload persistence in Docker should be verified before production cutover, as noted in the storage section.
+
+---
+
+## 11. Related Documents
+
+- [PRD.md](../PRD.md) — product requirements and phase status.
+- [DEPLOYMENT.md](DEPLOYMENT.md) — canonical Docker/VPS deployment guide.
+- [API_REFERENCE.md](API_REFERENCE.md) — endpoint reference.
+- [FLOW_DIAGRAMS.md](FLOW_DIAGRAMS.md) — Mermaid diagrams.
+- [reports/DOCKER_SETUP_REPORT.md](reports/DOCKER_SETUP_REPORT.md) — Docker setup implementation notes.
+- [reports/RAILWAY_VERCEL_CLEANUP_REPORT.md](reports/RAILWAY_VERCEL_CLEANUP_REPORT.md) — migration context from cloud PaaS to self-hosted VPS.
