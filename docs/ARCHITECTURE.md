@@ -56,6 +56,7 @@ graph LR
 
     subgraph HostStorage[Host-mounted / persisted state]
         DATA[./data<br/>SQLite dev, raw/extracted/anonymized data]
+        UPLOADS[./uploads<br/>candidate documents]
         MODELS[./models<br/>HuggingFace cache]
         PGVOL[postgres_data volume]
     end
@@ -70,6 +71,7 @@ graph LR
     API --> HF
     BG --> HF
     API --- DATA
+    API --- UPLOADS
     API --- MODELS
     DB --- PGVOL
 ```
@@ -352,9 +354,9 @@ backend/vectorstore/      # ChromaDB directory
 ### Docker production
 
 - PostgreSQL data is stored in the `postgres_data` Docker volume.
-- `./data` is mounted into `/app/data`.
-- `./models` is mounted into `/app/models`.
-- Candidate upload persistence must be verified against `settings.upload_dir`. If `upload_dir` remains `./uploads` inside the backend container, Compose should mount `./uploads:/app/uploads` or set `UPLOAD_DIR=/app/data/uploads` once `upload_dir` is env-configurable.
+- `./data` is mounted into `/app/data` for legacy raw/extracted/anonymized artifacts.
+- `./uploads` is mounted into `/app/uploads`, matching `settings.upload_dir = "./uploads"`, so candidate-submitted documents survive backend container recreation.
+- `./models` is mounted into `/app/models` for the HuggingFace model cache.
 
 ---
 
@@ -365,7 +367,6 @@ backend/vectorstore/      # ChromaDB directory
 - OCR for scanned PDFs/images is not part of the main pipeline yet.
 - JWT is stored in localStorage; HttpOnly cookie + CSRF is a security backlog.
 - Horizontal scaling would require shared file storage and shared rate-limit state.
-- Candidate upload persistence in Docker should be verified before production cutover, as noted in the storage section.
 
 ---
 
