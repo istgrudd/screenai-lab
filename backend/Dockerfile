@@ -34,12 +34,13 @@ COPY alembic.ini ./
 COPY scripts ./scripts
 
 # Persisted directories — declared so a `docker run` without docker-compose
-# still gets durable storage. In normal use the docker-compose.yml mounts
-# host directories over these paths.
+# still gets durable storage. In normal use docker-compose.yml mounts host
+# directories over these paths.
 #
 #   /app/models/ner  — HuggingFace IndoBERT cache (~1.3 GB first download)
-#   /app/data        — SQLite dev DB, uploads, raw_pdfs, extracted, anonymized
-VOLUME ["/app/models/ner", "/app/data"]
+#   /app/data        — SQLite dev DB, legacy raw_pdfs, extracted, anonymized
+#   /app/uploads     — candidate-submitted application documents
+VOLUME ["/app/models/ner", "/app/data", "/app/uploads"]
 
 EXPOSE 8000
 
