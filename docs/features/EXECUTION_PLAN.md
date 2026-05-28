@@ -159,12 +159,49 @@ plan
 -> implement frontend
 -> run build/tests
 -> update docs
+-> write docs/reports/<nama_phase>_features.md
 -> commit
 ```
 
 ---
 
-## 6. Phase Overview
+## 6. Feature Implementation Report Convention
+
+After each phase is implemented and validated, create a short implementation report under:
+
+```text
+docs/reports/<nama_phase>_features.md
+````
+
+The report file name should use lowercase kebab/snake-style naming that clearly identifies the phase, for example:
+
+```text
+docs/reports/phase_1_candidate_frontend_features.md
+docs/reports/phase_2_recruiter_admin_frontend_features.md
+docs/reports/phase_3_email_verification_features.md
+```
+
+Each report should summarize the actual implementation result, not the original plan. At minimum, include:
+
+* implementation date
+* branch name
+* phase name
+* summary of completed work
+* files changed
+* routes/endpoints added or changed
+* validation commands and results
+* manual checklist results, if applicable
+* known limitations or follow-up notes
+
+The phase is considered complete only after:
+
+1. Required validation passes.
+2. Manual checklist is completed when applicable.
+3. The corresponding feature report exists in `docs/reports/`.
+
+---
+
+## 7. Phase Overview
 
 | Phase    | Type          | Scope                                                     | Main Smoke Tests                                                    |
 | -------- | ------------- | --------------------------------------------------------- | ------------------------------------------------------------------- |
