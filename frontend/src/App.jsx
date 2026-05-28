@@ -1,186 +1,60 @@
 import { useEffect, useState } from "react";
-import { BrowserRouter, Routes, Route, NavLink, Navigate, useLocation } from "react-router-dom";
-import { Toaster } from "@/components/ui/sonner";
-import { TooltipProvider } from "@/components/ui/tooltip";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import {
-  LayoutDashboard,
-  FileText,
-  BarChart3,
-  LogOut,
-  ClipboardList,
-  GraduationCap,
-  CheckCircle2,
-  UserCog,
-  CalendarClock,
-  Loader2,
-} from "lucide-react";
+import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
 
-import DashboardPage from "@/pages/DashboardPage";
-import UploadPage from "@/pages/UploadPage";
-import RubricConfigPage from "@/pages/RubricConfigPage";
+import RoleNavSidebar from "@/components/navigation/RoleNavSidebar";
+import ProtectedRoute from "@/components/ProtectedRoute";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import { Toaster } from "@/components/ui/sonner";
+import { Loader2 } from "lucide-react";
+
 import CandidateDetailPage from "@/pages/CandidateDetailPage";
 import LoginPage from "@/pages/LoginPage";
-import RegisterPage from "@/pages/RegisterPage";
 import MyApplicationsPage from "@/pages/MyApplicationsPage";
+import RegisterPage from "@/pages/RegisterPage";
+import RubricConfigPage from "@/pages/RubricConfigPage";
+import UploadPage from "@/pages/UploadPage";
 
 import CandidateDashboardPage from "@/pages/candidate/DashboardPage";
-import ProfilePage from "@/pages/candidate/ProfilePage";
-import EditProfilePage from "@/pages/candidate/EditProfilePage";
+import CandidateProfilePage from "@/pages/candidate/ProfilePage";
+import CandidateEditProfilePage from "@/pages/candidate/EditProfilePage";
 import ApplicationOverviewPage from "@/pages/candidate/ApplicationOverviewPage";
 import StartApplicationPage from "@/pages/candidate/StartApplicationPage";
 import DocumentsPage from "@/pages/candidate/DocumentsPage";
 import ReviewPage from "@/pages/candidate/ReviewPage";
 import ApplicationStatusPage from "@/pages/candidate/ApplicationStatusPage";
-import AdminPage from "@/pages/admin/AdminPage";
-import AdminProfilePage from "@/pages/admin/ProfilePage";
-import RecruitmentPeriodPage from "@/pages/admin/RecruitmentPeriodPage";
-import RecruiterProfilePage from "@/pages/recruiter/ProfilePage";
 
-import ProtectedRoute from "@/components/ProtectedRoute";
+import RecruiterOverviewPage from "@/pages/recruiter/OverviewPage";
+import RecruiterApplicationsPage from "@/pages/recruiter/ApplicationsPage";
+import RecruiterEvaluationPage from "@/pages/recruiter/EvaluationPage";
+import RecruiterCandidatesPage from "@/pages/recruiter/CandidatesPage";
+import RecruiterDocumentVerificationPage from "@/pages/recruiter/DocumentVerificationPage";
+import RecruiterAnnouncementsPage from "@/pages/recruiter/AnnouncementsPage";
+import RecruiterAnalyticsPage from "@/pages/recruiter/AnalyticsPage";
+import RecruiterProfilePage from "@/pages/recruiter/ProfilePage";
+import RecruiterEditProfilePage from "@/pages/recruiter/EditProfilePage";
+
+import AdminOverviewPage from "@/pages/admin/OverviewPage";
+import AdminPage from "@/pages/admin/AdminPage";
+import RecruitmentPeriodPage from "@/pages/admin/RecruitmentPeriodPage";
+import AuditLogsPage from "@/pages/admin/AuditLogsPage";
+import EmailTemplatesPage from "@/pages/admin/EmailTemplatesPage";
+import SettingsPage from "@/pages/admin/SettingsPage";
+import AdminProfilePage from "@/pages/admin/ProfilePage";
+import AdminEditProfilePage from "@/pages/admin/EditProfilePage";
+
 import {
+  defaultPathForRole,
   getCurrentUser,
   isAuthenticated,
-  logout,
   ROLES,
-  defaultPathForRole,
 } from "@/lib/auth";
 import { getMyApplication } from "@/lib/api";
 import { isNotFoundError } from "@/lib/candidateApplication";
 
-const ROLE_LABEL = {
-  super_admin: "Super Admin",
-  recruiter: "Recruiter",
-  candidate: "Candidate",
-};
-
-const ROLE_BADGE_VARIANT = {
-  super_admin: "default",
-  recruiter: "secondary",
-  candidate: "outline",
-};
-
-function navLinksForRole(role) {
-  if (role === ROLES.CANDIDATE) {
-    return [
-      { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-      {
-        to: "/application",
-        label: "Application Overview",
-        icon: ClipboardList,
-        isActive: (pathname) =>
-          ["/application", "/application/start", "/application/review", "/review"].includes(pathname),
-      },
-      { to: "/documents", label: "Documents", icon: FileText },
-      {
-        to: "/application/status",
-        label: "Application Status",
-        icon: CheckCircle2,
-        isActive: (pathname) =>
-          ["/application/status", "/submitted", "/result"].includes(pathname),
-      },
-      { to: "/profile", label: "Profile", icon: GraduationCap },
-    ];
-  }
-  if (role === ROLES.RECRUITER || role === ROLES.SUPER_ADMIN) {
-    const links = [
-      { to: "/", label: "Dashboard", icon: LayoutDashboard },
-      { to: "/rubrics", label: "Rubrics", icon: FileText },
-    ];
-    if (role === ROLES.SUPER_ADMIN) {
-      links.push({ to: "/admin/users", label: "Admin Panel", icon: UserCog });
-      links.push({ to: "/admin/periods", label: "Periode Rekrutasi", icon: CalendarClock });
-      links.push({ to: "/admin/profile", label: "Profile", icon: GraduationCap });
-    } else {
-      links.push({ to: "/recruiter/profile", label: "Profile", icon: GraduationCap });
-    }
-    return links;
-  }
-  return [];
-}
-
-function Sidebar() {
-  const user = getCurrentUser();
-  const location = useLocation();
-  const links = navLinksForRole(user?.role);
-
-  return (
-    <aside className="fixed top-0 left-0 z-40 h-screen w-64 border-r border-border bg-card flex flex-col">
-      {/* Brand */}
-      <div className="flex items-center gap-3 px-6 py-5 border-b border-border">
-        <div className="w-9 h-9 rounded-lg bg-primary flex items-center justify-center">
-          <BarChart3 className="w-5 h-5 text-primary-foreground" />
-        </div>
-        <div>
-          <h1 className="text-base font-semibold tracking-tight text-foreground">
-            ScreenAI Lab
-          </h1>
-          <p className="text-xs text-muted-foreground">MBC Laboratory Recruitment</p>
-        </div>
-      </div>
-
-      {/* Nav */}
-      <nav className="flex-1 px-3 py-4 space-y-1">
-        {links.map((link) => (
-          <NavLink
-            key={link.to}
-            to={link.to}
-            end={link.to === "/"}
-            className={({ isActive }) =>
-              `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
-                (link.isActive ? link.isActive(location.pathname) : isActive)
-                  ? "bg-primary text-primary-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground hover:bg-muted"
-              }`
-            }
-          >
-            <link.icon className="w-4 h-4" />
-            {link.label}
-          </NavLink>
-        ))}
-      </nav>
-
-      {/* User + footer */}
-      {user && (
-        <div className="border-t border-border px-4 py-4 space-y-3">
-          <div className="space-y-1">
-            <p className="text-sm font-medium truncate" title={user.email}>
-              {user.email}
-            </p>
-            <Badge
-              variant={ROLE_BADGE_VARIANT[user.role] || "secondary"}
-              className="text-[10px] uppercase tracking-wide"
-            >
-              {ROLE_LABEL[user.role] || user.role}
-            </Badge>
-          </div>
-          <Button
-            variant="outline"
-            size="sm"
-            className="w-full justify-start"
-            onClick={logout}
-          >
-            <LogOut className="w-4 h-4" />
-            Log out
-          </Button>
-          <p className="text-xs text-muted-foreground pt-1">
-            MBC Laboratory © 2026
-          </p>
-        </div>
-      )}
-    </aside>
-  );
-}
-
-/**
- * Shell for authenticated pages — sidebar + content area.
- * Login/register pages render without this wrapper.
- */
 function AuthenticatedShell({ children }) {
   return (
     <div className="flex min-h-screen bg-background">
-      <Sidebar />
+      <RoleNavSidebar />
       <main className="flex-1 ml-64">
         <div className="p-6 lg:p-8 max-w-7xl mx-auto">{children}</div>
       </main>
@@ -188,23 +62,22 @@ function AuthenticatedShell({ children }) {
   );
 }
 
-/** Redirect "/" to the right landing page based on auth + role. */
+function ProtectedShell({ roles, children }) {
+  return (
+    <AuthenticatedShell>
+      <ProtectedRoute roles={roles}>{children}</ProtectedRoute>
+    </AuthenticatedShell>
+  );
+}
+
 function RootRedirect() {
   const location = useLocation();
   if (!isAuthenticated()) {
     return <Navigate to="/login" replace state={{ from: location }} />;
   }
+
   const user = getCurrentUser();
-  const target = defaultPathForRole(user?.role);
-  if (target === "/") {
-    // recruiter/super_admin already land at "/" — render Dashboard directly
-    return (
-      <ProtectedRoute roles={[ROLES.RECRUITER, ROLES.SUPER_ADMIN]}>
-        <DashboardPage />
-      </ProtectedRoute>
-    );
-  }
-  return <Navigate to={target} replace />;
+  return <Navigate to={defaultPathForRole(user?.role)} replace />;
 }
 
 function RouteLoader() {
@@ -250,16 +123,18 @@ function LegacyReviewRedirect() {
   return <Navigate to={target} replace />;
 }
 
+const CANDIDATE = [ROLES.CANDIDATE];
+const RECRUITER_PLUS = [ROLES.RECRUITER, ROLES.SUPER_ADMIN];
+const SUPER_ADMIN = [ROLES.SUPER_ADMIN];
+
 export default function App() {
   return (
     <BrowserRouter>
       <TooltipProvider>
         <Routes>
-          {/* Public */}
           <Route path="/login" element={<LoginPage />} />
           <Route path="/register" element={<RegisterPage />} />
 
-          {/* Authenticated shell */}
           <Route
             path="/"
             element={
@@ -269,203 +144,265 @@ export default function App() {
             }
           />
 
-          {/* Candidate routes (Phase 1) */}
           <Route
             path="/dashboard"
             element={
-              <AuthenticatedShell>
-                <ProtectedRoute roles={[ROLES.CANDIDATE]}>
-                  <CandidateDashboardPage />
-                </ProtectedRoute>
-              </AuthenticatedShell>
+              <ProtectedShell roles={CANDIDATE}>
+                <CandidateDashboardPage />
+              </ProtectedShell>
             }
           />
           <Route
             path="/profile"
             element={
-              <AuthenticatedShell>
-                <ProtectedRoute roles={[ROLES.CANDIDATE]}>
-                  <ProfilePage />
-                </ProtectedRoute>
-              </AuthenticatedShell>
+              <ProtectedShell roles={CANDIDATE}>
+                <CandidateProfilePage />
+              </ProtectedShell>
             }
           />
           <Route
             path="/profile/edit"
             element={
-              <AuthenticatedShell>
-                <ProtectedRoute roles={[ROLES.CANDIDATE]}>
-                  <EditProfilePage />
-                </ProtectedRoute>
-              </AuthenticatedShell>
+              <ProtectedShell roles={CANDIDATE}>
+                <CandidateEditProfilePage />
+              </ProtectedShell>
             }
           />
           <Route
             path="/application"
             element={
-              <AuthenticatedShell>
-                <ProtectedRoute roles={[ROLES.CANDIDATE]}>
-                  <ApplicationOverviewPage />
-                </ProtectedRoute>
-              </AuthenticatedShell>
+              <ProtectedShell roles={CANDIDATE}>
+                <ApplicationOverviewPage />
+              </ProtectedShell>
             }
           />
           <Route
             path="/application/start"
             element={
-              <AuthenticatedShell>
-                <ProtectedRoute roles={[ROLES.CANDIDATE]}>
-                  <StartApplicationPage />
-                </ProtectedRoute>
-              </AuthenticatedShell>
+              <ProtectedShell roles={CANDIDATE}>
+                <StartApplicationPage />
+              </ProtectedShell>
             }
           />
           <Route
             path="/documents"
             element={
-              <AuthenticatedShell>
-                <ProtectedRoute roles={[ROLES.CANDIDATE]}>
-                  <DocumentsPage />
-                </ProtectedRoute>
-              </AuthenticatedShell>
+              <ProtectedShell roles={CANDIDATE}>
+                <DocumentsPage />
+              </ProtectedShell>
             }
           />
           <Route
             path="/application/review"
             element={
-              <AuthenticatedShell>
-                <ProtectedRoute roles={[ROLES.CANDIDATE]}>
-                  <ReviewPage />
-                </ProtectedRoute>
-              </AuthenticatedShell>
+              <ProtectedShell roles={CANDIDATE}>
+                <ReviewPage />
+              </ProtectedShell>
             }
           />
           <Route
             path="/application/status"
             element={
-              <AuthenticatedShell>
-                <ProtectedRoute roles={[ROLES.CANDIDATE]}>
-                  <ApplicationStatusPage />
-                </ProtectedRoute>
-              </AuthenticatedShell>
+              <ProtectedShell roles={CANDIDATE}>
+                <ApplicationStatusPage />
+              </ProtectedShell>
             }
           />
           <Route
             path="/review"
             element={
-              <AuthenticatedShell>
-                <ProtectedRoute roles={[ROLES.CANDIDATE]}>
-                  <LegacyReviewRedirect />
-                </ProtectedRoute>
-              </AuthenticatedShell>
+              <ProtectedShell roles={CANDIDATE}>
+                <LegacyReviewRedirect />
+              </ProtectedShell>
             }
           />
           <Route
             path="/submitted"
             element={
-              <AuthenticatedShell>
-                <ProtectedRoute roles={[ROLES.CANDIDATE]}>
-                  <Navigate to="/application/status" replace />
-                </ProtectedRoute>
-              </AuthenticatedShell>
-            }
-          />
-          <Route
-            path="/my-applications"
-            element={
-              <AuthenticatedShell>
-                <ProtectedRoute roles={[ROLES.CANDIDATE]}>
-                  <MyApplicationsPage />
-                </ProtectedRoute>
-              </AuthenticatedShell>
+              <ProtectedShell roles={CANDIDATE}>
+                <Navigate to="/application/status" replace />
+              </ProtectedShell>
             }
           />
           <Route
             path="/result"
             element={
-              <AuthenticatedShell>
-                <ProtectedRoute roles={[ROLES.CANDIDATE]}>
-                  <Navigate to="/application/status" replace />
-                </ProtectedRoute>
-              </AuthenticatedShell>
+              <ProtectedShell roles={CANDIDATE}>
+                <Navigate to="/application/status" replace />
+              </ProtectedShell>
             }
           />
-
-          {/* Legacy Capstone CV upload — off-nav, candidate-only (matches backend). */}
+          <Route
+            path="/my-applications"
+            element={
+              <ProtectedShell roles={CANDIDATE}>
+                <MyApplicationsPage />
+              </ProtectedShell>
+            }
+          />
           <Route
             path="/upload"
             element={
-              <AuthenticatedShell>
-                <ProtectedRoute roles={[ROLES.CANDIDATE]}>
-                  <UploadPage />
-                </ProtectedRoute>
-              </AuthenticatedShell>
+              <ProtectedShell roles={CANDIDATE}>
+                <UploadPage />
+              </ProtectedShell>
             }
           />
 
-          {/* Recruiter / Admin routes */}
+          <Route
+            path="/recruiter/dashboard"
+            element={
+              <ProtectedShell roles={RECRUITER_PLUS}>
+                <RecruiterOverviewPage />
+              </ProtectedShell>
+            }
+          />
+          <Route
+            path="/recruiter/applications"
+            element={
+              <ProtectedShell roles={RECRUITER_PLUS}>
+                <RecruiterApplicationsPage />
+              </ProtectedShell>
+            }
+          />
+          <Route
+            path="/recruiter/evaluation"
+            element={
+              <ProtectedShell roles={RECRUITER_PLUS}>
+                <RecruiterEvaluationPage />
+              </ProtectedShell>
+            }
+          />
+          <Route
+            path="/recruiter/candidates"
+            element={
+              <ProtectedShell roles={RECRUITER_PLUS}>
+                <RecruiterCandidatesPage />
+              </ProtectedShell>
+            }
+          />
+          <Route
+            path="/recruiter/documents"
+            element={
+              <ProtectedShell roles={RECRUITER_PLUS}>
+                <RecruiterDocumentVerificationPage />
+              </ProtectedShell>
+            }
+          />
+          <Route
+            path="/recruiter/announcements"
+            element={
+              <ProtectedShell roles={RECRUITER_PLUS}>
+                <RecruiterAnnouncementsPage />
+              </ProtectedShell>
+            }
+          />
+          <Route
+            path="/recruiter/analytics"
+            element={
+              <ProtectedShell roles={RECRUITER_PLUS}>
+                <RecruiterAnalyticsPage />
+              </ProtectedShell>
+            }
+          />
           <Route
             path="/rubrics"
             element={
-              <AuthenticatedShell>
-                <ProtectedRoute roles={[ROLES.RECRUITER, ROLES.SUPER_ADMIN]}>
-                  <RubricConfigPage />
-                </ProtectedRoute>
-              </AuthenticatedShell>
+              <ProtectedShell roles={RECRUITER_PLUS}>
+                <RubricConfigPage />
+              </ProtectedShell>
             }
           />
           <Route
             path="/candidates/:id"
             element={
-              <AuthenticatedShell>
-                <ProtectedRoute roles={[ROLES.RECRUITER, ROLES.SUPER_ADMIN]}>
-                  <CandidateDetailPage />
-                </ProtectedRoute>
-              </AuthenticatedShell>
-            }
-          />
-          <Route
-            path="/admin/users"
-            element={
-              <AuthenticatedShell>
-                <ProtectedRoute roles={[ROLES.SUPER_ADMIN]}>
-                  <AdminPage />
-                </ProtectedRoute>
-              </AuthenticatedShell>
-            }
-          />
-          <Route
-            path="/admin/periods"
-            element={
-              <AuthenticatedShell>
-                <ProtectedRoute roles={[ROLES.SUPER_ADMIN]}>
-                  <RecruitmentPeriodPage />
-                </ProtectedRoute>
-              </AuthenticatedShell>
-            }
-          />
-          <Route
-            path="/admin/profile"
-            element={
-              <AuthenticatedShell>
-                <ProtectedRoute roles={[ROLES.SUPER_ADMIN]}>
-                  <AdminProfilePage />
-                </ProtectedRoute>
-              </AuthenticatedShell>
+              <ProtectedShell roles={RECRUITER_PLUS}>
+                <CandidateDetailPage />
+              </ProtectedShell>
             }
           />
           <Route
             path="/recruiter/profile"
             element={
-              <AuthenticatedShell>
-                <ProtectedRoute roles={[ROLES.RECRUITER, ROLES.SUPER_ADMIN]}>
-                  <RecruiterProfilePage />
-                </ProtectedRoute>
-              </AuthenticatedShell>
+              <ProtectedShell roles={RECRUITER_PLUS}>
+                <RecruiterProfilePage />
+              </ProtectedShell>
+            }
+          />
+          <Route
+            path="/recruiter/profile/edit"
+            element={
+              <ProtectedShell roles={RECRUITER_PLUS}>
+                <RecruiterEditProfilePage />
+              </ProtectedShell>
             }
           />
 
-          {/* Fallback */}
+          <Route
+            path="/admin/dashboard"
+            element={
+              <ProtectedShell roles={SUPER_ADMIN}>
+                <AdminOverviewPage />
+              </ProtectedShell>
+            }
+          />
+          <Route
+            path="/admin/users"
+            element={
+              <ProtectedShell roles={SUPER_ADMIN}>
+                <AdminPage />
+              </ProtectedShell>
+            }
+          />
+          <Route
+            path="/admin/periods"
+            element={
+              <ProtectedShell roles={SUPER_ADMIN}>
+                <RecruitmentPeriodPage />
+              </ProtectedShell>
+            }
+          />
+          <Route
+            path="/admin/audit-logs"
+            element={
+              <ProtectedShell roles={SUPER_ADMIN}>
+                <AuditLogsPage />
+              </ProtectedShell>
+            }
+          />
+          <Route
+            path="/admin/email-templates"
+            element={
+              <ProtectedShell roles={SUPER_ADMIN}>
+                <EmailTemplatesPage />
+              </ProtectedShell>
+            }
+          />
+          <Route
+            path="/admin/settings"
+            element={
+              <ProtectedShell roles={SUPER_ADMIN}>
+                <SettingsPage />
+              </ProtectedShell>
+            }
+          />
+          <Route
+            path="/admin/profile"
+            element={
+              <ProtectedShell roles={SUPER_ADMIN}>
+                <AdminProfilePage />
+              </ProtectedShell>
+            }
+          />
+          <Route
+            path="/admin/profile/edit"
+            element={
+              <ProtectedShell roles={SUPER_ADMIN}>
+                <AdminEditProfilePage />
+              </ProtectedShell>
+            }
+          />
+
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
         <Toaster richColors position="top-right" />

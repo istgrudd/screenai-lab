@@ -1,10 +1,11 @@
-import StaffProfileForm from "@/components/StaffProfileForm";
+import StaffProfileSummary from "@/components/StaffProfileSummary";
 
 export default function RecruiterProfilePage() {
   return (
-    <StaffProfileForm
-      title="Profil Recruiter"
-      description="Kelola informasi akun recruiter kamu."
+    <StaffProfileSummary
+      title="Recruiter Profile"
+      description="Account summary for the current recruiter."
+      editPath="/recruiter/profile/edit"
     />
   );
 }

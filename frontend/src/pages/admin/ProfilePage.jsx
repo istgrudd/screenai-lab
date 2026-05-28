@@ -1,10 +1,11 @@
-import StaffProfileForm from "@/components/StaffProfileForm";
+import StaffProfileSummary from "@/components/StaffProfileSummary";
 
 export default function AdminProfilePage() {
   return (
-    <StaffProfileForm
-      title="Profil Super Admin"
-      description="Kelola informasi akun Super Admin kamu."
+    <StaffProfileSummary
+      title="Super Admin Profile"
+      description="Account summary for the current super admin."
+      editPath="/admin/profile/edit"
     />
   );
 }
