@@ -20,6 +20,10 @@ Authenticated requests must include:
 Authorization: Bearer <token>
 ```
 
+JWTs issued before the user's latest password change are rejected by the auth
+middleware. Clients should discard the token and sign in again after a password
+change.
+
 **Roles:** `candidate` · `recruiter` · `super_admin`.
 
 **Role shorthand:**
@@ -173,6 +177,10 @@ Rate limit: `10/minute`.
 
 Recruiter and `super_admin` login behavior is unchanged in Phase 3.
 
+Tokens returned by login include standard expiry plus issued-at metadata. If
+`users.password_changed_at` is newer than the token issue time, protected
+endpoints return `401`.
+
 ### 🔓 `GET /api/auth/verify-email?code=...`
 
 Verifies a candidate email using a one-time, expiring verification code.
@@ -225,6 +233,67 @@ Rate limit: `5/minute`.
 }
 ```
 
+### 🔓 `POST /api/auth/forgot-password`
+
+Requests a self-service password reset email. The response is intentionally
+generic for existing, missing, inactive, and cooldown-limited accounts.
+
+Rate limit: `5/minute`.
+
+**Body**
+
+```json
+{ "email": "user@example.com" }
+```
+
+**Response 200**
+
+```json
+{
+  "success": true,
+  "data": {
+    "message": "If the account exists, a password reset email has been sent."
+  },
+  "error": null
+}
+```
+
+### 🔓 `POST /api/auth/reset-password`
+
+Resets a password using a one-time, expiring reset code. The raw reset code is
+not stored in the database. This endpoint does not auto-login and does not
+return an access token.
+
+Rate limit: `10/minute`.
+
+**Body**
+
+```json
+{
+  "code": "reset-code-from-email",
+  "new_password": "new-min8-password"
+}
+```
+
+**Response 200**
+
+```json
+{
+  "success": true,
+  "data": {
+    "message": "Password has been reset. Please sign in again."
+  },
+  "error": null
+}
+```
+
+**Errors**
+
+- `400 INVALID_RESET_CODE` if the code is invalid.
+- `400 RESET_CODE_EXPIRED` if the code is expired.
+- `400 RESET_CODE_USED` if the code has already been used.
+- `422` if `new_password` validation fails.
+
 ### 🔐 `POST /api/auth/logout`
 
 Server-side no-op. Client must discard JWT.
@@ -241,7 +310,9 @@ Returns the authenticated user profile.
 
 ### 👑 `POST /api/auth/admin/reset-password`
 
-Super-admin assisted password reset. This changes the stored password hash but does not invalidate already-issued JWTs.
+Super-admin assisted password reset. This changes the stored password hash and
+updates `password_changed_at`, so already-issued JWTs for the target user are
+rejected on subsequent protected requests.
 
 **Body**
 
@@ -314,6 +385,7 @@ Updates current user's profile. Every field is optional; only sent fields update
 **Rules**
 
 - `full_name`, `whatsapp`, and `password` remain editable in every phase.
+- Updating `password` sets `password_changed_at`; existing JWTs for that user are rejected after the update.
 - `nim`, `faculty`, `major`, `year` lock once application status is past `draft`.
 - `division` locks as soon as any application exists, including `draft`.
 - Sending `division` as a candidate with no application creates a draft application.

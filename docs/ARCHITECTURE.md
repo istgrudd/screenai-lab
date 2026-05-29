@@ -89,7 +89,8 @@ Key data paths:
 1. **Submit-time NER**: `submit_application` commits the application, then schedules a background task that opens its own `SessionLocal`, extracts CV + Motivation Letter, anonymizes text, and caches it in `candidate_documents.anonymized_text`.
 2. **Evaluation**: recruiter triggers `POST /api/recruiter/evaluate/batch`; the pipeline checks NER cache, falls back to inline NER when needed, parses KHS, validates KTM, builds a rubric-augmented prompt, awaits the async DeepSeek client, persists `DimensionScore`, and updates `Candidate.composite_score`.
 3. **Phase derivation**: `backend/utils/period_utils.py::get_current_phase` derives the active phase from calendar boundaries. No cron/scheduler is required.
-4. **Announcement**: recruiter selects passing applications and calls `POST /api/announcements/bulk`; the backend updates pass/fail statuses atomically and writes `AuditLog` rows.
+4. **Auth hardening**: password reset, admin reset, and authenticated profile password updates set `users.password_changed_at`; protected requests reject JWTs issued before that timestamp.
+5. **Announcement**: recruiter selects passing applications and calls `POST /api/announcements/bulk`; the backend updates pass/fail statuses atomically and writes `AuditLog` rows.
 
 ---
 
@@ -126,6 +127,8 @@ PUBLIC_FRONTEND_URL=https://your-domain.example
 EMAIL_ENABLED=true
 EMAIL_VERIFICATION_EXPIRE_MINUTES=60
 EMAIL_RESEND_COOLDOWN_SECONDS=60
+PASSWORD_RESET_EXPIRE_MINUTES=60
+PASSWORD_RESET_COOLDOWN_SECONDS=60
 ```
 
 Notes:
@@ -165,6 +168,7 @@ screenai-lab/
 │   ├── models/
 │   │   ├── user.py            — User + UserRole
 │   │   ├── email_verification.py — one-time email verification links
+│   │   ├── password_reset.py    — one-time password reset links
 │   │   ├── application.py     — Application + status/division enums
 │   │   ├── document.py        — Document + DocumentType
 │   │   ├── candidate.py       — Candidate, CandidateDocument, DimensionScore
@@ -173,7 +177,7 @@ screenai-lab/
 │   │   └── audit.py           — AuditLog
 │   │
 │   ├── routers/
-│   │   ├── auth.py            — register / login / logout / me / admin reset password
+│   │   ├── auth.py            — register / login / verify / forgot-reset / me / admin reset
 │   │   ├── users.py           — self-service profile + super-admin user management
 │   │   ├── applications.py    — application CRUD + submit + recruiter list
 │   │   ├── documents.py       — upload / list / download / verify
@@ -190,6 +194,7 @@ screenai-lab/
 │   │   ├── email_service.py        — Resend abstraction + disabled mode
 │   │   ├── email_templates.py      — hardcoded transactional email templates
 │   │   ├── email_verification_service.py — candidate verification flow
+│   │   ├── password_reset_service.py — reset code generation, hashing, email, password update
 │   │   ├── extractor.py            — PyMuPDF PDF extraction + EPrT helper
 │   │   ├── normalizer.py           — text cleanup + section segmentation
 │   │   ├── anonymizer.py           — NER + regex anonymization
@@ -317,6 +322,14 @@ Variables are defined in `.env.example`. Backend variables are read by `backend/
 | `DEEPSEEK_API_KEY` | backend | Required for evaluation calls |
 | `VITE_API_BASE_URL` | frontend build | Same-domain Docker path: `/api`; rebuild when changed |
 | `FRONTEND_URL` | backend | Dev CORS fallback when `ALLOWED_ORIGINS` empty |
+| `RESEND_API_KEY` | backend | Required only when transactional email sending is enabled |
+| `EMAIL_FROM` | backend | Required only when transactional email sending is enabled |
+| `PUBLIC_FRONTEND_URL` | backend | Public base URL used in email verification and password reset links |
+| `EMAIL_ENABLED` | backend | Keep `false` for local smoke tests; set `true` after email config is valid |
+| `EMAIL_VERIFICATION_EXPIRE_MINUTES` | backend | Candidate verification code TTL |
+| `EMAIL_RESEND_COOLDOWN_SECONDS` | backend | Candidate verification resend cooldown |
+| `PASSWORD_RESET_EXPIRE_MINUTES` | backend | Password reset code TTL |
+| `PASSWORD_RESET_COOLDOWN_SECONDS` | backend | Forgot-password request cooldown |
 | `CHROMA_PERSIST_DIR` | backend | Optional override |
 | `NER_MODEL_NAME` | backend | Optional override |
 | `EMBEDDING_MODEL_NAME` | backend | Optional override |
@@ -325,7 +338,7 @@ Variables are defined in `.env.example`. Backend variables are read by `backend/
 
 ## 8. Data Flow at a Glance
 
-1. **Sign-up & profile**: Candidate registers → JWT issued → profile fields stored on `users`.
+1. **Sign-up & profile**: Candidate registers → email verification link issued → verified candidate can log in and receive a JWT.
 2. **Application creation**: Candidate selects division → `POST /api/applications` creates a `DRAFT` application.
 3. **Document uploads**: Six required document types are uploaded through `/api/documents/upload/{doc_type}` with size, MIME, and magic-byte validation.
 4. **Submit gate**: Submission requires an active period in `SUBMISSION` and all required documents. Status flips to `submitted`, file mutations are locked.
@@ -376,6 +389,7 @@ backend/vectorstore/      # ChromaDB directory
 - Current scoring path is rubric-augmented prompting, not live vector retrieval.
 - OCR for scanned PDFs/images is not part of the main pipeline yet.
 - JWT is stored in localStorage; HttpOnly cookie + CSRF is a security backlog.
+- Frontend forgot/reset password pages are not implemented yet; Phase 4 exposes backend endpoints only.
 - Horizontal scaling would require shared file storage and shared rate-limit state.
 
 ---

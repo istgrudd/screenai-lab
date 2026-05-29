@@ -20,6 +20,7 @@ out of the system.
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 import re
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -325,6 +326,7 @@ def update_me(
         current_user.whatsapp = wa.strip() if wa else None
     if "password" in data:
         current_user.password_hash = hash_password(data["password"])
+        current_user.password_changed_at = datetime.now(timezone.utc)
 
     if "division" in data and is_candidate:
         # Mutate the user's draft Application — create one if there isn't

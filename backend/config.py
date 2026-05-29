@@ -47,6 +47,8 @@ class Settings(BaseSettings):
     email_enabled: bool = False
     email_verification_expire_minutes: int = 60
     email_resend_cooldown_seconds: int = 60
+    password_reset_expire_minutes: int = 60
+    password_reset_cooldown_seconds: int = 60
 
     @property
     def cors_origins(self) -> list[str]:

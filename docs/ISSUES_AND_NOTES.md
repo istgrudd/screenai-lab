@@ -81,9 +81,10 @@ No other `TODO/FIXME/XXX/HACK` comments exist in `backend/` or `frontend/src/`.
 ### 🟦 No virus scanning on uploads
 - Files land directly on disk. Recruiters preview them via `FileResponse`. Acceptable inside an internal lab system but a hardening note for any wider deployment.
 
-### 🟦 JWT cannot be revoked
-- [backend/services/auth_service.py](../backend/services/auth_service.py) has no blacklist. `POST /api/auth/logout` is a no-op server-side ([routers/auth.py:171](../backend/routers/auth.py#L171)). A leaked token is valid until `exp` (480 min default).
-- Hardening: add a `token_blacklist` table or switch to short-lived access + refresh tokens.
+### 🟦 General logout token revocation is still limited
+- [backend/services/auth_service.py](../backend/services/auth_service.py) has no token blacklist. `POST /api/auth/logout` is a no-op server-side, so normal logout still depends on the client discarding its token.
+- Phase 4 hardening added `users.password_changed_at`: self-service password reset, admin reset, and authenticated profile password changes reject JWTs issued before the password change.
+- Remaining hardening: add a `token_blacklist` table or switch to short-lived access + refresh tokens for immediate logout/device revocation.
 
 ### ✅ `evaluate_batch` returns 422 for unknown ValueError — **Resolved in Batch 3**
 - Unrecognized `ValueError`s now log the full traceback server-side and return a sanitized 500 (`"Evaluation failed due to an internal error. Please contact the administrator."`). Known shapes (`"no dimensions configured"`, `"no rubric found"`, `"rubric weights must sum"`) still map to clean 400/404 with their original message. The intermediate `except HTTPException: raise` makes sure deliberate HTTPExceptions aren't double-wrapped.
@@ -91,8 +92,10 @@ No other `TODO/FIXME/XXX/HACK` comments exist in `backend/` or `frontend/src/`.
 ### 🟧 No CSRF protection
 - The app uses bearer tokens (not cookies), so traditional CSRF is not exploitable for state-changing requests; document this trust model so future contributors don't introduce cookie-based auth without remembering to add CSRF tokens.
 
-### ✅ No password reset flow — **Partially resolved in Batch 3** (admin-assisted)
-- `POST /api/auth/admin/reset-password` lets a super_admin reset any user's password directly (no email round-trip). The endpoint is gated by `require_role(SUPER_ADMIN)` and the new password is bcrypt-hashed. JWTs are **not** invalidated — existing sessions remain valid until `exp`. Self-service email reset is still deferred to Phase 3. UI: a "Reset password" button on every row of [/admin/users](../frontend/src/pages/admin/AdminPage.jsx).
+### ✅ No password reset flow — **Resolved in Phase 4 backend**
+- `POST /api/auth/forgot-password` and `POST /api/auth/reset-password` implement generic-response, one-time, expiring, hash-only reset links.
+- `POST /api/auth/admin/reset-password` remains as a super-admin fallback and now updates `password_changed_at`, invalidating older JWTs for the target user.
+- Frontend forgot/reset pages are still deferred to Phase 5.
 
 ---
 

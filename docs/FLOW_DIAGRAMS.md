@@ -129,9 +129,11 @@ sequenceDiagram
     Note over FE,DB: PROTECTED REQUEST
     FE->>MW: GET /api/applications/my<br/>Authorization: Bearer <jwt>
     MW->>Svc: decode_access_token
-    Svc-->>MW: payload {sub, role, exp, ...}
+    Svc-->>MW: payload {sub, role, exp, issued_at, ...}
     MW->>DB: SELECT user WHERE id = sub
     alt user missing or inactive or invalid token
+        MW-->>FE: 401
+    else token issued before password_changed_at
         MW-->>FE: 401
     else ok and require_role passes
         MW-->>FE: hand off to route handler
@@ -139,6 +141,50 @@ sequenceDiagram
 ```
 
 Source: [backend/routers/auth.py](../backend/routers/auth.py), [backend/services/auth_service.py](../backend/services/auth_service.py), [backend/middleware/auth_middleware.py](../backend/middleware/auth_middleware.py), [backend/utils/security.py](../backend/utils/security.py).
+
+---
+
+## 3a. Forgot Password Flow
+
+Backend-only Phase 4 flow: the email links target `/reset-password?code=...` so
+the Phase 5 frontend can attach a page later. Smoke tests keep email disabled
+and read the captured development outbox.
+
+```mermaid
+sequenceDiagram
+    participant FE as Client
+    participant Auth as routers/auth.py
+    participant Reset as services/password_reset_service.py
+    participant Email as services/email_service.py
+    participant DB as DB
+    participant MW as middleware/auth_middleware.py
+
+    FE->>Auth: POST /api/auth/forgot-password { email }
+    Auth->>Reset: request_password_reset_if_allowed(email)
+    Reset->>DB: SELECT active user by normalized email
+    alt missing, inactive, or cooldown
+        Reset-->>Auth: generic no-op
+    else active user
+        Reset->>DB: INSERT password_reset_links (hashed secret)
+        Reset->>Email: send reset link
+    end
+    Auth-->>FE: 200 generic message
+
+    FE->>Auth: POST /api/auth/reset-password { code, new_password }
+    Auth->>Reset: reset_password_with_code(code, new_password)
+    Reset->>DB: SELECT password_reset_links by hashed code
+    alt invalid / expired / used
+        Auth-->>FE: 400 structured error
+    else valid
+        Reset->>DB: UPDATE users.password_hash, users.password_changed_at
+        Reset->>DB: UPDATE password_reset_links.used_at
+        Auth-->>FE: 200 sign-in-again message
+    end
+
+    FE->>MW: Protected request with old JWT
+    MW->>DB: SELECT user
+    MW-->>FE: 401 if token issued before password_changed_at
+```
 
 ---
 

@@ -45,3 +45,39 @@ def verification_email(
 </html>
 """.strip()
     return EmailTemplate(subject=subject, html=html, text=text)
+
+
+def password_reset_email(
+    *,
+    recipient_name: str,
+    reset_url: str,
+    expires_minutes: int,
+) -> EmailTemplate:
+    """Build the self-service password reset message."""
+    subject = "Reset your ScreenAI Lab password"
+    safe_name = escape(recipient_name)
+    safe_url = escape(reset_url, quote=True)
+    text = (
+        f"Hi {recipient_name},\n\n"
+        "We received a request to reset your ScreenAI Lab password.\n\n"
+        f"Reset link: {reset_url}\n\n"
+        f"This link expires in {expires_minutes} minutes. "
+        "If you did not request this, you can ignore this email.\n"
+    )
+    html = f"""
+<!doctype html>
+<html>
+  <body style="font-family: Arial, sans-serif; color: #111827; line-height: 1.5;">
+    <p>Hi {safe_name},</p>
+    <p>We received a request to reset your ScreenAI Lab password.</p>
+    <p>
+      <a href="{safe_url}" style="color: #1d4ed8;">
+        Reset password
+      </a>
+    </p>
+    <p>This link expires in {expires_minutes} minutes.</p>
+    <p>If you did not request this, you can ignore this email.</p>
+  </body>
+</html>
+""".strip()
+    return EmailTemplate(subject=subject, html=html, text=text)

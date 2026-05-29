@@ -18,6 +18,7 @@ def create_access_token(user: User) -> str:
         email, role: convenience claims for the client
         exp:  expiry (UTC)
         iat:  issued-at (UTC)
+        issued_at: high-precision issued-at timestamp for password-change checks
     """
     now = datetime.now(timezone.utc)
     expire = now + timedelta(minutes=settings.access_token_expire_minutes)
@@ -26,6 +27,7 @@ def create_access_token(user: User) -> str:
         "email": user.email,
         "role": user.role.value if hasattr(user.role, "value") else str(user.role),
         "iat": now,
+        "issued_at": now.isoformat(),
         "exp": expire,
     }
     return jwt.encode(payload, settings.secret_key, algorithm=settings.jwt_algorithm)

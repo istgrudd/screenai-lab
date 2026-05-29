@@ -10,6 +10,7 @@ Endpoints:
 """
 
 import re
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, EmailStr, Field, field_validator
@@ -30,6 +31,12 @@ from backend.services.email_verification_service import (
     create_and_send_verification,
     resend_verification_if_allowed,
     verify_email_code,
+)
+from backend.services.password_reset_service import (
+    GENERIC_FORGOT_PASSWORD_MESSAGE,
+    ResetPasswordStatus,
+    request_password_reset_if_allowed,
+    reset_password_with_code,
 )
 from backend.utils.security import hash_password
 
@@ -75,13 +82,17 @@ class ResendVerificationRequest(BaseModel):
     email: EmailStr
 
 
-class AdminResetPasswordRequest(BaseModel):
-    """Super-admin assisted password reset (Phase 2 stop-gap).
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
 
-    Self-service reset (email token) is Phase 4. Until then, a candidate
-    who forgets their password contacts the lab; a super-admin uses this
-    endpoint to set a new one.
-    """
+
+class ResetPasswordRequest(BaseModel):
+    code: str = Field(..., max_length=512)
+    new_password: str = Field(..., min_length=8, max_length=72)
+
+
+class AdminResetPasswordRequest(BaseModel):
+    """Super-admin assisted password reset fallback."""
 
     user_id: int
     new_password: str = Field(..., min_length=8, max_length=72)
@@ -290,6 +301,69 @@ def resend_verification(
     }
 
 
+@router.post("/forgot-password")
+@limiter.limit("5/minute")
+def forgot_password(
+    request: Request,
+    payload: ForgotPasswordRequest,
+    db: Session = Depends(get_db),
+):
+    """Request a password reset email with a generic response."""
+    result = request_password_reset_if_allowed(db, payload.email)
+    if result.attempted_send and result.email_result and not result.email_result.success:
+        db.rollback()
+    else:
+        db.commit()
+
+    return {
+        "success": True,
+        "data": {"message": GENERIC_FORGOT_PASSWORD_MESSAGE},
+        "error": None,
+    }
+
+
+@router.post("/reset-password")
+@limiter.limit("10/minute")
+def reset_password(
+    request: Request,
+    payload: ResetPasswordRequest,
+    db: Session = Depends(get_db),
+):
+    """Reset a password using a one-time reset code."""
+    result = reset_password_with_code(db, payload.code, payload.new_password)
+    if result.status == ResetPasswordStatus.RESET:
+        db.commit()
+        return {
+            "success": True,
+            "data": {"message": "Password has been reset. Please sign in again."},
+            "error": None,
+        }
+
+    db.rollback()
+    error_map = {
+        ResetPasswordStatus.INVALID: (
+            "INVALID_RESET_CODE",
+            "Password reset code is invalid.",
+        ),
+        ResetPasswordStatus.EXPIRED: (
+            "RESET_CODE_EXPIRED",
+            "Password reset code has expired. Please request a new one.",
+        ),
+        ResetPasswordStatus.USED: (
+            "RESET_CODE_USED",
+            "Password reset code has already been used.",
+        ),
+    }
+    code_value, message = error_map.get(
+        result.status,
+        ("INVALID_RESET_CODE", "Password reset code is invalid."),
+    )
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail={"code": code_value, "message": message},
+    )
+
+
 @router.post("/logout")
 def logout(current_user: User = Depends(get_current_user)):
     """Logout endpoint.
@@ -325,10 +399,9 @@ def admin_reset_password(
 ):
     """Super-admin-only assisted password reset.
 
-    Hashes the new password with bcrypt and replaces the target user's
-    stored hash. Does not invalidate existing JWTs (that's Phase 4 +
-    requires a token blacklist) — but the next login will require the
-    new password.
+    Hashes the new password with bcrypt, replaces the target user's stored
+    hash, and updates ``password_changed_at`` so previously issued JWTs are
+    rejected by the auth middleware.
     """
     target = db.query(User).filter(User.id == payload.user_id).first()
     if not target:
@@ -338,6 +411,7 @@ def admin_reset_password(
         )
 
     target.password_hash = hash_password(payload.new_password)
+    target.password_changed_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(target)
 

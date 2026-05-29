@@ -63,6 +63,7 @@ class User(Base):
     # is intentionally deferred; Phase 3 only blocks unverified candidates.
     email_verified_at = Column(DateTime, nullable=True)
     email_verification_sent_at = Column(DateTime, nullable=True)
+    password_changed_at = Column(DateTime, nullable=True)
 
     # --- Relationships ---
     applications = relationship(
@@ -76,6 +77,11 @@ class User(Base):
     )
     email_verification_links = relationship(
         "EmailVerificationLink",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+    password_reset_links = relationship(
+        "PasswordResetLink",
         back_populates="user",
         cascade="all, delete-orphan",
     )

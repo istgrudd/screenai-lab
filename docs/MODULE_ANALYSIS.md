@@ -22,6 +22,8 @@ For endpoint-level detail see [API_REFERENCE.md](API_REFERENCE.md). For runtime 
 - [backend/middleware/rate_limit.py](../backend/middleware/rate_limit.py)
 - [backend/utils/security.py](../backend/utils/security.py)
 - [backend/models/user.py](../backend/models/user.py)
+- [backend/models/password_reset.py](../backend/models/password_reset.py)
+- [backend/services/password_reset_service.py](../backend/services/password_reset_service.py)
 
 **Inputs**
 
@@ -29,6 +31,8 @@ For endpoint-level detail see [API_REFERENCE.md](API_REFERENCE.md). For runtime 
 - Login body: `{ email, password }`.
 - Verify email query: `code`.
 - Resend verification body: `{ email }`.
+- Forgot password body: `{ email }`.
+- Reset password body: `{ code, new_password }`.
 - Admin password reset body: `{ user_id, new_password }`.
 - `Authorization: Bearer <token>` on protected endpoints.
 
@@ -42,9 +46,10 @@ For endpoint-level detail see [API_REFERENCE.md](API_REFERENCE.md). For runtime 
 
 - `User` ORM.
 - `EmailVerificationLink` ORM.
+- `PasswordResetLink` ORM.
 - bcrypt helpers.
 - email service abstraction for Resend / disabled smoke-test mode.
-- slowapi limiter for register/login/verify/resend auth endpoints.
+- slowapi limiter for register/login/verify/resend/forgot/reset auth endpoints.
 
 **Business rules**
 
@@ -52,16 +57,21 @@ For endpoint-level detail see [API_REFERENCE.md](API_REFERENCE.md). For runtime 
 - Candidate registration sends a verification email and does not return a normal access token.
 - Candidates must verify email before login; recruiter and super-admin login behavior is unchanged in Phase 3.
 - Verify email is rate-limited to reduce brute-force attempts against one-time codes.
+- Forgot password always returns a generic response and does not reveal whether an email exists.
+- Password reset links are one-time, expiring, and stored as HMAC-SHA256 hashes rather than raw secrets.
+- Successful self-service password reset updates `users.password_changed_at`.
+- Admin-assisted reset also updates `users.password_changed_at`.
 - Email is normalized to lowercase.
 - NIM must be a numeric string of at least 10 digits.
 - Password length: 8–72 chars; upper bound follows bcrypt's effective input limit.
 - Login returns `401` for invalid credentials, `403` for valid credentials on deactivated accounts, and `403 EMAIL_NOT_VERIFIED` for unverified candidates.
-- JWTs are stateless. Logout is a server-side no-op; the frontend discards the token.
-- Admin-assisted reset changes password hash but does not invalidate existing JWTs.
+- JWTs are stateless, but protected requests reject tokens issued before the user's latest `password_changed_at`. Logout remains a server-side no-op; the frontend discards the token.
 
 **Notable edge cases**
 
 - Deactivated users cannot pass `get_current_user` even if their JWT has not expired.
+- Tokens created before Phase 4 without `issued_at` remain valid while `password_changed_at` is null, but are rejected after the user changes password through reset/admin reset.
+- Forgot password for unverified candidates does not set `email_verified_at`; candidate login still requires email verification.
 - Token storage is currently frontend localStorage; HttpOnly cookie + CSRF remains backlog.
 
 ---
@@ -96,6 +106,7 @@ For endpoint-level detail see [API_REFERENCE.md](API_REFERENCE.md). For runtime 
 **Business rules**
 
 - `full_name`, `whatsapp`, and `password` stay editable in all phases.
+- Updating password through `PUT /api/users/me` sets `password_changed_at`, so the previous JWT is rejected on later protected requests.
 - Candidate email changes are temporarily blocked after Phase 3 to avoid carrying verification status to a new email; same-email updates are allowed.
 - Recruiter and super-admin email changes keep the existing duplicate-check behavior.
 - `nim`, `faculty`, `major`, and `year` lock once application status is past `draft`.
