@@ -121,6 +121,8 @@ class ProfileUpdate(BaseModel):
     NIM/faculty/major/year/division are locked once the user's active
     Application has moved past DRAFT — the endpoint returns 403 in that
     case rather than silently no-opping.
+    Candidate email changes are temporarily blocked in Phase 3 until an
+    email re-verification flow exists.
     """
 
     full_name: str | None = Field(default=None, min_length=1, max_length=255)
@@ -230,9 +232,11 @@ def update_me(
     candidate has already started uploading docs against that division
     and switching mid-flight would orphan their uploads. All five keys
     raise 403 if present in the payload after their respective lock.
-    ``full_name``, ``email``, ``whatsapp``, and ``password`` remain
-    editable in every phase. Recruiters/super_admins ignore lock logic
-    and never carry a division.
+    ``full_name``, ``whatsapp``, and ``password`` remain editable in every
+    phase. Candidate email changes are temporarily blocked until an email
+    re-verification flow exists; recruiters/super_admins keep the existing
+    email-edit behavior. Recruiters/super_admins ignore lock logic and never
+    carry a division.
     """
     is_candidate = current_user.role == UserRole.CANDIDATE
     app = _latest_application(db, current_user.id) if is_candidate else None
@@ -270,6 +274,17 @@ def update_me(
     if "email" in data:
         new_email = data["email"].lower()
         if new_email != current_user.email:
+            if current_user.role == UserRole.CANDIDATE:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail={
+                        "code": "CANDIDATE_EMAIL_CHANGE_REQUIRES_VERIFICATION_FLOW",
+                        "message": (
+                            "Candidate email changes are temporarily disabled "
+                            "until the email re-verification flow is available."
+                        ),
+                    },
+                )
             exists = (
                 db.query(User)
                 .filter(User.email == new_email, User.id != current_user.id)

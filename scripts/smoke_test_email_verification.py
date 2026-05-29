@@ -263,6 +263,37 @@ def main() -> int:
         bool(login_response.json()["data"]["access_token"]),
         "login after verification returns access_token",
     )
+    token = login_response.json()["data"]["access_token"]
+    auth_headers = {"Authorization": f"Bearer {token}"}
+
+    same_email_response = client.put(
+        "/api/users/me",
+        headers=auth_headers,
+        json={"email": TEST_EMAIL},
+    )
+    _check(
+        same_email_response.status_code == 200,
+        f"candidate same-email profile update -> 200, got {same_email_response.status_code}",
+    )
+    _check(
+        same_email_response.json()["data"]["email"] == TEST_EMAIL,
+        "candidate same-email profile update preserves email",
+    )
+
+    changed_email_response = client.put(
+        "/api/users/me",
+        headers=auth_headers,
+        json={"email": "smoke+emailverify_changed@example.com"},
+    )
+    _check(
+        changed_email_response.status_code == 403,
+        f"candidate changed-email profile update -> 403, got {changed_email_response.status_code}",
+    )
+    _check(
+        changed_email_response.json()["detail"]["code"]
+        == "CANDIDATE_EMAIL_CHANGE_REQUIRES_VERIFICATION_FLOW",
+        "candidate changed-email profile update returns structured block code",
+    )
 
     reused_response = client.get(
         "/api/auth/verify-email",

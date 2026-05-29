@@ -78,7 +78,7 @@ class ResendVerificationRequest(BaseModel):
 class AdminResetPasswordRequest(BaseModel):
     """Super-admin assisted password reset (Phase 2 stop-gap).
 
-    Self-service reset (email token) is Phase 3. Until then, a candidate
+    Self-service reset (email token) is Phase 4. Until then, a candidate
     who forgets their password contacts the lab; a super-admin uses this
     endpoint to set a new one.
     """
@@ -222,7 +222,9 @@ def login(request: Request, payload: LoginRequest, db: Session = Depends(get_db)
 
 
 @router.get("/verify-email")
+@limiter.limit("20/minute")
 def verify_email(
+    request: Request,
     code: str = Query(..., min_length=20, max_length=512),
     db: Session = Depends(get_db),
 ):
@@ -324,7 +326,7 @@ def admin_reset_password(
     """Super-admin-only assisted password reset.
 
     Hashes the new password with bcrypt and replaces the target user's
-    stored hash. Does not invalidate existing JWTs (that's Phase 3 +
+    stored hash. Does not invalidate existing JWTs (that's Phase 4 +
     requires a token blacklist) — but the next login will require the
     new password.
     """

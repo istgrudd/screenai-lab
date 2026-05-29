@@ -44,13 +44,14 @@ For endpoint-level detail see [API_REFERENCE.md](API_REFERENCE.md). For runtime 
 - `EmailVerificationLink` ORM.
 - bcrypt helpers.
 - email service abstraction for Resend / disabled smoke-test mode.
-- slowapi limiter for register/login.
+- slowapi limiter for register/login/verify/resend auth endpoints.
 
 **Business rules**
 
 - Registration always creates a `candidate` account.
 - Candidate registration sends a verification email and does not return a normal access token.
 - Candidates must verify email before login; recruiter and super-admin login behavior is unchanged in Phase 3.
+- Verify email is rate-limited to reduce brute-force attempts against one-time codes.
 - Email is normalized to lowercase.
 - NIM must be a numeric string of at least 10 digits.
 - Password length: 8–72 chars; upper bound follows bcrypt's effective input limit.
@@ -94,7 +95,9 @@ For endpoint-level detail see [API_REFERENCE.md](API_REFERENCE.md). For runtime 
 
 **Business rules**
 
-- `full_name`, `email`, `whatsapp`, and `password` stay editable in all phases.
+- `full_name`, `whatsapp`, and `password` stay editable in all phases.
+- Candidate email changes are temporarily blocked after Phase 3 to avoid carrying verification status to a new email; same-email updates are allowed.
+- Recruiter and super-admin email changes keep the existing duplicate-check behavior.
 - `nim`, `faculty`, `major`, and `year` lock once application status is past `draft`.
 - `division` locks once any application exists, including `draft`.
 - Candidate can create a draft application by sending `division` through `PUT /api/users/me` if they do not already have one.

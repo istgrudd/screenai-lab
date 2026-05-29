@@ -60,6 +60,12 @@ EMAIL_RESEND_COOLDOWN_SECONDS=
 | `POST /api/auth/login` | Changed |
 | `GET /api/auth/verify-email` | Added |
 | `POST /api/auth/resend-verification` | Added |
+| `PUT /api/users/me` | Changed |
+
+## Post-Review Hardening Update
+- Candidate email changes through `PUT /api/users/me` are temporarily blocked with `CANDIDATE_EMAIL_CHANGE_REQUIRES_VERIFICATION_FLOW` to avoid treating a newly changed email as already verified.
+- `GET /api/auth/verify-email` is now rate-limited at `20/minute`.
+- Smoke tests were updated to cover candidate email-change blocking.
 
 ## Validation
 | Command | Result |
@@ -77,6 +83,8 @@ EMAIL_RESEND_COOLDOWN_SECONDS=
 - Verification succeeds with valid code.
 - Login after verification succeeds.
 - Reusing verification code fails.
+- Candidate email change after verification is blocked.
+- Candidate same-email profile update remains allowed.
 - Resend does not leak account existence.
 - Email disabled/test mode does not send real email.
 

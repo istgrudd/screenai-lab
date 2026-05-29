@@ -179,6 +179,8 @@ Verifies a candidate email using a one-time, expiring verification code.
 The raw code is not stored in the database, and this endpoint does not return
 an access token.
 
+Rate limit: `20/minute`.
+
 **Response 200**
 
 ```json
@@ -311,15 +313,28 @@ Updates current user's profile. Every field is optional; only sent fields update
 
 **Rules**
 
-- `full_name`, `email`, `whatsapp`, and `password` remain editable in every phase.
+- `full_name`, `whatsapp`, and `password` remain editable in every phase.
 - `nim`, `faculty`, `major`, `year` lock once application status is past `draft`.
 - `division` locks as soon as any application exists, including `draft`.
 - Sending `division` as a candidate with no application creates a draft application.
 - Non-candidates cannot set `division`.
+- Phase 3: candidate email changes are temporarily blocked until email re-verification UI/flow is implemented. Sending the same email value is allowed.
+- Recruiter and `super_admin` email changes keep the existing behavior with duplicate checks.
 
 **Errors**
 
 - `403` locked field attempted; body includes `locked_fields`.
+- `403 CANDIDATE_EMAIL_CHANGE_REQUIRES_VERIFICATION_FLOW` if a candidate tries to change email:
+
+```json
+{
+  "detail": {
+    "code": "CANDIDATE_EMAIL_CHANGE_REQUIRES_VERIFICATION_FLOW",
+    "message": "Candidate email changes are temporarily disabled until the email re-verification flow is available."
+  }
+}
+```
+
 - `400` non-candidate sent `division`.
 - `409` duplicate email or NIM.
 
