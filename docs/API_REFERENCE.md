@@ -189,6 +189,11 @@ an access token.
 
 Rate limit: `20/minute`.
 
+Production UX note: users should normally arrive via the frontend page
+`/verify-email?code=...`. That page then calls this backend endpoint with the
+same code. Email templates should not send production users directly to the
+backend JSON endpoint.
+
 **Response 200**
 
 ```json
@@ -265,6 +270,10 @@ not stored in the database. This endpoint does not auto-login and does not
 return an access token.
 
 Rate limit: `10/minute`.
+
+Production UX note: users should normally arrive via the frontend page
+`/reset-password?code=...`. That page then submits the code and new password to
+this backend endpoint.
 
 **Body**
 

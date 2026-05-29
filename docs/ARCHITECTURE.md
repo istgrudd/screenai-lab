@@ -114,7 +114,7 @@ Manual `uvicorn` via systemd/supervisor is not the recommended production path a
 ```env
 ENVIRONMENT=production
 SECRET_KEY=<strong random value>
-ALLOWED_ORIGINS=https://your-domain.example
+ALLOWED_ORIGINS=https://recruitment.mbclaboratory.com
 DEEPSEEK_API_KEY=<key>
 DATABASE_URL=postgresql://screenai:<password>@db:5432/screenai_lab
 POSTGRES_USER=screenai
@@ -122,8 +122,8 @@ POSTGRES_PASSWORD=<same password>
 POSTGRES_DB=screenai_lab
 VITE_API_BASE_URL=/api
 RESEND_API_KEY=<key>
-EMAIL_FROM="ScreenAI Lab <noreply@your-domain.example>"
-PUBLIC_FRONTEND_URL=https://your-domain.example
+EMAIL_FROM="MBC Laboratory <noreply@mail.mbclaboratory.com>"
+PUBLIC_FRONTEND_URL=https://recruitment.mbclaboratory.com
 EMAIL_ENABLED=true
 EMAIL_VERIFICATION_EXPIRE_MINUTES=60
 EMAIL_RESEND_COOLDOWN_SECONDS=60
@@ -134,6 +134,11 @@ PASSWORD_RESET_COOLDOWN_SECONDS=60
 Notes:
 
 - `DATABASE_URL` must use `db` as hostname in Docker Compose, not `localhost`.
+- The production app origin is expected to be `https://recruitment.mbclaboratory.com`; the main domain `mbclaboratory.com` can host the laboratory website or a future app portal.
+- Verification and reset-password links should be frontend-facing: `/verify-email?code=...` and `/reset-password?code=...`.
+- Backend email templates build those links from `PUBLIC_FRONTEND_URL`; do not point production UX directly at backend JSON endpoints.
+- `VITE_API_BASE_URL=/api` is recommended for the same-subdomain Docker deployment where frontend nginx proxies `/api` to the backend.
+- `EMAIL_FROM` must match a domain verified in Resend. Resend delivers email; ScreenAI Lab backend owns verification/reset token generation and validation.
 - `VITE_API_BASE_URL` is build-time. Rebuild the frontend when it changes.
 - TLS is intentionally outside Docker so cert renewal is independent from app containers.
 
@@ -314,17 +319,17 @@ Variables are defined in `.env.example`. Backend variables are read by `backend/
 |---|---|---|
 | `ENVIRONMENT` | backend | Set to `production` to activate startup guards |
 | `SECRET_KEY` | backend | Strong random JWT signing key; placeholder refused in production |
-| `ALLOWED_ORIGINS` | backend | Required in production; exact browser origin(s) |
+| `ALLOWED_ORIGINS` | backend | Required in production; recommended app origin `https://recruitment.mbclaboratory.com` |
 | `DATABASE_URL` | backend | Docker prod: `postgresql://USER:PASSWORD@db:5432/DBNAME` |
 | `POSTGRES_USER` | db | Must match `DATABASE_URL` |
 | `POSTGRES_PASSWORD` | db | Must match `DATABASE_URL` |
 | `POSTGRES_DB` | db | Must match `DATABASE_URL` |
 | `DEEPSEEK_API_KEY` | backend | Required for evaluation calls |
-| `VITE_API_BASE_URL` | frontend build | Same-domain Docker path: `/api`; rebuild when changed |
+| `VITE_API_BASE_URL` | frontend build | Same-subdomain Docker path: `/api`; rebuild when changed |
 | `FRONTEND_URL` | backend | Dev CORS fallback when `ALLOWED_ORIGINS` empty |
 | `RESEND_API_KEY` | backend | Required only when transactional email sending is enabled |
-| `EMAIL_FROM` | backend | Required only when transactional email sending is enabled |
-| `PUBLIC_FRONTEND_URL` | backend | Public base URL used in email verification and password reset links |
+| `EMAIL_FROM` | backend | Required only when transactional email sending is enabled; must match a Resend-verified sender domain |
+| `PUBLIC_FRONTEND_URL` | backend | Public frontend origin used in email verification and password reset links |
 | `EMAIL_ENABLED` | backend | Keep `false` for local smoke tests; set `true` after email config is valid |
 | `EMAIL_VERIFICATION_EXPIRE_MINUTES` | backend | Candidate verification code TTL |
 | `EMAIL_RESEND_COOLDOWN_SECONDS` | backend | Candidate verification resend cooldown |

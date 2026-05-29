@@ -24,6 +24,44 @@ browser ── HTTPS ──> host nginx/caddy ── HTTP ──> :80 frontend (
                                                     └─ /api/ ─> backend (uvicorn) ─> db (postgres)
 ```
 
+### Production Domain Convention
+
+ScreenAI Lab is intended to run on an application subdomain in production.
+
+Recommended convention:
+
+- Main domain: `mbclaboratory.com`
+- Recruitment app: `recruitment.mbclaboratory.com`
+- Optional email sending domain: `mail.mbclaboratory.com`
+
+The main domain can host the laboratory website or a future app portal, while
+the recruitment system is isolated under the recruitment subdomain.
+
+Recommended production env:
+
+```env
+PUBLIC_FRONTEND_URL=https://recruitment.mbclaboratory.com
+ALLOWED_ORIGINS=https://recruitment.mbclaboratory.com
+VITE_API_BASE_URL=/api
+EMAIL_FROM="MBC Laboratory <noreply@mail.mbclaboratory.com>"
+EMAIL_ENABLED=true
+```
+
+`PUBLIC_FRONTEND_URL` must point to the public frontend origin because
+verification and reset-password email links are opened by users in the browser.
+
+`VITE_API_BASE_URL=/api` is recommended when the frontend and backend are served
+under the same app subdomain and the frontend nginx proxies `/api` to the
+backend container.
+
+`EMAIL_FROM` must use a sender domain that has already been verified in Resend.
+If `mail.mbclaboratory.com` is not configured yet, use
+`MBC Laboratory <noreply@mbclaboratory.com>` after verifying that domain.
+
+Resend is only the email delivery provider. ScreenAI Lab backend remains
+responsible for generating, hashing, validating, and consuming verification and
+reset codes.
+
 ---
 
 ## 2. Prerequisites
@@ -104,13 +142,13 @@ Make sure `DATABASE_URL`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, and `POSTGRES_DB
 
 ### Step 2 — Set the frontend build-time URL
 
-Vite inlines `VITE_API_BASE_URL` at build time. Set it in `.env` to the URL the user's browser will see, e.g.:
+Vite inlines `VITE_API_BASE_URL` at build time. Set it in `.env` to the URL or relative path the user's browser will use, e.g.:
 
 ```
-VITE_API_BASE_URL=https://lab.example.org/api
+VITE_API_BASE_URL=/api
 ```
 
-If the host reverse proxy serves the SPA on the same domain that the `/api/` proxy lives on (the default in [frontend/nginx.conf](../frontend/nginx.conf)), the value above is correct: the browser hits `https://lab.example.org/api/...`, the host proxy strips TLS and forwards to the frontend container, the frontend nginx proxies `/api/` to the backend container.
+If the host reverse proxy serves the SPA on the same domain that the `/api/` proxy lives on (the default in [frontend/nginx.conf](../frontend/nginx.conf)), the value above is correct: the browser hits `https://recruitment.mbclaboratory.com/api/...`, the host proxy strips TLS and forwards to the frontend container, the frontend nginx proxies `/api/` to the backend container.
 
 ### Step 3 — Build and start
 

@@ -727,6 +727,22 @@ Full-stack frontend integration.
 
 Expose email verification and forgot password flows in the frontend.
 
+## Production Link Decision
+
+Phase 5 auth email pages must use frontend-facing links built from
+`PUBLIC_FRONTEND_URL`.
+
+Production target:
+
+* App origin: `https://recruitment.mbclaboratory.com`
+* Verification page: `/verify-email?code=...`
+* Reset password page: `/reset-password?code=...`
+
+Backend email templates should not send users directly to backend JSON endpoints
+in production UX. Resend is only the email delivery provider; ScreenAI Lab
+backend remains responsible for generating, hashing, validating, and consuming
+verification/reset codes.
+
 ## Scope
 
 * Register success verification notice.
