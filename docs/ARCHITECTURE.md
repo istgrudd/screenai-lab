@@ -120,6 +120,12 @@ POSTGRES_USER=screenai
 POSTGRES_PASSWORD=<same password>
 POSTGRES_DB=screenai_lab
 VITE_API_BASE_URL=/api
+RESEND_API_KEY=<key>
+EMAIL_FROM="ScreenAI Lab <noreply@your-domain.example>"
+PUBLIC_FRONTEND_URL=https://your-domain.example
+EMAIL_ENABLED=true
+EMAIL_VERIFICATION_EXPIRE_MINUTES=60
+EMAIL_RESEND_COOLDOWN_SECONDS=60
 ```
 
 Notes:
@@ -158,6 +164,7 @@ screenai-lab/
 │   │
 │   ├── models/
 │   │   ├── user.py            — User + UserRole
+│   │   ├── email_verification.py — one-time email verification links
 │   │   ├── application.py     — Application + status/division enums
 │   │   ├── document.py        — Document + DocumentType
 │   │   ├── candidate.py       — Candidate, CandidateDocument, DimensionScore
@@ -180,6 +187,9 @@ screenai-lab/
 │   │
 │   ├── services/
 │   │   ├── auth_service.py         — JWT + password auth
+│   │   ├── email_service.py        — Resend abstraction + disabled mode
+│   │   ├── email_templates.py      — hardcoded transactional email templates
+│   │   ├── email_verification_service.py — candidate verification flow
 │   │   ├── extractor.py            — PyMuPDF PDF extraction + EPrT helper
 │   │   ├── normalizer.py           — text cleanup + section segmentation
 │   │   ├── anonymizer.py           — NER + regex anonymization

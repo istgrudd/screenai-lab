@@ -80,6 +80,8 @@ Source: [`backend/routers/auth.py`](../backend/routers/auth.py)
 ### 🔓 `POST /api/auth/register`
 
 Registers a candidate account. Role is always forced to `candidate`.
+The account must verify email before login; this endpoint no longer returns
+a normal access token.
 
 Rate limit: `5/minute`.
 
@@ -101,20 +103,13 @@ Rate limit: `5/minute`.
 
 ```json
 {
-  "access_token": "jwt...",
-  "token_type": "bearer",
-  "user": {
-    "id": 1,
+  "success": true,
+  "data": {
+    "message": "Account created. Please verify your email before signing in.",
     "email": "candidate@students.telkomuniversity.ac.id",
-    "full_name": "Budi Santoso",
-    "nim": "1031234567890",
-    "faculty": "Informatics",
-    "major": "Software Engineering",
-    "year": 2023,
-    "whatsapp": null,
-    "role": "candidate",
-    "is_active": true
-  }
+    "verification_required": true
+  },
+  "error": null
 }
 ```
 
@@ -122,6 +117,7 @@ Rate limit: `5/minute`.
 
 - `409` if email already registered.
 - `409` if NIM already registered.
+- `503` if email sending is enabled but the verification email cannot be sent.
 - `422` if payload validation fails. NIM must be a numeric string of at least 10 digits.
 
 ### 🔓 `POST /api/auth/login`
@@ -136,12 +132,96 @@ Rate limit: `10/minute`.
 
 **Response 200**
 
-Same data shape as register.
+```json
+{
+  "success": true,
+  "data": {
+    "access_token": "jwt...",
+    "token_type": "bearer",
+    "user": {
+      "id": 1,
+      "email": "candidate@students.telkomuniversity.ac.id",
+      "full_name": "Budi Santoso",
+      "nim": "1031234567890",
+      "faculty": "Informatics",
+      "major": "Software Engineering",
+      "year": 2023,
+      "whatsapp": null,
+      "role": "candidate",
+      "is_active": true,
+      "email_verified_at": "2026-05-29T10:15:00"
+    }
+  },
+  "error": null
+}
+```
 
 **Errors**
 
 - `401` invalid credentials.
 - `403` account deactivated.
+- `403` candidate email not verified:
+
+```json
+{
+  "detail": {
+    "code": "EMAIL_NOT_VERIFIED",
+    "message": "Please verify your email before signing in."
+  }
+}
+```
+
+Recruiter and `super_admin` login behavior is unchanged in Phase 3.
+
+### 🔓 `GET /api/auth/verify-email?code=...`
+
+Verifies a candidate email using a one-time, expiring verification code.
+The raw code is not stored in the database, and this endpoint does not return
+an access token.
+
+**Response 200**
+
+```json
+{
+  "success": true,
+  "data": {
+    "message": "Email verified. Please sign in.",
+    "email": "candidate@students.telkomuniversity.ac.id"
+  },
+  "error": null
+}
+```
+
+**Errors**
+
+- `400 INVALID_VERIFICATION_CODE` if the code is invalid.
+- `400 VERIFICATION_CODE_EXPIRED` if the code is expired.
+- `400 VERIFICATION_CODE_USED` if the code has already been used.
+
+### 🔓 `POST /api/auth/resend-verification`
+
+Requests a new verification email. The response is intentionally generic for
+existing, missing, already verified, and cooldown-limited accounts.
+
+Rate limit: `5/minute`.
+
+**Body**
+
+```json
+{ "email": "candidate@students.telkomuniversity.ac.id" }
+```
+
+**Response 200**
+
+```json
+{
+  "success": true,
+  "data": {
+    "message": "If an unverified candidate account exists for this email, a verification email has been sent."
+  },
+  "error": null
+}
+```
 
 ### 🔐 `POST /api/auth/logout`
 
@@ -202,7 +282,8 @@ Returns current profile enriched with candidate application state.
   "division": "big_data",
   "application_status": "draft",
   "role": "candidate",
-  "is_active": true
+  "is_active": true,
+  "email_verified_at": "2026-05-29T10:15:00"
 }
 ```
 

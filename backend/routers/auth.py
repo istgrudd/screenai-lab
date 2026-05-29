@@ -1,15 +1,17 @@
 """Authentication router — register, login, logout, current user.
 
 Endpoints:
-    POST /api/auth/register  — Public; creates a candidate account.
-    POST /api/auth/login     — Public; returns a JWT.
-    POST /api/auth/logout    — Auth; client-side token discard.
-    GET  /api/auth/me        — Auth; return current user's profile.
+    POST /api/auth/register             — Public; creates a candidate account.
+    POST /api/auth/login                — Public; returns a JWT.
+    GET  /api/auth/verify-email         — Public; verifies candidate email.
+    POST /api/auth/resend-verification  — Public; resends verification.
+    POST /api/auth/logout               — Auth; client-side token discard.
+    GET  /api/auth/me                   — Auth; return current user's profile.
 """
 
 import re
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, EmailStr, Field, field_validator
 from sqlalchemy.orm import Session
 
@@ -21,6 +23,13 @@ from backend.services.auth_service import (
     AuthResult,
     authenticate_user,
     create_access_token,
+)
+from backend.services.email_verification_service import (
+    GENERIC_RESEND_MESSAGE,
+    VerifyEmailStatus,
+    create_and_send_verification,
+    resend_verification_if_allowed,
+    verify_email_code,
 )
 from backend.utils.security import hash_password
 
@@ -62,6 +71,10 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class ResendVerificationRequest(BaseModel):
+    email: EmailStr
+
+
 class AdminResetPasswordRequest(BaseModel):
     """Super-admin assisted password reset (Phase 2 stop-gap).
 
@@ -85,6 +98,7 @@ class UserOut(BaseModel):
     whatsapp: str | None
     role: str
     is_active: bool
+    email_verified_at: str | None
 
     @classmethod
     def from_user(cls, user: User) -> "UserOut":
@@ -99,6 +113,11 @@ class UserOut(BaseModel):
             whatsapp=user.whatsapp,
             role=user.role.value if hasattr(user.role, "value") else str(user.role),
             is_active=user.is_active,
+            email_verified_at=(
+                user.email_verified_at.isoformat()
+                if user.email_verified_at
+                else None
+            ),
         )
 
 
@@ -109,7 +128,7 @@ class UserOut(BaseModel):
 @router.post("/register", status_code=status.HTTP_201_CREATED)
 @limiter.limit("5/minute")
 def register(request: Request, payload: RegisterRequest, db: Session = Depends(get_db)):
-    """Register a new candidate account. Role is always 'candidate'."""
+    """Register a new candidate account and send email verification."""
     email = payload.email.lower()
     if db.query(User).filter(User.email == email).first():
         raise HTTPException(
@@ -132,18 +151,28 @@ def register(request: Request, payload: RegisterRequest, db: Session = Depends(g
         year=payload.year,
         role=UserRole.CANDIDATE,
         is_active=True,
+        email_verified_at=None,
     )
     db.add(user)
+    db.flush()
+
+    verification = create_and_send_verification(db, user)
+    if not verification.success:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Verification email could not be sent. Please try again later.",
+        )
+
     db.commit()
     db.refresh(user)
 
-    token = create_access_token(user)
     return {
         "success": True,
         "data": {
-            "access_token": token,
-            "token_type": "bearer",
-            "user": UserOut.from_user(user).model_dump(),
+            "message": "Account created. Please verify your email before signing in.",
+            "email": user.email,
+            "verification_required": True,
         },
         "error": None,
     }
@@ -171,6 +200,15 @@ def login(request: Request, payload: LoginRequest, db: Session = Depends(get_db)
         )
 
     user = result
+    if user.role == UserRole.CANDIDATE and user.email_verified_at is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "EMAIL_NOT_VERIFIED",
+                "message": "Please verify your email before signing in.",
+            },
+        )
+
     token = create_access_token(user)
     return {
         "success": True,
@@ -179,6 +217,73 @@ def login(request: Request, payload: LoginRequest, db: Session = Depends(get_db)
             "token_type": "bearer",
             "user": UserOut.from_user(user).model_dump(),
         },
+        "error": None,
+    }
+
+
+@router.get("/verify-email")
+def verify_email(
+    code: str = Query(..., min_length=20, max_length=512),
+    db: Session = Depends(get_db),
+):
+    """Verify a candidate email using a one-time code."""
+    result = verify_email_code(db, code)
+    if result.status in {
+        VerifyEmailStatus.VERIFIED,
+        VerifyEmailStatus.ALREADY_VERIFIED,
+    }:
+        db.commit()
+        return {
+            "success": True,
+            "data": {
+                "message": "Email verified. Please sign in.",
+                "email": result.user.email if result.user else None,
+            },
+            "error": None,
+        }
+
+    db.rollback()
+    error_map = {
+        VerifyEmailStatus.INVALID: (
+            "INVALID_VERIFICATION_CODE",
+            "Verification code is invalid.",
+        ),
+        VerifyEmailStatus.EXPIRED: (
+            "VERIFICATION_CODE_EXPIRED",
+            "Verification code has expired. Please request a new one.",
+        ),
+        VerifyEmailStatus.USED: (
+            "VERIFICATION_CODE_USED",
+            "Verification code has already been used.",
+        ),
+    }
+    code_value, message = error_map.get(
+        result.status,
+        ("INVALID_VERIFICATION_CODE", "Verification code is invalid."),
+    )
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail={"code": code_value, "message": message},
+    )
+
+
+@router.post("/resend-verification")
+@limiter.limit("5/minute")
+def resend_verification(
+    request: Request,
+    payload: ResendVerificationRequest,
+    db: Session = Depends(get_db),
+):
+    """Resend verification email with a generic response."""
+    result = resend_verification_if_allowed(db, payload.email)
+    if result.attempted_send and result.email_result and not result.email_result.success:
+        db.rollback()
+    else:
+        db.commit()
+
+    return {
+        "success": True,
+        "data": {"message": GENERIC_RESEND_MESSAGE},
         "error": None,
     }
 

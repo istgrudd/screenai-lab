@@ -59,6 +59,11 @@ class User(Base):
     is_active = Column(Boolean, nullable=False, default=True)
     created_at = Column(DateTime, nullable=False, default=_utcnow)
 
+    # Candidate email verification state. Recruiter/super_admin enforcement
+    # is intentionally deferred; Phase 3 only blocks unverified candidates.
+    email_verified_at = Column(DateTime, nullable=True)
+    email_verification_sent_at = Column(DateTime, nullable=True)
+
     # --- Relationships ---
     applications = relationship(
         "Application",
@@ -68,6 +73,11 @@ class User(Base):
     periods = relationship(
         "RecruitmentPeriod",
         back_populates="creator",
+    )
+    email_verification_links = relationship(
+        "EmailVerificationLink",
+        back_populates="user",
+        cascade="all, delete-orphan",
     )
 
     def __repr__(self) -> str:

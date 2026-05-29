@@ -64,6 +64,7 @@ class UserAdminOut(BaseModel):
     whatsapp: str | None
     role: str
     is_active: bool
+    email_verified_at: str | None
     created_at: str | None
 
     @classmethod
@@ -79,6 +80,9 @@ class UserAdminOut(BaseModel):
             whatsapp=u.whatsapp,
             role=u.role.value if hasattr(u.role, "value") else str(u.role),
             is_active=u.is_active,
+            email_verified_at=(
+                u.email_verified_at.isoformat() if u.email_verified_at else None
+            ),
             created_at=u.created_at.isoformat() if u.created_at else None,
         )
 
@@ -108,6 +112,7 @@ class MeOut(BaseModel):
     application_status: str | None
     role: str
     is_active: bool
+    email_verified_at: str | None
 
 
 class ProfileUpdate(BaseModel):
@@ -192,6 +197,9 @@ def _me_payload(db: Session, user: User) -> dict:
         application_status=app_status,
         role=user.role.value if hasattr(user.role, "value") else str(user.role),
         is_active=user.is_active,
+        email_verified_at=(
+            user.email_verified_at.isoformat() if user.email_verified_at else None
+        ),
     ).model_dump()
 
 

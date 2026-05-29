@@ -40,6 +40,14 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 480
 
+    # --- Email / account verification ---
+    resend_api_key: str = ""
+    email_from: str = ""
+    public_frontend_url: str = "http://localhost:5173"
+    email_enabled: bool = False
+    email_verification_expire_minutes: int = 60
+    email_resend_cooldown_seconds: int = 60
+
     @property
     def cors_origins(self) -> list[str]:
         """Return the list of origins allowed to call the API.

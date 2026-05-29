@@ -27,27 +27,34 @@ For endpoint-level detail see [API_REFERENCE.md](API_REFERENCE.md). For runtime 
 
 - Register body: `{ email, password, full_name, nim, faculty, major, year }`.
 - Login body: `{ email, password }`.
+- Verify email query: `code`.
+- Resend verification body: `{ email }`.
 - Admin password reset body: `{ user_id, new_password }`.
 - `Authorization: Bearer <token>` on protected endpoints.
 
 **Outputs**
 
-- Auth token payload: `{ access_token, token_type: "bearer", user: <UserOut> }`.
-- `UserOut`: `id, email, full_name, nim, faculty, major, year, whatsapp, role, is_active`.
+- Register payload: `{ message, email, verification_required: true }`.
+- Login token payload: `{ access_token, token_type: "bearer", user: <UserOut> }`.
+- `UserOut`: `id, email, full_name, nim, faculty, major, year, whatsapp, role, is_active, email_verified_at`.
 
 **Dependencies**
 
 - `User` ORM.
+- `EmailVerificationLink` ORM.
 - bcrypt helpers.
+- email service abstraction for Resend / disabled smoke-test mode.
 - slowapi limiter for register/login.
 
 **Business rules**
 
 - Registration always creates a `candidate` account.
+- Candidate registration sends a verification email and does not return a normal access token.
+- Candidates must verify email before login; recruiter and super-admin login behavior is unchanged in Phase 3.
 - Email is normalized to lowercase.
 - NIM must be a numeric string of at least 10 digits.
 - Password length: 8–72 chars; upper bound follows bcrypt's effective input limit.
-- Login returns `401` for invalid credentials and `403` for valid credentials on deactivated accounts.
+- Login returns `401` for invalid credentials, `403` for valid credentials on deactivated accounts, and `403 EMAIL_NOT_VERIFIED` for unverified candidates.
 - JWTs are stateless. Logout is a server-side no-op; the frontend discards the token.
 - Admin-assisted reset changes password hash but does not invalidate existing JWTs.
 

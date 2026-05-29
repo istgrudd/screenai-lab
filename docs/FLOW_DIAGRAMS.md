@@ -96,10 +96,14 @@ sequenceDiagram
     Auth->>Sec: hash_password(plaintext)
     Sec-->>Auth: bcrypt hash
     Auth->>DB: INSERT users (role=candidate)
-    Auth->>Svc: create_access_token(user)
-    Svc-->>Auth: JWT
-    Auth-->>FE: 201 { access_token, user }
-    FE->>FE: localStorage.setItem(token)
+    Auth->>DB: INSERT email_verification_links (hashed secret)
+    Auth-->>FE: 201 { verification_required: true }
+
+    Note over FE,DB: VERIFY EMAIL
+    FE->>Auth: GET /api/auth/verify-email?code=...
+    Auth->>DB: SELECT email_verification_links by hashed code
+    Auth->>DB: UPDATE users.email_verified_at, links.used_at
+    Auth-->>FE: 200 { message }
 
     Note over FE,DB: LOGIN
     FE->>Auth: POST /api/auth/login
@@ -114,8 +118,12 @@ sequenceDiagram
         Auth-->>FE: 403
     else ok
         Svc-->>Auth: User
-        Auth->>Svc: create_access_token
-        Auth-->>FE: 200 { access_token, user }
+        alt candidate not email verified
+            Auth-->>FE: 403 EMAIL_NOT_VERIFIED
+        else verified or non-candidate
+            Auth->>Svc: create_access_token
+            Auth-->>FE: 200 { access_token, user }
+        end
     end
 
     Note over FE,DB: PROTECTED REQUEST
