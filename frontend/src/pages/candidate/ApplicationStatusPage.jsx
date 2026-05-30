@@ -161,6 +161,12 @@ function StatusHero({ application, announcement }) {
     ? "Pengumuman: Lolos"
     : isFail
     ? "Pengumuman: Tidak Lolos"
+    : status === "correction_requested"
+    ? "Perbaikan Dokumen Diminta"
+    : status === "document_review"
+    ? "Review Dokumen"
+    : status === "verified"
+    ? "Dokumen Terverifikasi"
     : status === "screening"
     ? "Tahap Evaluasi AI"
     : "Tahap Pendaftaran";
@@ -169,6 +175,12 @@ function StatusHero({ application, announcement }) {
     ? "Hasil akhir sudah diumumkan. Selamat, kamu lolos seleksi."
     : isFail
     ? "Hasil akhir sudah diumumkan. Terima kasih sudah mendaftar di MBC Laboratory."
+    : status === "correction_requested"
+    ? "Ada dokumen yang perlu kamu upload ulang sebelum aplikasi bisa diproses."
+    : status === "document_review"
+    ? "Dokumen kamu sedang diverifikasi oleh recruiter/admin."
+    : status === "verified"
+    ? "Semua dokumen sudah diterima. Evaluasi AI akan berjalan pada fase evaluasi."
     : status === "screening"
     ? "Aplikasi kamu sedang berada di tahap Evaluasi AI."
     : "Aplikasi dan dokumen kamu sudah diterima pada tahap Pendaftaran.";
@@ -215,6 +227,52 @@ function StatusHero({ application, announcement }) {
               Announced: {formatDateTime(announcement.announced_at)}
             </span>
           )}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function CorrectionDocumentsCard({ documents }) {
+  const rejectedDocs = documents.filter(
+    (document) => document.verification_status === "rejected"
+  );
+  if (!rejectedDocs.length) return null;
+
+  return (
+    <Card className="border-destructive/40">
+      <CardHeader className="pb-3">
+        <CardTitle className="text-lg flex items-center gap-2">
+          <AlertTriangle className="w-5 h-5 text-destructive" />
+          Rejected Documents
+        </CardTitle>
+        <CardDescription>
+          Upload replacements for the rejected documents only.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {rejectedDocs.map((document) => (
+          <div key={document.id} className="rounded-lg border px-3 py-3">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-sm font-medium">
+                {formatStatus(document.doc_type)}
+              </p>
+              <Badge variant="destructive" className="text-[10px] uppercase">
+                Rejected
+              </Badge>
+            </div>
+            <p className="text-sm text-muted-foreground mt-2">
+              {document.rejection_reason || "No reason provided."}
+            </p>
+          </div>
+        ))}
+        <div className="pt-1">
+          <Button asChild className="gap-2">
+            <Link to="/documents">
+              Fix Documents
+              <ArrowRight className="w-4 h-4" />
+            </Link>
+          </Button>
         </div>
       </CardContent>
     </Card>
@@ -314,7 +372,7 @@ export default function ApplicationStatusPage() {
             <CardHeader className="pb-3">
               <CardTitle className="text-lg">Tahapan Seleksi</CardTitle>
               <CardDescription>
-                Pendaftaran, Evaluasi AI, dan Pengumuman.
+                Pendaftaran, review dokumen, Evaluasi AI, dan Pengumuman.
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -322,21 +380,40 @@ export default function ApplicationStatusPage() {
             </CardContent>
           </Card>
 
+          {application.status === "correction_requested" && (
+            <CorrectionDocumentsCard documents={documents} />
+          )}
+
           {!announced && (
             <Card>
               <CardContent className="py-5 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
                 <div className="flex items-start gap-3">
                   <FileText className="w-5 h-5 text-muted-foreground mt-0.5" />
                   <div>
-                    <p className="text-sm font-medium">Documents are locked</p>
+                    <p className="text-sm font-medium">
+                      {application.status === "correction_requested"
+                        ? "Document correction needed"
+                        : "Documents are locked"}
+                    </p>
                     <p className="text-sm text-muted-foreground mt-1">
-                      No further action is needed unless the recruitment team
-                      contacts you.
+                      {application.status === "correction_requested"
+                        ? "Open the documents page and replace the rejected file(s)."
+                        : "No further action is needed unless the recruitment team contacts you."}
                     </p>
                   </div>
                 </div>
                 <Button asChild variant="outline">
-                  <Link to="/dashboard">Back to dashboard</Link>
+                  <Link
+                    to={
+                      application.status === "correction_requested"
+                        ? "/documents"
+                        : "/dashboard"
+                    }
+                  >
+                    {application.status === "correction_requested"
+                      ? "Fix Documents"
+                      : "Back to dashboard"}
+                  </Link>
                 </Button>
               </CardContent>
             </Card>

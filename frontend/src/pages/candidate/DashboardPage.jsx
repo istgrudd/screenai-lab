@@ -190,6 +190,10 @@ export default function DashboardPage() {
   const uploadedCount = documents.length;
   const progressPct = Math.round((uploadedCount / DOC_CHECKLIST.length) * 100);
   const locked = application && application.status !== "draft";
+  const canManageDocuments =
+    application &&
+    (application.status === "draft" ||
+      application.status === "correction_requested");
 
   if (loading) {
     return (
@@ -306,10 +310,18 @@ export default function DashboardPage() {
                   <Button
                     size="sm"
                     variant="outline"
-                    onClick={() => navigate("/application/status")}
+                    onClick={() =>
+                      navigate(
+                        application.status === "correction_requested"
+                          ? "/documents"
+                          : "/application/status"
+                      )
+                    }
                     className="gap-2"
                   >
-                    View submission
+                    {application.status === "correction_requested"
+                      ? "Fix documents"
+                      : "View submission"}
                     <ArrowRight className="w-3.5 h-3.5" />
                   </Button>
                 )}
@@ -322,9 +334,9 @@ export default function DashboardPage() {
             <Card>
               <CardHeader className="pb-3">
                 <CardTitle className="text-lg">Tahapan Seleksi</CardTitle>
-                <CardDescription>
-                  Pendaftaran, Evaluasi AI, dan Pengumuman.
-                </CardDescription>
+              <CardDescription>
+                  Pendaftaran, review dokumen, Evaluasi AI, dan Pengumuman.
+              </CardDescription>
               </CardHeader>
               <CardContent>
                 <RecruitmentJourney
@@ -338,7 +350,7 @@ export default function DashboardPage() {
           <ChecklistCard
             documents={documents}
             applicationId={application.id}
-            locked={locked}
+            locked={!canManageDocuments}
           />
         </>
       )}

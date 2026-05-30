@@ -325,6 +325,19 @@ export async function verifyDocument(docId, isVerified) {
   });
 }
 
+export async function reviewDocument(docId, { status, reason = null }) {
+  return request(`/documents/${docId}/review`, {
+    method: "PUT",
+    body: JSON.stringify({ status, reason }),
+  });
+}
+
+export async function finalizeDocumentReview(applicationId) {
+  return request(`/applications/${applicationId}/finalize-document-review`, {
+    method: "POST",
+  });
+}
+
 export async function getSwotText(applicationId) {
   return request(`/applications/${applicationId}/swot-text`);
 }

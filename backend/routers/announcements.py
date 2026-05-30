@@ -85,9 +85,8 @@ def create_announcement(
             detail="Application not found",
         )
 
-    # Only allow announcing if status is submitted or screening
+    # Only allow announcing after evaluation/screening.
     if app.status not in (
-        ApplicationStatus.SUBMITTED,
         ApplicationStatus.SCREENING,
         ApplicationStatus.ANNOUNCED_PASS,
         ApplicationStatus.ANNOUNCED_FAIL,

@@ -33,6 +33,11 @@ from backend.models.candidate import Candidate, CandidateDocument
 from backend.models.document import Document, DocumentType
 from backend.models.period import RecruitmentPeriod
 from backend.models.user import User, UserRole
+from backend.services.document_review_service import (
+    document_review_progress,
+    finalize_document_review,
+    reset_document_review_state,
+)
 from backend.services.extractor import extract_text_from_pdf
 from backend.services.submit_anonymization import run_submit_anonymization
 from backend.utils.period_utils import get_current_phase
@@ -60,9 +65,15 @@ class ApplicationOut(BaseModel):
     submitted_at: str | None
     created_at: str | None
     documents_count: int
+    document_review_progress: dict | None = None
 
     @classmethod
-    def from_application(cls, app: Application, documents_count: int) -> "ApplicationOut":
+    def from_application(
+        cls,
+        app: Application,
+        documents_count: int,
+        review_progress: dict | None = None,
+    ) -> "ApplicationOut":
         return cls(
             id=app.id,
             user_id=app.user_id,
@@ -71,6 +82,7 @@ class ApplicationOut(BaseModel):
             submitted_at=app.submitted_at.isoformat() if app.submitted_at else None,
             created_at=app.created_at.isoformat() if app.created_at else None,
             documents_count=documents_count,
+            document_review_progress=review_progress,
         )
 
 
@@ -80,6 +92,11 @@ class ApplicationOut(BaseModel):
 
 def _count_documents(db: Session, application_id: int) -> int:
     return db.query(Document).filter(Document.application_id == application_id).count()
+
+
+def _document_review_progress(db: Session, application_id: int) -> dict:
+    docs = db.query(Document).filter(Document.application_id == application_id).all()
+    return document_review_progress(docs)
 
 
 def _get_my_application_or_404(db: Session, user: User) -> Application:
@@ -143,7 +160,11 @@ def create_application(
 
     return {
         "success": True,
-        "data": ApplicationOut.from_application(app, 0).model_dump(),
+        "data": ApplicationOut.from_application(
+            app,
+            0,
+            document_review_progress([]),
+        ).model_dump(),
         "error": None,
     }
 
@@ -156,9 +177,14 @@ def get_my_application(
     """Fetch the current candidate's application (404 if none)."""
     app = _get_my_application_or_404(db, current_user)
     count = _count_documents(db, app.id)
+    review_progress = _document_review_progress(db, app.id)
     return {
         "success": True,
-        "data": ApplicationOut.from_application(app, count).model_dump(),
+        "data": ApplicationOut.from_application(
+            app,
+            count,
+            review_progress,
+        ).model_dump(),
         "error": None,
     }
 
@@ -222,7 +248,18 @@ def get_swot_text(
             "error": None,
         }
 
-    # Cache miss — fall back to inline extraction (legacy path).
+    if app.status not in (
+        ApplicationStatus.VERIFIED,
+        ApplicationStatus.SCREENING,
+        ApplicationStatus.ANNOUNCED_PASS,
+        ApplicationStatus.ANNOUNCED_FAIL,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="SWOT text is available only after document verification",
+        )
+
+    # Cache miss: fall back to inline extraction only after verification.
     try:
         result = extract_text_from_pdf(swot_doc.file_path)
     except (FileNotFoundError, ValueError) as e:
@@ -251,15 +288,14 @@ def get_swot_text(
 )
 def submit_application(
     application_id: int,
-    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Final-submit an application.
+    """Final-submit an application into document review.
 
-    Validates that every DocumentType (D-01 … D-06) has a Document, sets
-    status to ``submitted``, stamps ``submitted_at``, and locks the
-    documents (the document router rejects edits once status != draft).
+    Validates that every DocumentType has a Document, sets status to
+    ``document_review``, stamps ``submitted_at``, and leaves NER blocked until
+    recruiter/admin final approval.
     """
     app = db.query(Application).filter(Application.id == application_id).first()
     if not app:
@@ -306,9 +342,10 @@ def submit_application(
             detail=phase_messages.get(phase, "Pendaftaran tidak diperbolehkan saat ini."),
         )
 
+    docs = db.query(Document).filter(Document.application_id == app.id).all()
     uploaded_types: set[str] = {
         (d.doc_type.value if hasattr(d.doc_type, "value") else str(d.doc_type))
-        for d in db.query(Document).filter(Document.application_id == app.id).all()
+        for d in docs
     }
     required_types = [dt.value for dt in DocumentType]
     missing = [dt for dt in required_types if dt not in uploaded_types]
@@ -323,23 +360,59 @@ def submit_application(
             },
         )
 
-    app.status = ApplicationStatus.SUBMITTED
+    app.status = ApplicationStatus.DOCUMENT_REVIEW
     app.submitted_at = datetime.now(timezone.utc)
     app.period_id = active_period.id
+    for doc in docs:
+        reset_document_review_state(doc)
     db.commit()
     db.refresh(app)
 
-    # Task 10.2: trigger NER anonymization in the background.
-    # Pass the SessionLocal factory — the task opens and closes its own
-    # session, since the request-scoped session is already closed by
-    # then.
-    background_tasks.add_task(
-        run_submit_anonymization, app.id, SessionLocal
+    return {
+        "success": True,
+        "data": ApplicationOut.from_application(
+            app,
+            len(required_types),
+            document_review_progress(docs),
+        ).model_dump(),
+        "error": None,
+    }
+
+
+@router.post(
+    "/{application_id}/finalize-document-review",
+    dependencies=[Depends(_recruiter_or_admin)],
+)
+def finalize_application_document_review(
+    application_id: int,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Finalize document review for one application/candidate."""
+    result = finalize_document_review(
+        db,
+        application_id=application_id,
+        reviewer=current_user,
     )
+    if result.trigger_anonymization:
+        background_tasks.add_task(
+            run_submit_anonymization,
+            result.application.id,
+            SessionLocal,
+        )
 
     return {
         "success": True,
-        "data": ApplicationOut.from_application(app, len(required_types)).model_dump(),
+        "data": ApplicationOut.from_application(
+            result.application,
+            _count_documents(db, result.application.id),
+            _document_review_progress(db, result.application.id),
+        ).model_dump()
+        | {
+            "rejected_document_types": result.rejected_document_types,
+            "anonymization_queued": result.trigger_anonymization,
+        },
         "error": None,
     }
 
@@ -368,7 +441,11 @@ def list_submitted_applications(
     q = (
         db.query(Application)
         .options(joinedload(Application.user), joinedload(Application.documents))
-        .filter(Application.status != ApplicationStatus.DRAFT)
+        .filter(
+            ~Application.status.in_(
+                [ApplicationStatus.DRAFT, ApplicationStatus.CANCELLED]
+            )
+        )
     )
     if division:
         q = q.filter(Application.division == division)
@@ -420,7 +497,12 @@ def list_submitted_applications(
         rank = rank_by_app.get(app.id)
         is_recommended = bool(threshold_n and rank and rank <= threshold_n)
 
-        item = ApplicationOut.from_application(app, doc_count).model_dump()
+        review_progress = document_review_progress(list(app.documents))
+        item = ApplicationOut.from_application(
+            app,
+            doc_count,
+            review_progress,
+        ).model_dump()
         item.update({
             "doc_completeness_pct": round((doc_count / required_count) * 100),
             "candidate": {

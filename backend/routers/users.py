@@ -44,9 +44,13 @@ _NIM_PATTERN = re.compile(r"^\d{10,}$")
 # candidate has submitted, they cannot change their NIM, division, etc.
 _LOCKED_STATUSES = {
     ApplicationStatus.SUBMITTED,
+    ApplicationStatus.DOCUMENT_REVIEW,
+    ApplicationStatus.CORRECTION_REQUESTED,
+    ApplicationStatus.VERIFIED,
     ApplicationStatus.SCREENING,
     ApplicationStatus.ANNOUNCED_PASS,
     ApplicationStatus.ANNOUNCED_FAIL,
+    ApplicationStatus.CANCELLED,
 }
 
 

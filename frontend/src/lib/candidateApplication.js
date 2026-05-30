@@ -39,17 +39,25 @@ export const REQUIRED_DOCUMENTS = [
 
 export const POST_SUBMIT_STATUSES = new Set([
   "submitted",
+  "document_review",
+  "correction_requested",
+  "verified",
   "screening",
   "announced_pass",
   "announced_fail",
+  "cancelled",
 ]);
 
 export const STATUS_LABELS = {
   draft: "Draft",
-  submitted: "Pendaftaran",
+  submitted: "Submitted",
+  document_review: "Document Review",
+  correction_requested: "Correction Requested",
+  verified: "Verified",
   screening: "Evaluasi AI",
   announced_pass: "Pengumuman",
   announced_fail: "Pengumuman",
+  cancelled: "Cancelled",
 };
 
 export function formatDivision(division) {

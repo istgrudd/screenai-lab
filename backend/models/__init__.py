@@ -10,6 +10,6 @@ from backend.models.user import User, UserRole  # noqa: F401
 from backend.models.email_verification import EmailVerificationLink  # noqa: F401
 from backend.models.password_reset import PasswordResetLink  # noqa: F401
 from backend.models.application import Application, ApplicationStatus, Division  # noqa: F401
-from backend.models.document import Document, DocumentType  # noqa: F401
+from backend.models.document import Document, DocumentType, DocumentVerificationStatus  # noqa: F401
 from backend.models.audit import AuditLog  # noqa: F401
 from backend.models.period import RecruitmentPeriod  # noqa: F401

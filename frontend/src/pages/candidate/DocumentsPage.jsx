@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import {
+  AlertTriangle,
   ArrowLeft,
   ArrowRight,
   CheckCircle2,
@@ -28,7 +29,7 @@ import {
   listApplicationDocuments,
   uploadApplicationDocument,
 } from "@/lib/api";
-import { REQUIRED_DOCUMENTS } from "@/lib/candidateApplication";
+import { formatStatus, REQUIRED_DOCUMENTS } from "@/lib/candidateApplication";
 
 function StepTracker({ steps, activeIndex, uploadedTypes }) {
   const completed = steps.filter((step) => uploadedTypes.has(step.doc_type)).length;
@@ -75,6 +76,54 @@ function StepTracker({ steps, activeIndex, uploadedTypes }) {
         })}
       </div>
     </div>
+  );
+}
+
+function ReviewStatusPanel({ documents }) {
+  const docsByType = new Map(documents.map((document) => [document.doc_type, document]));
+  const hasReviewState = documents.some((document) => document.verification_status);
+  if (!hasReviewState) return null;
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-lg">Document Review Status</CardTitle>
+        <CardDescription>
+          Rejected documents show the reason from the recruitment team.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        {REQUIRED_DOCUMENTS.map((item) => {
+          const doc = docsByType.get(item.doc_type);
+          const status = doc?.verification_status || "pending";
+          const rejected = status === "rejected";
+          const verified = status === "verified";
+          return (
+            <div
+              key={item.doc_type}
+              className={`rounded-lg border px-3 py-3 ${
+                rejected ? "border-destructive/40 bg-destructive/5" : ""
+              }`}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-sm font-medium">{item.label}</p>
+                <Badge
+                  variant={rejected ? "destructive" : verified ? "secondary" : "outline"}
+                  className="text-[10px] uppercase"
+                >
+                  {formatStatus(status)}
+                </Badge>
+              </div>
+              {rejected && doc?.rejection_reason && (
+                <p className="text-xs text-destructive mt-2">
+                  {doc.rejection_reason}
+                </p>
+              )}
+            </div>
+          );
+        })}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -126,12 +175,16 @@ export default function DocumentsPage() {
   const allComplete = REQUIRED_DOCUMENTS.every((step) =>
     uploadedTypes.has(step.doc_type)
   );
-  const locked = application && application.status !== "draft";
+  const isDraft = application?.status === "draft";
+  const isCorrection = application?.status === "correction_requested";
 
   const currentStep = REQUIRED_DOCUMENTS[activeIndex];
   const currentDoc = documents.find(
     (document) => document.doc_type === currentStep?.doc_type
   );
+  const currentRejected = currentDoc?.verification_status === "rejected";
+  const canEditCurrent = isDraft || (isCorrection && currentRejected);
+  const locked = !canEditCurrent;
   const currentLimit = limits[currentStep?.doc_type] || {
     max_bytes: 5 * 1024 * 1024,
     allowed_mime: ["application/pdf"],
@@ -146,6 +199,12 @@ export default function DocumentsPage() {
       return [...filtered, result];
     });
   };
+
+  const lockedMessage = isCorrection
+    ? currentRejected
+      ? "Upload a replacement for this rejected document."
+      : "Only rejected documents can be replaced during correction."
+    : "Documents are locked after final submit.";
 
   if (loading) {
     return (
@@ -185,15 +244,33 @@ export default function DocumentsPage() {
         </CardContent>
       </Card>
 
+      {isCorrection && (
+        <Card className="border-destructive/40 bg-destructive/5">
+          <CardContent className="py-4 flex items-start gap-3">
+            <AlertTriangle className="w-5 h-5 text-destructive mt-0.5 shrink-0" />
+            <div>
+              <p className="text-sm font-medium">Correction requested</p>
+              <p className="text-sm text-muted-foreground mt-1">
+                Replace only the rejected document(s). Verified documents remain locked.
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {application.status !== "draft" && (
+        <ReviewStatusPanel documents={documents} />
+      )}
+
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-xl">
             {activeIndex + 1}. {currentStep.label}
           </CardTitle>
           <CardDescription>
-            {locked
-              ? "Your application has been submitted. Documents are locked."
-              : "Drop the file here or click to browse. We re-validate on the server."}
+            {canEditCurrent
+              ? "Drop the file here or click to browse. We re-validate on the server."
+              : "This document is locked in the current review state."}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -207,6 +284,7 @@ export default function DocumentsPage() {
             }}
             existing={currentDoc}
             locked={locked}
+            lockedMessage={lockedMessage}
             onUpload={handleUpload}
           />
         </CardContent>

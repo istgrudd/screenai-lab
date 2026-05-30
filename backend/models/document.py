@@ -17,6 +17,7 @@ from sqlalchemy import (
     ForeignKey,
     Integer,
     String,
+    Text,
     UniqueConstraint,
 )
 from sqlalchemy.orm import relationship
@@ -37,6 +38,14 @@ class DocumentType(str, enum.Enum):
     MOTIVATION_LETTER = "motivation_letter"
     SWOT = "swot"
     SUPPORTING_DOCS = "supporting_docs"
+
+
+class DocumentVerificationStatus(str, enum.Enum):
+    """Recruiter/admin review state for a submitted document."""
+
+    PENDING = "pending"
+    VERIFIED = "verified"
+    REJECTED = "rejected"
 
 
 class Document(Base):
@@ -73,9 +82,24 @@ class Document(Base):
         default=False,
         doc="Recruiter manual verification flag for supporting_docs (D-06)",
     )
+    verification_status = Column(
+        String(20),
+        nullable=False,
+        default=DocumentVerificationStatus.PENDING.value,
+        doc="Document review state: pending | verified | rejected",
+    )
+    rejection_reason = Column(Text, nullable=True)
+    reviewed_at = Column(DateTime, nullable=True)
+    reviewed_by_id = Column(
+        Integer,
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
 
     # --- Relationships ---
     application = relationship("Application", back_populates="documents")
+    reviewed_by = relationship("User", foreign_keys=[reviewed_by_id])
 
     def __repr__(self) -> str:
         return (

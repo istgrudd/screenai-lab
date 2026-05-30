@@ -22,10 +22,16 @@ import sys
 import tempfile
 from datetime import datetime, timedelta, timezone
 
+os.environ["EMAIL_ENABLED"] = "false"
+os.environ["EMAIL_RESEND_COOLDOWN_SECONDS"] = "0"
+os.environ["ENVIRONMENT"] = "development"
+os.environ["PUBLIC_FRONTEND_URL"] = "http://testserver"
+
 import fitz
 
 from fastapi.testclient import TestClient
 
+import backend.routers.applications as applications_router
 from backend.config import settings
 from backend.database import SessionLocal
 from backend.main import app as fastapi_app
@@ -49,6 +55,7 @@ CAND_EMAIL = "smoke+eval_candidate@example.com"
 CAND_NIM = "1039876500001"
 TEST_PASSWORD = "hunter2secure"
 PERIOD_NAME = "smoke+eval cycle"
+NER_CALLS: list[int] = []
 
 
 def _assert(cond: bool, msg: str) -> int:
@@ -65,6 +72,43 @@ def _minimal_pdf(text: str = "") -> bytes:
     buf = doc.tobytes()
     doc.close()
     return buf
+
+
+def _fake_run_submit_anonymization(application_id: int, session_factory) -> None:
+    NER_CALLS.append(application_id)
+    db = session_factory()
+    try:
+        app = db.query(Application).filter(Application.id == application_id).first()
+        candidate = db.query(Candidate).filter(Candidate.user_id == app.user_id).first()
+        if candidate is None:
+            candidate = Candidate(
+                anonymous_id=f"CAND-EV{application_id:06d}"[-13:],
+                user_id=app.user_id,
+                rubric_id=None,
+                status="anonymized",
+            )
+            db.add(candidate)
+            db.flush()
+        cv_doc = (
+            db.query(Document)
+            .filter(Document.application_id == application_id, Document.doc_type == DocumentType.CV)
+            .first()
+        )
+        db.add(
+            CandidateDocument(
+                candidate_id=candidate.id,
+                filename=cv_doc.file_name if cv_doc else "cv.pdf",
+                file_path=cv_doc.file_path if cv_doc else "fake",
+                document_type="cv",
+                raw_text="raw cv",
+                normalized_text="normalized cv",
+                anonymized_text="[NAME] has relevant experience.",
+                entities_json=[],
+            )
+        )
+        db.commit()
+    finally:
+        db.close()
 
 
 def _cleanup() -> None:
@@ -141,6 +185,8 @@ def _deactivate_all_periods() -> None:
 def main() -> int:
     _cleanup()
     _deactivate_all_periods()
+    NER_CALLS.clear()
+    applications_router.run_submit_anonymization = _fake_run_submit_anonymization
     failures = 0
     client = TestClient(fastapi_app)
 
@@ -225,6 +271,20 @@ def main() -> int:
         },
     )
     failures += _assert(r.status_code == 201, f"candidate register -> 201 (got {r.status_code})")
+
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.email == CAND_EMAIL).first()
+        user.email_verified_at = datetime.now(timezone.utc)
+        db.commit()
+    finally:
+        db.close()
+
+    r = client.post(
+        "/api/auth/login",
+        json={"email": CAND_EMAIL, "password": TEST_PASSWORD},
+    )
+    failures += _assert(r.status_code == 200, f"candidate login -> 200 (got {r.status_code})")
     cand_token = r.json()["data"]["access_token"]
     cand_auth = {"Authorization": f"Bearer {cand_token}"}
 
@@ -271,6 +331,38 @@ def main() -> int:
     # --- Submit application ---
     r = client.post(f"/api/applications/{app_id}/submit", headers=cand_auth)
     failures += _assert(r.status_code == 200, f"submit -> 200 (got {r.status_code})")
+    if r.status_code == 200:
+        failures += _assert(
+            r.json()["data"]["status"] == "document_review",
+            "submit moves to document_review",
+        )
+
+    r = client.get(f"/api/documents/{app_id}", headers=rec_auth)
+    app_docs = r.json()["data"]["documents"] if r.status_code == 200 else []
+    for doc in app_docs:
+        r = client.put(
+            f"/api/documents/{doc['id']}/review",
+            headers=rec_auth,
+            json={"status": "verified"},
+        )
+        failures += _assert(
+            r.status_code == 200,
+            f"verify {doc['doc_type']} -> 200 (got {r.status_code})",
+        )
+
+    r = client.post(
+        f"/api/applications/{app_id}/finalize-document-review",
+        headers=rec_auth,
+    )
+    failures += _assert(
+        r.status_code == 200,
+        f"finalize document review -> 200 (got {r.status_code})",
+    )
+    if r.status_code == 200:
+        failures += _assert(
+            r.json()["data"]["status"] == "verified",
+            "finalized application is verified before evaluation",
+        )
 
     # =====================================================================
     # TEST 1: Empty rubric -> 400
@@ -377,6 +469,18 @@ def main() -> int:
     # =====================================================================
     # TEST 3: Announcements
     # =====================================================================
+
+    # If the LLM is unavailable, the service reports errors and leaves the
+    # application verified. Mark it screening here so the announcement path
+    # can still be tested without requiring live LLM credentials.
+    db = SessionLocal()
+    try:
+        app = db.query(Application).filter(Application.id == app_id).first()
+        if app and app.status == ApplicationStatus.VERIFIED:
+            app.status = ApplicationStatus.SCREENING
+            db.commit()
+    finally:
+        db.close()
 
     # POST announcement (pass)
     r = client.post(

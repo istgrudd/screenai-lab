@@ -26,17 +26,25 @@ class ApplicationStatus(str, enum.Enum):
     """Lifecycle states for a candidate application.
 
     draft:           candidate is still editing / uploading
-    submitted:       final-submit done, documents locked
+    submitted:       legacy submitted state before explicit document review
+    document_review: recruiter/admin is checking uploaded documents
+    correction_requested: one or more documents must be replaced
+    verified:        all required documents are accepted; NER may run
     screening:       AI pipeline is processing or has scored it
     announced_pass:  recruiter has published a pass result
     announced_fail:  recruiter has published a fail result
+    cancelled:       application/draft was cancelled
     """
 
     DRAFT = "draft"
     SUBMITTED = "submitted"
+    DOCUMENT_REVIEW = "document_review"
+    CORRECTION_REQUESTED = "correction_requested"
+    VERIFIED = "verified"
     SCREENING = "screening"
     ANNOUNCED_PASS = "announced_pass"
     ANNOUNCED_FAIL = "announced_fail"
+    CANCELLED = "cancelled"
 
 
 class Application(Base):

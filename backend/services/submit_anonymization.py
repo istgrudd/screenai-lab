@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session, sessionmaker
 
-from backend.models.application import Application
+from backend.models.application import Application, ApplicationStatus
 from backend.models.candidate import Candidate, CandidateDocument
 from backend.models.document import Document, DocumentType
 from backend.services.extractor import extract_text_from_pdf
@@ -82,6 +82,15 @@ def _run_anonymization(application_id: int, db: Session) -> None:
     app = db.query(Application).filter(Application.id == application_id).first()
     if not app:
         logger.warning("Application %d not found for submit-time NER", application_id)
+        return
+
+    if app.status != ApplicationStatus.VERIFIED:
+        app_status = app.status.value if hasattr(app.status, "value") else str(app.status)
+        logger.warning(
+            "Skipping NER for application %d because status is %s",
+            application_id,
+            app_status,
+        )
         return
 
     # 2. Create or update Candidate record (rubric_id=None at this stage)

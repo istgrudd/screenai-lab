@@ -57,6 +57,10 @@ export function StatusBadge({ status }) {
       ? "default"
       : status === "announced_fail"
       ? "destructive"
+      : status === "correction_requested"
+      ? "destructive"
+      : status === "verified"
+      ? "secondary"
       : status === "screening"
       ? "secondary"
       : "outline";

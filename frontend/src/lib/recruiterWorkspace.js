@@ -11,6 +11,9 @@ export const WORKFLOW_DIVISIONS = DIVISIONS.filter((division) => division.id !==
 export const STATUSES = [
   { id: "all", label: "All statuses (non-draft)" },
   { id: "submitted", label: "Submitted" },
+  { id: "document_review", label: "Document review" },
+  { id: "correction_requested", label: "Correction requested" },
+  { id: "verified", label: "Verified" },
   { id: "screening", label: "Screening" },
   { id: "announced_pass", label: "Passed" },
   { id: "announced_fail", label: "Not passed" },
@@ -55,7 +58,7 @@ export function summarizeApplications(applications = []) {
     if (score != null) {
       scoredCount += 1;
       if (topScore == null || Number(score) > topScore) topScore = Number(score);
-    } else if (application?.status === "submitted") {
+    } else if (application?.status === "verified") {
       pendingEvaluationCount += 1;
     }
 

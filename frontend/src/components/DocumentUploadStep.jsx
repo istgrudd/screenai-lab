@@ -35,6 +35,7 @@ export default function DocumentUploadStep({
   doc,
   existing,
   locked = false,
+  lockedMessage = "Documents are locked after final submit.",
   onUpload,
 }) {
   const inputRef = useRef(null);
@@ -224,7 +225,7 @@ export default function DocumentUploadStep({
       {locked && (
         <p className="flex items-center gap-2 text-xs text-muted-foreground">
           <XCircle className="w-3.5 h-3.5" />
-          Documents are locked after final submit.
+          {lockedMessage}
         </p>
       )}
     </div>

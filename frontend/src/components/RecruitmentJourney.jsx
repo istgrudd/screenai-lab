@@ -1,4 +1,4 @@
-import { CheckCircle2, Sparkles, Trophy } from "lucide-react";
+import { CheckCircle2, FileCheck2, FileSearch, Sparkles, Trophy } from "lucide-react";
 
 export const JOURNEY_STEPS = [
   {
@@ -7,6 +7,18 @@ export const JOURNEY_STEPS = [
     description:
       "Aplikasi dan dokumen sudah dikirim atau masih berada di tahap pendaftaran.",
     icon: CheckCircle2,
+  },
+  {
+    id: "review_dokumen",
+    label: "Review Dokumen",
+    description: "Dokumen sedang diverifikasi oleh recruiter/admin.",
+    icon: FileSearch,
+  },
+  {
+    id: "dokumen_valid",
+    label: "Dokumen Valid",
+    description: "Semua dokumen sudah diterima dan siap masuk evaluasi.",
+    icon: FileCheck2,
   },
   {
     id: "evaluasi_ai",
@@ -25,6 +37,9 @@ export const JOURNEY_STEPS = [
 export const STATUS_TO_JOURNEY_STEP = {
   draft: null,
   submitted: "pendaftaran",
+  document_review: "review_dokumen",
+  correction_requested: "review_dokumen",
+  verified: "dokumen_valid",
   screening: "evaluasi_ai",
   announced_pass: "pengumuman",
   announced_fail: "pengumuman",

@@ -236,7 +236,7 @@ export default function RecruiterEvaluationPage() {
         <CardHeader className="pb-3">
           <CardTitle className="text-lg">Evaluation Controls</CardTitle>
           <CardDescription>
-            Current backend evaluates submitted applications by division. Later document-review phases will narrow this to verified applications.
+            Evaluation only targets applications whose required documents are verified.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-wrap items-center gap-3">

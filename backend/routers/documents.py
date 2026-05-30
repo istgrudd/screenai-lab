@@ -17,6 +17,7 @@ Authorization:
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
@@ -28,8 +29,14 @@ from backend.database import get_db
 from backend.middleware.auth_middleware import get_current_user, require_role
 from backend.models.application import Application, ApplicationStatus
 from backend.models.audit import AuditLog
-from backend.models.document import Document, DocumentType
+from backend.models.document import Document, DocumentType, DocumentVerificationStatus
 from backend.models.user import User, UserRole
+from backend.services.document_review_service import (
+    get_document_verification_status,
+    replace_rejected_document,
+    reset_document_review_state,
+    review_document as review_document_service,
+)
 from backend.utils.file_storage import (
     ALLOWED_MIME_TYPES,
     MAX_FILE_SIZE,
@@ -51,10 +58,16 @@ class VerifyRequest(BaseModel):
     is_verified: bool
 
 
+class DocumentReviewRequest(BaseModel):
+    status: str
+    reason: str | None = None
+
+
 def _serialize_document(doc: Document) -> dict:
     doc_type_value = (
         doc.doc_type.value if hasattr(doc.doc_type, "value") else str(doc.doc_type)
     )
+    verification_status = get_document_verification_status(doc)
     return {
         "id": doc.id,
         "application_id": doc.application_id,
@@ -63,6 +76,10 @@ def _serialize_document(doc: Document) -> dict:
         "file_size": doc.file_size,
         "uploaded_at": doc.uploaded_at.isoformat() if doc.uploaded_at else None,
         "is_verified": doc.is_verified,
+        "verification_status": verification_status,
+        "rejection_reason": doc.rejection_reason,
+        "reviewed_at": doc.reviewed_at.isoformat() if doc.reviewed_at else None,
+        "reviewed_by_id": doc.reviewed_by_id,
     }
 
 
@@ -127,21 +144,38 @@ def upload_document(
         * Refused with 403 once the application is no longer in ``draft``.
     """
     app = _get_owned_application(db, current_user)
-    _assert_draft(app)
-
-    file_path, size_bytes = save_upload(app.id, doc_type, file)
-    original_name = (file.filename or f"{doc_type.value}").strip() or f"{doc_type.value}"
-
     existing = (
         db.query(Document)
         .filter(Document.application_id == app.id, Document.doc_type == doc_type)
         .first()
     )
+
+    if app.status == ApplicationStatus.CORRECTION_REQUESTED:
+        if not existing:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only rejected existing documents can be replaced in correction flow",
+            )
+        updated = replace_rejected_document(
+            db,
+            doc=existing,
+            app=app,
+            file=file,
+            candidate=current_user,
+        )
+        return {"success": True, "data": _serialize_document(updated), "error": None}
+
+    _assert_draft(app)
+
+    file_path, size_bytes = save_upload(app.id, doc_type, file)
+    original_name = (file.filename or f"{doc_type.value}").strip() or f"{doc_type.value}"
+
     if existing:
         # Replace in place — save_upload already overwrote the disk file.
         existing.file_path = file_path
         existing.file_name = original_name
         existing.file_size = size_bytes
+        reset_document_review_state(existing)
         db.commit()
         db.refresh(existing)
         return {"success": True, "data": _serialize_document(existing), "error": None}
@@ -153,6 +187,7 @@ def upload_document(
         file_name=original_name,
         file_size=size_bytes,
         is_verified=False,
+        verification_status=DocumentVerificationStatus.PENDING.value,
     )
     db.add(doc)
     db.commit()
@@ -182,6 +217,17 @@ def replace_document(
     app = db.query(Application).filter(Application.id == doc.application_id).first()
     if not app or app.user_id != current_user.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not your document")
+
+    if app.status == ApplicationStatus.CORRECTION_REQUESTED:
+        updated = replace_rejected_document(
+            db,
+            doc=doc,
+            app=app,
+            file=file,
+            candidate=current_user,
+        )
+        return {"success": True, "data": _serialize_document(updated), "error": None}
+
     _assert_draft(app)
 
     # Remove old disk file, then save the new one.
@@ -192,6 +238,7 @@ def replace_document(
     doc.file_path = file_path
     doc.file_name = original_name
     doc.file_size = size_bytes
+    reset_document_review_state(doc)
     db.commit()
     db.refresh(doc)
     return {"success": True, "data": _serialize_document(doc), "error": None}
@@ -283,6 +330,27 @@ def download_document(
 # ---------------------------------------------------------------------------
 
 @router.put(
+    "/{doc_id}/review",
+    dependencies=[Depends(_recruiter_or_admin)],
+)
+def review_document(
+    doc_id: int,
+    payload: DocumentReviewRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Review one document with a final status: verified or rejected."""
+    doc = review_document_service(
+        db,
+        doc_id=doc_id,
+        review_status=payload.status,
+        reason=payload.reason,
+        reviewer=current_user,
+    )
+    return {"success": True, "data": _serialize_document(doc), "error": None}
+
+
+@router.put(
     "/{doc_id}/verify",
     dependencies=[Depends(_recruiter_or_admin)],
 )
@@ -303,6 +371,19 @@ def verify_document(
 
     old_value = doc.is_verified
     doc.is_verified = bool(payload.is_verified)
+    doc.verification_status = (
+        DocumentVerificationStatus.VERIFIED.value
+        if doc.is_verified
+        else DocumentVerificationStatus.PENDING.value
+    )
+    if doc.is_verified:
+        doc.rejection_reason = None
+        doc.reviewed_at = datetime.now(timezone.utc)
+        doc.reviewed_by_id = current_user.id
+    else:
+        doc.rejection_reason = None
+        doc.reviewed_at = None
+        doc.reviewed_by_id = None
 
     doc_type_value = (
         doc.doc_type.value if hasattr(doc.doc_type, "value") else str(doc.doc_type)

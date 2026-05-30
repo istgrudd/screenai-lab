@@ -14,6 +14,11 @@ import io
 import os
 import sys
 
+os.environ["EMAIL_ENABLED"] = "false"
+os.environ["EMAIL_RESEND_COOLDOWN_SECONDS"] = "0"
+os.environ["ENVIRONMENT"] = "development"
+os.environ["PUBLIC_FRONTEND_URL"] = "http://testserver"
+
 from fastapi.testclient import TestClient
 
 from datetime import datetime, timedelta, timezone
@@ -23,6 +28,7 @@ from backend.database import SessionLocal
 from backend.main import app as fastapi_app
 from backend.models.application import Application
 from backend.models.document import Document, DocumentType
+from backend.models.email_verification import EmailVerificationLink
 from backend.models.period import RecruitmentPeriod
 from backend.models.user import User, UserRole
 from backend.utils.file_storage import purge_application_dir
@@ -63,6 +69,9 @@ def _cleanup_user() -> None:
             .all()
         )
         for u in users:
+            db.query(EmailVerificationLink).filter(
+                EmailVerificationLink.user_id == u.id
+            ).delete(synchronize_session=False)
             for a in db.query(Application).filter(Application.user_id == u.id).all():
                 # Clean disk files first.
                 db.query(Document).filter(Document.application_id == a.id).delete(
@@ -140,6 +149,19 @@ def main() -> int:
         },
     )
     _check(r.status_code == 201, f"register -> 201 (got {r.status_code}: {r.text})")
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.email == TEST_EMAIL).first()
+        user.email_verified_at = datetime.now(timezone.utc)
+        db.commit()
+    finally:
+        db.close()
+
+    r = client.post(
+        "/api/auth/login",
+        json={"email": TEST_EMAIL, "password": TEST_PASSWORD},
+    )
+    _check(r.status_code == 200, f"login -> 200 (got {r.status_code}: {r.text})")
     token = r.json()["data"]["access_token"]
     auth = {"Authorization": f"Bearer {token}"}
 
@@ -260,7 +282,7 @@ def main() -> int:
     # --- Submit successfully ---
     r = client.post(f"/api/applications/{app_id}/submit", headers=auth)
     _check(r.status_code == 200, f"submit ok -> 200 (got {r.status_code}: {r.text})")
-    _check(r.json()["data"]["status"] == "submitted", "status transitions to submitted")
+    _check(r.json()["data"]["status"] == "document_review", "status transitions to document_review")
     _check(r.json()["data"]["submitted_at"] is not None, "submitted_at timestamp set")
 
     # --- Submit again -> 409 ---

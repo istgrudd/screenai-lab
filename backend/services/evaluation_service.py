@@ -106,7 +106,7 @@ async def run_evaluation_pipeline(
     # applications (draft, screening, announced_*) are never re-evaluated.
     q = db.query(Application).filter(
         Application.division == division_enum,
-        Application.status == ApplicationStatus.SUBMITTED,
+        Application.status == ApplicationStatus.VERIFIED,
     )
     if application_ids:
         q = q.filter(Application.id.in_(application_ids))
@@ -189,6 +189,12 @@ async def _evaluate_one(
     db: Session,
 ) -> dict:
     """Run the full pipeline for one application."""
+    if app.status != ApplicationStatus.VERIFIED:
+        app_status = app.status.value if hasattr(app.status, "value") else str(app.status)
+        raise ValueError(
+            f"Application {app.id} is not eligible for evaluation while status is '{app_status}'"
+        )
+
     user = db.query(User).filter(User.id == app.user_id).first()
 
     result: dict = {
