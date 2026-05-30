@@ -74,9 +74,9 @@ def hash_verification_secret(secret: str) -> str:
 
 
 def build_verification_url(secret: str) -> str:
-    """Build the public backend verification URL from trusted settings."""
+    """Build the public frontend verification URL from trusted settings."""
     base_url = (settings.public_frontend_url or settings.frontend_url).strip().rstrip("/")
-    return f"{base_url}/api/auth/verify-email?{urlencode({'code': secret})}"
+    return f"{base_url}/verify-email?{urlencode({'code': secret})}"
 
 
 def create_and_send_verification(

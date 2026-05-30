@@ -8,11 +8,14 @@ import { Toaster } from "@/components/ui/sonner";
 import { Loader2 } from "lucide-react";
 
 import CandidateDetailPage from "@/pages/CandidateDetailPage";
+import ForgotPasswordPage from "@/pages/ForgotPasswordPage";
 import LoginPage from "@/pages/LoginPage";
 import MyApplicationsPage from "@/pages/MyApplicationsPage";
 import RegisterPage from "@/pages/RegisterPage";
+import ResetPasswordPage from "@/pages/ResetPasswordPage";
 import RubricConfigPage from "@/pages/RubricConfigPage";
 import UploadPage from "@/pages/UploadPage";
+import VerifyEmailPage from "@/pages/VerifyEmailPage";
 
 import CandidateDashboardPage from "@/pages/candidate/DashboardPage";
 import CandidateProfilePage from "@/pages/candidate/ProfilePage";
@@ -134,6 +137,9 @@ export default function App() {
         <Routes>
           <Route path="/login" element={<LoginPage />} />
           <Route path="/register" element={<RegisterPage />} />
+          <Route path="/verify-email" element={<VerifyEmailPage />} />
+          <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+          <Route path="/reset-password" element={<ResetPasswordPage />} />
 
           <Route
             path="/"

@@ -7,6 +7,109 @@ import { getToken, removeToken } from "@/lib/auth";
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000/api";
 
+const PUBLIC_AUTH_ENDPOINTS = [
+  "/auth/login",
+  "/auth/register",
+  "/auth/verify-email",
+  "/auth/resend-verification",
+  "/auth/forgot-password",
+  "/auth/reset-password",
+];
+
+export class ApiError extends Error {
+  constructor(message, { status = null, code = null, detail = null, body = null } = {}) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.code = code;
+    this.detail = detail;
+    this.body = body;
+  }
+}
+
+function normalizeErrorPayload(payload, fallbackMessage, status = null) {
+  const source =
+    payload && typeof payload === "object" && !Array.isArray(payload)
+      ? payload.detail ?? payload.error ?? payload.message ?? payload
+      : payload;
+
+  let code =
+    payload && typeof payload === "object" && !Array.isArray(payload)
+      ? payload.code ?? payload.error_code ?? null
+      : null;
+  let message = fallbackMessage;
+
+  if (typeof source === "string") {
+    message = source;
+  } else if (Array.isArray(source)) {
+    const validationMessages = source
+      .map((item) => item?.msg || item?.message)
+      .filter(Boolean);
+    message = validationMessages.length
+      ? validationMessages.join("; ")
+      : fallbackMessage;
+  } else if (source && typeof source === "object") {
+    code = source.code ?? source.error_code ?? code;
+    const nestedMessage = source.message ?? source.detail ?? source.error;
+    if (typeof nestedMessage === "string") {
+      message = nestedMessage;
+    } else if (Array.isArray(nestedMessage)) {
+      const validationMessages = nestedMessage
+        .map((item) => item?.msg || item?.message)
+        .filter(Boolean);
+      message = validationMessages.length
+        ? validationMessages.join("; ")
+        : fallbackMessage;
+    }
+  }
+
+  return {
+    status,
+    code,
+    detail: source,
+    body: payload,
+    message: String(message || fallbackMessage),
+  };
+}
+
+function createApiError(status, payload, fallbackMessage = `HTTP ${status}`) {
+  const normalized = normalizeErrorPayload(payload, fallbackMessage, status);
+  return new ApiError(normalized.message, normalized);
+}
+
+export function getApiErrorCode(error) {
+  return error?.code || null;
+}
+
+export function getApiErrorMessage(error, fallbackMessage = "Request failed") {
+  return error?.message || fallbackMessage;
+}
+
+async function parseResponseBody(res) {
+  const text = await res.text();
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
+}
+
+function shouldForceRelogin(endpoint, status) {
+  if (status !== 401) return false;
+  return !PUBLIC_AUTH_ENDPOINTS.some((publicEndpoint) =>
+    endpoint.startsWith(publicEndpoint)
+  );
+}
+
+function forceReloginIfNeeded(endpoint, status, token) {
+  if (!shouldForceRelogin(endpoint, status)) return;
+  if (token) removeToken();
+  if (!window.location.pathname.startsWith("/login")) {
+    window.location.assign("/login");
+  }
+}
+
 /**
  * Generic fetch wrapper that handles JSON responses and errors.
  * Unwraps the { success, data, error } envelope.
@@ -27,32 +130,20 @@ async function request(endpoint, options = {}) {
   };
 
   const res = await fetch(url, config);
-
-  if (res.status === 401) {
-    // Token missing / invalid / expired — force re-login.
-    removeToken();
-    if (!window.location.pathname.startsWith("/login")) {
-      window.location.assign("/login");
-    }
-    throw new Error("Unauthorized");
-  }
+  const body = await parseResponseBody(res);
 
   if (!res.ok) {
-    let detail = `HTTP ${res.status}`;
-    try {
-      const body = await res.json();
-      detail = body.detail || body.error || JSON.stringify(body);
-    } catch {
-      // ignore parse error
-    }
-    throw new Error(detail);
+    forceReloginIfNeeded(endpoint, res.status, token);
+    throw createApiError(res.status, body);
   }
 
-  const json = await res.json();
-  if (json.success === false) {
-    throw new Error(json.error || "Unknown API error");
+  const json = body;
+  if (json?.success === false) {
+    throw createApiError(res.status, json, "Unknown API error");
   }
-  return json.data;
+  return json && Object.prototype.hasOwnProperty.call(json, "data")
+    ? json.data
+    : json;
 }
 
 // ── Auth ────────────────────────────────────────────────────────────────────
@@ -89,6 +180,32 @@ export async function register({
       major,
       year: Number(year),
     }),
+  });
+}
+
+export async function verifyEmail(code) {
+  const params = new URLSearchParams({ code });
+  return request(`/auth/verify-email?${params.toString()}`);
+}
+
+export async function resendVerification(email) {
+  return request("/auth/resend-verification", {
+    method: "POST",
+    body: JSON.stringify({ email }),
+  });
+}
+
+export async function forgotPassword(email) {
+  return request("/auth/forgot-password", {
+    method: "POST",
+    body: JSON.stringify({ email }),
+  });
+}
+
+export async function resetPassword(code, newPassword) {
+  return request("/auth/reset-password", {
+    method: "POST",
+    body: JSON.stringify({ code, new_password: newPassword }),
   });
 }
 
@@ -180,17 +297,19 @@ export function documentFileUrl(docId) {
  */
 export async function fetchDocumentBlob(docId) {
   const token = getToken();
-  const res = await fetch(`${BASE_URL}/documents/${docId}/file`, {
+  const endpoint = `/documents/${docId}/file`;
+  const res = await fetch(`${BASE_URL}${endpoint}`, {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   });
-  if (res.status === 401) {
-    removeToken();
-    if (!window.location.pathname.startsWith("/login")) {
-      window.location.assign("/login");
-    }
-    throw new Error("Unauthorized");
+  if (!res.ok) {
+    const body = await parseResponseBody(res);
+    forceReloginIfNeeded(endpoint, res.status, token);
+    throw createApiError(
+      res.status,
+      body,
+      `Failed to load document (HTTP ${res.status})`
+    );
   }
-  if (!res.ok) throw new Error(`Failed to load document (HTTP ${res.status})`);
   const mime = res.headers.get("content-type") || "application/octet-stream";
   const disposition = res.headers.get("content-disposition") || "";
   const match = /filename\*?="?([^";]+)"?/i.exec(disposition);
@@ -374,7 +493,8 @@ export async function runEvaluation(rubricId) {
 export async function evaluateBatch(division, opts = {}) {
   const { applicationIds = null, force = false } = opts;
   const token = getToken();
-  const res = await fetch(`${BASE_URL}/recruiter/evaluate/batch`, {
+  const endpoint = "/recruiter/evaluate/batch";
+  const res = await fetch(`${BASE_URL}${endpoint}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -386,24 +506,14 @@ export async function evaluateBatch(division, opts = {}) {
       force,
     }),
   });
-  if (res.status === 401) {
-    removeToken();
-    if (!window.location.pathname.startsWith("/login")) {
-      window.location.assign("/login");
-    }
-    throw new Error("Unauthorized");
-  }
+  const body = await parseResponseBody(res);
   if (!res.ok) {
-    let detail = `HTTP ${res.status}`;
-    try {
-      const body = await res.json();
-      detail = body.detail || body.error || JSON.stringify(body);
-    } catch { /* ignore */ }
-    throw new Error(detail);
+    forceReloginIfNeeded(endpoint, res.status, token);
+    throw createApiError(res.status, body);
   }
-  const json = await res.json();
+  const json = body;
   if (json.success === false) {
-    throw new Error(json.error || "Unknown API error");
+    throw createApiError(res.status, json, "Unknown API error");
   }
   return {
     ...(json.data || {}),

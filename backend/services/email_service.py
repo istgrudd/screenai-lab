@@ -62,6 +62,11 @@ def send_email(
                     "provider": "disabled",
                 }
             )
+
+            print(f"[DEV EMAIL] To: {to_email}")
+            print(f"[DEV EMAIL] Subject: {subject}")
+            print(f"[DEV EMAIL] Text:\n{text}")
+        
         return EmailSendResult(
             success=True,
             provider="disabled",

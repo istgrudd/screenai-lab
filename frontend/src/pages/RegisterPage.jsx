@@ -1,7 +1,14 @@
 import { useState, useEffect } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { toast } from "sonner";
-import { GraduationCap, Loader2, UserPlus } from "lucide-react";
+import {
+  ArrowLeft,
+  GraduationCap,
+  Loader2,
+  MailCheck,
+  RefreshCw,
+  UserPlus,
+} from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -14,7 +21,11 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
-import { register as registerApi } from "@/lib/api";
+import {
+  getApiErrorMessage,
+  register as registerApi,
+  resendVerification,
+} from "@/lib/api";
 import {
   isAuthenticated,
   getCurrentUser,
@@ -34,6 +45,8 @@ export default function RegisterPage() {
   const [major, setMajor] = useState("");
   const [year, setYear] = useState(String(CURRENT_YEAR));
   const [submitting, setSubmitting] = useState(false);
+  const [registrationResult, setRegistrationResult] = useState(null);
+  const [resending, setResending] = useState(false);
 
   useEffect(() => {
     if (isAuthenticated()) {
@@ -78,7 +91,7 @@ export default function RegisterPage() {
     }
     setSubmitting(true);
     try {
-      await registerApi({
+      const data = await registerApi({
         email: trimmed.email,
         password,
         fullName: trimmed.fullName,
@@ -87,11 +100,37 @@ export default function RegisterPage() {
         major: trimmed.major,
         year: yearNum,
       });
-      navigate("/login", { replace: true, state: { registered: true } });
+      setRegistrationResult({
+        email: data?.email || trimmed.email,
+        message:
+          "Akun berhasil dibuat. Silakan cek email untuk verifikasi sebelum login.",
+      });
+      setPassword("");
+      toast.success(
+        "Akun berhasil dibuat. Silakan cek email untuk verifikasi sebelum login."
+      );
     } catch (err) {
-      toast.error(err.message || "Registration failed");
+      toast.error(getApiErrorMessage(err, "Registration failed"));
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleResendVerification = async () => {
+    const targetEmail = registrationResult?.email || email.trim();
+    if (!targetEmail) {
+      toast.error("Email tujuan tidak tersedia.");
+      return;
+    }
+
+    setResending(true);
+    try {
+      await resendVerification(targetEmail);
+      toast.success("Jika akun kandidat belum diverifikasi, email verifikasi telah dikirim.");
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, "Gagal mengirim ulang email verifikasi."));
+    } finally {
+      setResending(false);
     }
   };
 
@@ -100,15 +139,67 @@ export default function RegisterPage() {
       <Card className="w-full max-w-lg">
         <CardHeader className="space-y-3 text-center">
           <div className="mx-auto w-11 h-11 rounded-lg bg-primary flex items-center justify-center">
-            <GraduationCap className="w-6 h-6 text-primary-foreground" />
+            {registrationResult ? (
+              <MailCheck className="w-6 h-6 text-primary-foreground" />
+            ) : (
+              <GraduationCap className="w-6 h-6 text-primary-foreground" />
+            )}
           </div>
-          <CardTitle className="text-2xl">Create your candidate account</CardTitle>
+          <CardTitle className="text-2xl">
+            {registrationResult
+              ? "Verifikasi email diperlukan"
+              : "Create your candidate account"}
+          </CardTitle>
           <CardDescription>
-            Register to apply to an MBC Laboratory division.
+            {registrationResult
+              ? registrationResult.message
+              : "Register to apply to an MBC Laboratory division."}
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <form onSubmit={onSubmit} className="space-y-4">
+          {registrationResult ? (
+            <div className="space-y-4">
+              <div className="rounded-lg border bg-muted/40 px-3 py-3 text-sm">
+                <div className="font-medium">
+                  Akun berhasil dibuat. Silakan cek email untuk verifikasi sebelum login.
+                </div>
+                {registrationResult.email && (
+                  <div className="mt-2 break-all text-muted-foreground">
+                    Email tujuan: {registrationResult.email}
+                  </div>
+                )}
+              </div>
+
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <Button asChild className="flex-1">
+                  <Link to="/login">
+                    <ArrowLeft className="w-4 h-4" />
+                    Kembali ke Login
+                  </Link>
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="flex-1"
+                  disabled={resending}
+                  onClick={handleResendVerification}
+                >
+                  {resending ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      Mengirim...
+                    </>
+                  ) : (
+                    <>
+                      <RefreshCw className="w-4 h-4" />
+                      Kirim Ulang Email Verifikasi
+                    </>
+                  )}
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <form onSubmit={onSubmit} className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-2 md:col-span-2">
                 <Label htmlFor="full_name">Full name</Label>
@@ -233,6 +324,7 @@ export default function RegisterPage() {
               </Link>
             </p>
           </form>
+          )}
         </CardContent>
       </Card>
     </div>
