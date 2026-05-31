@@ -25,11 +25,17 @@ import { Progress } from "@/components/ui/progress";
 
 import DocumentUploadStep from "@/components/DocumentUploadStep";
 import {
+  getActivePeriod,
   getMyApplication,
   listApplicationDocuments,
   uploadApplicationDocument,
 } from "@/lib/api";
-import { formatStatus, REQUIRED_DOCUMENTS } from "@/lib/candidateApplication";
+import {
+  formatStatus,
+  isSubmissionPhase,
+  REQUIRED_DOCUMENTS,
+  submissionPhaseMessage,
+} from "@/lib/candidateApplication";
 
 function StepTracker({ steps, activeIndex, uploadedTypes }) {
   const completed = steps.filter((step) => uploadedTypes.has(step.doc_type)).length;
@@ -132,6 +138,7 @@ export default function DocumentsPage() {
   const [application, setApplication] = useState(null);
   const [documents, setDocuments] = useState([]);
   const [limits, setLimits] = useState({});
+  const [activePeriod, setActivePeriod] = useState(null);
   const [activeIndex, setActiveIndex] = useState(0);
   const [loading, setLoading] = useState(true);
 
@@ -144,6 +151,12 @@ export default function DocumentsPage() {
         const app = await getMyApplication();
         if (cancelled) return;
         setApplication(app);
+        try {
+          const period = await getActivePeriod();
+          if (!cancelled) setActivePeriod(period);
+        } catch {
+          if (!cancelled) setActivePeriod(null);
+        }
         const { documents: docs, limits: lim } = await listApplicationDocuments(
           app.id
         );
@@ -177,13 +190,14 @@ export default function DocumentsPage() {
   );
   const isDraft = application?.status === "draft";
   const isCorrection = application?.status === "correction_requested";
+  const submissionOpen = isSubmissionPhase(activePeriod);
 
   const currentStep = REQUIRED_DOCUMENTS[activeIndex];
   const currentDoc = documents.find(
     (document) => document.doc_type === currentStep?.doc_type
   );
   const currentRejected = currentDoc?.verification_status === "rejected";
-  const canEditCurrent = isDraft || (isCorrection && currentRejected);
+  const canEditCurrent = (isDraft && submissionOpen) || (isCorrection && currentRejected);
   const locked = !canEditCurrent;
   const currentLimit = limits[currentStep?.doc_type] || {
     max_bytes: 5 * 1024 * 1024,
@@ -204,6 +218,8 @@ export default function DocumentsPage() {
     ? currentRejected
       ? "Upload a replacement for this rejected document."
       : "Only rejected documents can be replaced during correction."
+    : isDraft && !submissionOpen
+    ? submissionPhaseMessage(activePeriod)
     : "Documents are locked after final submit.";
 
   if (loading) {
@@ -252,6 +268,20 @@ export default function DocumentsPage() {
               <p className="text-sm font-medium">Correction requested</p>
               <p className="text-sm text-muted-foreground mt-1">
                 Replace only the rejected document(s). Verified documents remain locked.
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {isDraft && !submissionOpen && (
+        <Card className="border-amber-500/40 bg-amber-500/10">
+          <CardContent className="py-4 flex items-start gap-3">
+            <AlertTriangle className="w-5 h-5 text-amber-600 mt-0.5 shrink-0" />
+            <div>
+              <p className="text-sm font-medium">Upload dokumen belum tersedia</p>
+              <p className="text-sm text-muted-foreground mt-1">
+                {submissionPhaseMessage(activePeriod)}
               </p>
             </div>
           </CardContent>

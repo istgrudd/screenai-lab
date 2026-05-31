@@ -92,6 +92,10 @@ export default function CandidateProfileForm({ profile, locked, onSaved }) {
       toast.error(WHATSAPP_ERROR);
       return;
     }
+    if (!whatsapp.trim()) {
+      toast.error("Nomor WhatsApp wajib diisi sebelum submit aplikasi.");
+      return;
+    }
 
     const payload = {};
     if (fullName.trim() !== (profile.full_name || "")) {
@@ -178,6 +182,7 @@ export default function CandidateProfileForm({ profile, locked, onSaved }) {
           maxLength={32}
           placeholder="+628123456789"
           disabled={saving}
+          required
         />
       </div>
       <div className="space-y-1.5">

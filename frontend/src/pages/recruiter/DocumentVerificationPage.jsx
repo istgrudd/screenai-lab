@@ -1,5 +1,15 @@
-import { useEffect, useMemo, useState } from "react";
-import { CheckCircle2, FileText, Loader2, ShieldCheck, XCircle } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  AlertTriangle,
+  CheckCircle2,
+  Eye,
+  EyeOff,
+  ExternalLink,
+  FileText,
+  Loader2,
+  ShieldCheck,
+  XCircle,
+} from "lucide-react";
 import { toast } from "sonner";
 
 import ApplicationFilters from "@/components/recruiter/ApplicationFilters";
@@ -9,7 +19,9 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import {
+  fetchDocumentBlob,
   finalizeDocumentReview,
+  getActivePeriod,
   listApplicationDocuments,
   listRecruiterApplications,
   reviewDocument,
@@ -33,10 +45,14 @@ export default function RecruiterDocumentVerificationPage() {
   const [statusFilter, setStatusFilter] = useState("document_review");
   const [selectedApplication, setSelectedApplication] = useState(null);
   const [documents, setDocuments] = useState([]);
+  const [activePeriod, setActivePeriod] = useState(null);
   const [rejectionReasons, setRejectionReasons] = useState({});
+  const [previews, setPreviews] = useState({});
+  const previewsRef = useRef({});
   const [loading, setLoading] = useState(true);
   const [documentsLoading, setDocumentsLoading] = useState(false);
   const [workingDocId, setWorkingDocId] = useState(null);
+  const [previewLoadingDocId, setPreviewLoadingDocId] = useState(null);
   const [finalizing, setFinalizing] = useState(false);
 
   const loadApplications = async () => {
@@ -74,15 +90,39 @@ export default function RecruiterDocumentVerificationPage() {
     }
   };
 
+  const loadActivePeriod = async () => {
+    try {
+      const period = await getActivePeriod();
+      setActivePeriod(period);
+    } catch {
+      setActivePeriod(null);
+    }
+  };
+
   useEffect(() => {
     loadApplications();
+    loadActivePeriod();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [divisionFilter, statusFilter]);
 
   useEffect(() => {
+    Object.values(previewsRef.current).forEach((preview) => {
+      if (preview?.url) URL.revokeObjectURL(preview.url);
+    });
+    previewsRef.current = {};
+    setPreviews({});
     loadDocuments(selectedApplication);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedApplication?.id]);
+
+  useEffect(
+    () => () => {
+      Object.values(previewsRef.current).forEach((preview) => {
+        if (preview?.url) URL.revokeObjectURL(preview.url);
+      });
+    },
+    []
+  );
 
   const summary = useMemo(() => {
     const pending = applications.filter(
@@ -132,6 +172,34 @@ export default function RecruiterDocumentVerificationPage() {
       toast.error(error.message || "Rejection failed");
     } finally {
       setWorkingDocId(null);
+    }
+  };
+
+  const closePreview = (docId) => {
+    const preview = previewsRef.current[docId];
+    if (preview?.url) URL.revokeObjectURL(preview.url);
+    delete previewsRef.current[docId];
+    setPreviews((prev) => {
+      const next = { ...prev };
+      delete next[docId];
+      return next;
+    });
+  };
+
+  const togglePreview = async (document) => {
+    if (previews[document.id]) {
+      closePreview(document.id);
+      return;
+    }
+    setPreviewLoadingDocId(document.id);
+    try {
+      const preview = await fetchDocumentBlob(document.id);
+      previewsRef.current[document.id] = preview;
+      setPreviews((prev) => ({ ...prev, [document.id]: preview }));
+    } catch (error) {
+      toast.error(error.message || "Failed to preview document");
+    } finally {
+      setPreviewLoadingDocId(null);
     }
   };
 
@@ -191,6 +259,21 @@ export default function RecruiterDocumentVerificationPage() {
         <MetricCard icon={XCircle} label="Correction requested" value={loading ? "..." : summary.correction} tone="yellow" />
         <MetricCard icon={CheckCircle2} label="All verified" value={loading ? "..." : summary.allVerified} tone="green" />
       </div>
+
+      {activePeriod?.current_phase === "EVALUATION" &&
+        (summary.pending > 0 || summary.correction > 0) && (
+          <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-4 flex items-start gap-3">
+            <AlertTriangle className="w-5 h-5 text-amber-600 mt-0.5 shrink-0" />
+            <div>
+              <p className="text-sm font-medium text-amber-900 dark:text-amber-200">
+                Evaluation phase is active.
+              </p>
+              <p className="text-sm text-amber-800/80 dark:text-amber-200/80 mt-1">
+                Candidates still in document review or correction remain in this queue and will be skipped by evaluation.
+              </p>
+            </div>
+          </div>
+        )}
 
       <ApplicationFilters
         divisionFilter={divisionFilter}
@@ -290,6 +373,7 @@ export default function RecruiterDocumentVerificationPage() {
               documents.map((document) => {
                 const rejected = document.verification_status === "rejected";
                 const verified = document.verification_status === "verified";
+                const preview = previews[document.id];
                 return (
                   <div key={document.id} className="rounded-lg border px-3 py-3">
                     <div className="flex items-start justify-between gap-3 flex-wrap">
@@ -313,6 +397,53 @@ export default function RecruiterDocumentVerificationPage() {
                       <p className="text-xs text-destructive mt-2">
                         {document.rejection_reason}
                       </p>
+                    )}
+
+                    <div className="mt-3">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => togglePreview(document)}
+                        disabled={previewLoadingDocId === document.id}
+                        className="gap-2"
+                      >
+                        {previewLoadingDocId === document.id ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : preview ? (
+                          <EyeOff className="w-4 h-4" />
+                        ) : (
+                          <Eye className="w-4 h-4" />
+                        )}
+                        {preview ? "Hide Preview" : "Preview"}
+                      </Button>
+                    </div>
+
+                    {preview && (
+                      <div className="mt-3 rounded-lg border bg-muted/30 overflow-hidden">
+                        {preview.mime.includes("pdf") ? (
+                          <iframe
+                            title={`Preview ${document.file_name}`}
+                            src={preview.url}
+                            className="h-[420px] w-full bg-background"
+                          />
+                        ) : preview.mime.startsWith("image/") ? (
+                          <img
+                            src={preview.url}
+                            alt={document.file_name}
+                            className="max-h-[420px] w-full object-contain bg-background"
+                          />
+                        ) : (
+                          <div className="p-4">
+                            <Button asChild variant="outline" className="gap-2">
+                              <a href={preview.url} target="_blank" rel="noreferrer">
+                                <ExternalLink className="w-4 h-4" />
+                                Open downloaded preview
+                              </a>
+                            </Button>
+                          </div>
+                        )}
+                      </div>
                     )}
 
                     <div className="mt-3 grid grid-cols-1 md:grid-cols-[1fr_auto_auto] gap-2 items-start">

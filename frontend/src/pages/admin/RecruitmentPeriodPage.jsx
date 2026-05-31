@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import {
+  AlertTriangle,
   CalendarClock,
   CheckCircle2,
   Loader2,
@@ -246,7 +247,7 @@ function ActivePeriodCard({ period, onClosed }) {
   );
 }
 
-function CreatePeriodForm({ onCreated }) {
+function CreatePeriodForm({ activePeriod, onCreated }) {
   const [name, setName] = useState("");
   const [startDate, setStartDate] = useState("");
   const [submissionEnd, setSubmissionEnd] = useState("");
@@ -268,6 +269,10 @@ function CreatePeriodForm({ onCreated }) {
 
   const onSubmit = async (e) => {
     e.preventDefault();
+    if (activePeriod) {
+      toast.error("Tutup periode aktif terlebih dahulu sebelum membuat periode baru.");
+      return;
+    }
     if (!name.trim()) {
       toast.error("Lengkapi nama periode.");
       return;
@@ -314,11 +319,22 @@ function CreatePeriodForm({ onCreated }) {
         </CardTitle>
         <CardDescription>
           Periode terdiri dari empat fase berurutan: Pendaftaran → Evaluasi →
-          Pengumuman. Membuat periode baru otomatis menonaktifkan periode
-          aktif sebelumnya.
+          Pengumuman. Periode baru hanya bisa dibuat setelah periode aktif
+          ditutup secara eksplisit.
         </CardDescription>
       </CardHeader>
       <CardContent>
+        {activePeriod && (
+          <div className="mb-4 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm flex items-start gap-2">
+            <AlertTriangle className="mt-0.5 w-4 h-4 text-amber-600" />
+            <div>
+              <p className="font-medium">Masih ada periode aktif.</p>
+              <p className="text-muted-foreground mt-1">
+                Tutup periode "{activePeriod.name}" sebelum membuat periode baru.
+              </p>
+            </div>
+          </div>
+        )}
         <form onSubmit={onSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="md:col-span-2 space-y-1.5">
             <Label htmlFor="name">Nama Periode</Label>
@@ -328,7 +344,7 @@ function CreatePeriodForm({ onCreated }) {
               onChange={(e) => setName(e.target.value)}
               placeholder="Rekrutasi Lab MBC 2026-2027"
               maxLength={255}
-              disabled={busy}
+              disabled={busy || Boolean(activePeriod)}
             />
           </div>
           <div className="space-y-1.5">
@@ -339,7 +355,7 @@ function CreatePeriodForm({ onCreated }) {
               step={1}
               value={startDate}
               onChange={(e) => setStartDate(e.target.value)}
-              disabled={busy}
+              disabled={busy || Boolean(activePeriod)}
             />
             <FieldError message={errors.startDate} />
           </div>
@@ -351,7 +367,7 @@ function CreatePeriodForm({ onCreated }) {
               step={1}
               value={submissionEnd}
               onChange={(e) => setSubmissionEnd(e.target.value)}
-              disabled={busy}
+              disabled={busy || Boolean(activePeriod)}
             />
             <FieldError message={errors.submissionEnd} />
           </div>
@@ -363,7 +379,7 @@ function CreatePeriodForm({ onCreated }) {
               step={1}
               value={evaluationEnd}
               onChange={(e) => setEvaluationEnd(e.target.value)}
-              disabled={busy}
+              disabled={busy || Boolean(activePeriod)}
             />
             <FieldError message={errors.evaluationEnd} />
           </div>
@@ -375,7 +391,7 @@ function CreatePeriodForm({ onCreated }) {
               step={1}
               value={endDate}
               onChange={(e) => setEndDate(e.target.value)}
-              disabled={busy}
+              disabled={busy || Boolean(activePeriod)}
             />
             <FieldError message={errors.endDate} />
           </div>
@@ -390,11 +406,11 @@ function CreatePeriodForm({ onCreated }) {
               value={thresholdN}
               onChange={(e) => setThresholdN(e.target.value)}
               placeholder="mis. 10"
-              disabled={busy}
+              disabled={busy || Boolean(activePeriod)}
             />
           </div>
           <div className="md:col-span-2">
-            <Button type="submit" disabled={busy} className="gap-2">
+            <Button type="submit" disabled={busy || Boolean(activePeriod)} className="gap-2">
               {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
               Buat & Aktifkan
             </Button>
@@ -588,7 +604,7 @@ export default function RecruitmentPeriodPage() {
 
       <ActivePeriodCard period={active} onClosed={fetchAll} />
 
-      <CreatePeriodForm onCreated={fetchAll} />
+      <CreatePeriodForm activePeriod={active} onCreated={fetchAll} />
 
       <Card>
         <CardHeader className="pb-3">

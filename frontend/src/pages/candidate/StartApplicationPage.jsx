@@ -19,18 +19,26 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import DivisionSelection from "@/components/candidate/DivisionSelection";
-import { createApplication, getMyApplication, getMyProfile } from "@/lib/api";
+import {
+  createApplication,
+  getActivePeriod,
+  getMyApplication,
+  getMyProfile,
+} from "@/lib/api";
 import {
   formatDivision,
   formatStatus,
   isNotFoundError,
+  isSubmissionPhase,
   isSubmittedOrLater,
+  submissionPhaseMessage,
 } from "@/lib/candidateApplication";
 
 export default function StartApplicationPage() {
   const navigate = useNavigate();
   const [profile, setProfile] = useState(null);
   const [application, setApplication] = useState(null);
+  const [activePeriod, setActivePeriod] = useState(null);
   const [selectedDivision, setSelectedDivision] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -45,6 +53,13 @@ export default function StartApplicationPage() {
         if (cancelled) return;
         setProfile(profileData);
         setSelectedDivision(profileData.division || null);
+
+        try {
+          const period = await getActivePeriod();
+          if (!cancelled) setActivePeriod(period);
+        } catch {
+          if (!cancelled) setActivePeriod(null);
+        }
 
         try {
           const app = await getMyApplication();
@@ -71,6 +86,7 @@ export default function StartApplicationPage() {
 
   const submittedOrLater = isSubmittedOrLater(application);
   const divisionLocked = Boolean(application);
+  const submissionOpen = isSubmissionPhase(activePeriod);
 
   const handleSelect = (division) => {
     if (divisionLocked) return;
@@ -132,9 +148,15 @@ export default function StartApplicationPage() {
         <CardContent className="space-y-6">
           <DivisionSelection
             selected={selectedDivision}
-            disabled={divisionLocked || saving}
+            disabled={divisionLocked || saving || !submissionOpen}
             onSelect={handleSelect}
           />
+
+          {!submissionOpen && !application && (
+            <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-800 dark:text-amber-200">
+              {submissionPhaseMessage(activePeriod)}
+            </div>
+          )}
 
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-2 border-t">
             <div className="text-sm text-muted-foreground">
@@ -157,7 +179,7 @@ export default function StartApplicationPage() {
             {!application ? (
               <Button
                 onClick={handleStart}
-                disabled={!selectedDivision || saving}
+                disabled={!selectedDivision || saving || !submissionOpen}
                 className="gap-2"
               >
                 {saving ? (

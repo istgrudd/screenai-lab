@@ -40,13 +40,22 @@ from backend.services.document_review_service import (
 )
 from backend.services.extractor import extract_text_from_pdf
 from backend.services.submit_anonymization import run_submit_anonymization
-from backend.utils.period_utils import get_current_phase
+from backend.utils.period_utils import assert_submission_phase
 
 router = APIRouter(prefix="/api/applications", tags=["applications"])
 recruiter_router = APIRouter(prefix="/api/recruiter", tags=["recruiter"])
 
 _candidate_only = require_role(UserRole.CANDIDATE)
 _recruiter_or_admin = require_role(UserRole.RECRUITER, UserRole.SUPER_ADMIN)
+_REQUIRED_PROFILE_FIELDS = (
+    "full_name",
+    "email",
+    "nim",
+    "faculty",
+    "major",
+    "year",
+    "whatsapp",
+)
 
 
 # ---------------------------------------------------------------------------
@@ -114,6 +123,35 @@ def _get_my_application_or_404(db: Session, user: User) -> Application:
     return app
 
 
+def _missing_required_profile_fields(user: User) -> list[str]:
+    missing: list[str] = []
+    for field in _REQUIRED_PROFILE_FIELDS:
+        value = getattr(user, field, None)
+        if value is None:
+            missing.append(field)
+        elif isinstance(value, str) and not value.strip():
+            missing.append(field)
+    return missing
+
+
+def _mask_candidate_review_progress(app: Application, progress: dict) -> dict:
+    """Hide in-flight per-document decisions from candidates before finalize."""
+    if app.status not in {
+        ApplicationStatus.SUBMITTED,
+        ApplicationStatus.DOCUMENT_REVIEW,
+    }:
+        return progress
+    return {
+        "total_required": progress.get("total_required", len(DocumentType)),
+        "pending_count": progress.get("total_required", len(DocumentType)),
+        "verified_count": 0,
+        "rejected_count": 0,
+        "all_verified": False,
+        "has_rejected": False,
+        "review_visibility": "hidden_until_finalized",
+    }
+
+
 # ---------------------------------------------------------------------------
 # Candidate endpoints
 # ---------------------------------------------------------------------------
@@ -134,6 +172,8 @@ def create_application(
     application per recruitment period. Multi-period re-application would need
     a `(user_id, period_id)` uniqueness model.
     """
+    assert_submission_phase(db)
+
     existing = (
         db.query(Application).filter(Application.user_id == current_user.id).first()
     )
@@ -178,6 +218,7 @@ def get_my_application(
     app = _get_my_application_or_404(db, current_user)
     count = _count_documents(db, app.id)
     review_progress = _document_review_progress(db, app.id)
+    review_progress = _mask_candidate_review_progress(app, review_progress)
     return {
         "success": True,
         "data": ApplicationOut.from_application(
@@ -313,33 +354,16 @@ def submit_application(
             },
         )
 
-    # Phase 2B (Task 11.7) + Task 13.2.1: submission requires an active
-    # recruitment period AND the period must currently be in the
-    # SUBMISSION phase. The phase is derived from the calendar; legacy
-    # periods (no submission_end_date) collapse to SUBMISSION while
-    # is_active is True, preserving back-compat.
-    active_period = (
-        db.query(RecruitmentPeriod)
-        .filter(RecruitmentPeriod.is_active == True)  # noqa: E712
-        .first()
-    )
-    if not active_period:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Tidak ada periode rekrutasi yang aktif saat ini.",
-        )
+    active_period = assert_submission_phase(db)
 
-    phase = get_current_phase(active_period, datetime.now(timezone.utc))
-    if phase != "SUBMISSION":
-        phase_messages = {
-            "UPCOMING": "Periode rekrutasi belum dibuka.",
-            "EVALUATION": "Masa pendaftaran telah ditutup.",
-            "ANNOUNCEMENT": "Masa pendaftaran telah ditutup.",
-            "CLOSED": "Periode rekrutasi telah berakhir.",
-        }
+    missing_profile_fields = _missing_required_profile_fields(current_user)
+    if missing_profile_fields:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=phase_messages.get(phase, "Pendaftaran tidak diperbolehkan saat ini."),
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "message": "Lengkapi data profil sebelum submit aplikasi.",
+                "missing_fields": missing_profile_fields,
+            },
         )
 
     docs = db.query(Document).filter(Document.application_id == app.id).all()

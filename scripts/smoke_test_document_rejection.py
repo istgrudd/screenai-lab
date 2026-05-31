@@ -118,6 +118,7 @@ def _seed_users_and_period() -> None:
             faculty="Fakultas Informatika",
             major="Data Science",
             year=2023,
+            whatsapp="+6281234567890",
             role=UserRole.CANDIDATE,
             is_active=True,
             email_verified_at=now,
@@ -251,6 +252,18 @@ def main() -> int:
         "rejected document stores reason",
     )
 
+    response = client.get(f"/api/documents/{app_id}", headers=candidate_auth)
+    candidate_docs_before_finalize = response.json()["data"]["documents"]
+    hidden_khs = next(doc for doc in candidate_docs_before_finalize if doc["doc_type"] == "khs")
+    _check(
+        hidden_khs["verification_status"] == "pending",
+        "candidate cannot see rejected status before finalize",
+    )
+    _check(
+        hidden_khs["rejection_reason"] is None,
+        "candidate cannot see rejection reason before finalize",
+    )
+
     for doc in docs:
         if doc["doc_type"] == "khs":
             continue
@@ -278,6 +291,18 @@ def main() -> int:
     _check(rejected_doc["verification_status"] == "rejected", "candidate sees rejected status")
     _check(rejected_doc["rejection_reason"] == REJECTION_REASON, "candidate sees rejection reason")
 
+    db = SessionLocal()
+    try:
+        now = datetime.now(timezone.utc)
+        period = db.query(RecruitmentPeriod).filter(RecruitmentPeriod.name == PERIOD_NAME).first()
+        period.start_date = now - timedelta(days=5)
+        period.submission_end_date = now - timedelta(days=1)
+        period.evaluation_end_date = now + timedelta(days=2)
+        period.end_date = now + timedelta(days=5)
+        db.commit()
+    finally:
+        db.close()
+
     response = client.put(
         f"/api/documents/{cv_doc['id']}/replace",
         headers=candidate_auth,
@@ -302,7 +327,7 @@ def main() -> int:
             )
         },
     )
-    _check(response.status_code == 200, "candidate replaces rejected document")
+    _check(response.status_code == 200, "candidate replaces rejected document after submission phase ended")
     replacement = response.json()["data"]
     _check(replacement["verification_status"] == "pending", "replacement resets status pending")
     _check(replacement["rejection_reason"] is None, "replacement clears rejection reason")

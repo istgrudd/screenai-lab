@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { useLocation } from "react-router-dom";
 import { toast } from "sonner";
-import { ArrowLeft, GraduationCap, Loader2 } from "lucide-react";
+import { AlertTriangle, ArrowLeft, GraduationCap, Loader2 } from "lucide-react";
 
 import {
   Card,
@@ -13,9 +14,13 @@ import {
 import { Button } from "@/components/ui/button";
 import CandidateProfileForm from "@/components/candidate/CandidateProfileForm";
 import { getMyProfile } from "@/lib/api";
-import { POST_SUBMIT_STATUSES } from "@/lib/candidateApplication";
+import {
+  POST_SUBMIT_STATUSES,
+  PROFILE_FIELD_LABELS,
+} from "@/lib/candidateApplication";
 
 export default function EditProfilePage() {
+  const location = useLocation();
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -51,6 +56,7 @@ export default function EditProfilePage() {
   if (!profile) return null;
 
   const locked = POST_SUBMIT_STATUSES.has(profile.application_status);
+  const missingFields = location.state?.missingProfileFields || [];
 
   return (
     <div className="space-y-6">
@@ -82,6 +88,20 @@ export default function EditProfilePage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
+          {missingFields.length > 0 && (
+            <div className="mb-4 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm">
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="mt-0.5 w-4 h-4 text-amber-600" />
+                <div>
+                  <p className="font-medium">Lengkapi profil sebelum lanjut.</p>
+                  <p className="text-muted-foreground mt-1">
+                    Wajib diisi:{" "}
+                    {missingFields.map((field) => PROFILE_FIELD_LABELS[field] || field).join(", ")}.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
           <CandidateProfileForm
             profile={profile}
             locked={locked}

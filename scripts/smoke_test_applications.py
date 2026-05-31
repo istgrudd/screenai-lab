@@ -153,6 +153,7 @@ def main() -> int:
     try:
         user = db.query(User).filter(User.email == TEST_EMAIL).first()
         user.email_verified_at = datetime.now(timezone.utc)
+        user.whatsapp = "+6281234567890"
         db.commit()
     finally:
         db.close()

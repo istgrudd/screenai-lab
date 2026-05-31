@@ -111,6 +111,17 @@ export default function RecruiterEvaluationPage() {
         .length,
     [applications]
   );
+  const pendingReviewSummary = useMemo(
+    () => ({
+      documentReview: applications.filter(
+        (application) => application.status === "document_review"
+      ).length,
+      correctionRequested: applications.filter(
+        (application) => application.status === "correction_requested"
+      ).length,
+    }),
+    [applications]
+  );
   const canReEvaluate = lastSkippedCount > 0 || evaluatedInSelectedDivision > 0;
 
   const runEvaluate = async ({ force = false } = {}) => {
@@ -125,10 +136,16 @@ export default function RecruiterEvaluationPage() {
       const result = await evaluateBatch(selectedDivision, { force });
       const evaluated = result.evaluated_count ?? 0;
       const skipped = result.skipped_count ?? 0;
+      const skippedUnverified = result.skipped_unverified_count ?? 0;
+      const skippedCorrection = result.skipped_correction_count ?? 0;
       setLastSkippedCount(skipped);
 
       if (evaluated === 0 && skipped > 0) {
         toast.info("All candidates in this division were already evaluated.");
+      } else if (evaluated === 0 && (skippedUnverified > 0 || skippedCorrection > 0)) {
+        toast.warning("No verified candidates were ready for evaluation. Pending or correction candidates were skipped.");
+      } else if (evaluated === 0) {
+        toast.info("No verified candidates are ready for evaluation in this division.");
       } else if (skipped > 0) {
         toast.success(
           `Evaluation complete. ${evaluated} candidates evaluated, ${skipped} skipped.`
@@ -231,6 +248,23 @@ export default function RecruiterEvaluationPage() {
           </div>
         </div>
       )}
+
+      {phase === "EVALUATION" &&
+        (pendingReviewSummary.documentReview > 0 ||
+          pendingReviewSummary.correctionRequested > 0) && (
+          <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-4 flex items-start gap-3">
+            <AlertTriangle className="w-5 h-5 text-amber-600 mt-0.5 shrink-0" />
+            <div>
+              <p className="text-sm font-medium text-amber-900 dark:text-amber-200">
+                Some candidates are not evaluation-ready.
+              </p>
+              <p className="text-sm text-amber-800/80 dark:text-amber-200/80 mt-1">
+                {pendingReviewSummary.documentReview} in document review and{" "}
+                {pendingReviewSummary.correctionRequested} in correction will be skipped by evaluation.
+              </p>
+            </div>
+          </div>
+        )}
 
       <Card>
         <CardHeader className="pb-3">

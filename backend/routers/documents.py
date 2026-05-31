@@ -17,7 +17,6 @@ Authorization:
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
@@ -28,7 +27,6 @@ from sqlalchemy.orm import Session
 from backend.database import get_db
 from backend.middleware.auth_middleware import get_current_user, require_role
 from backend.models.application import Application, ApplicationStatus
-from backend.models.audit import AuditLog
 from backend.models.document import Document, DocumentType, DocumentVerificationStatus
 from backend.models.user import User, UserRole
 from backend.services.document_review_service import (
@@ -43,6 +41,7 @@ from backend.utils.file_storage import (
     delete_stored_file,
     save_upload,
 )
+from backend.utils.period_utils import assert_submission_phase
 
 router = APIRouter(prefix="/api/documents", tags=["documents"])
 
@@ -63,12 +62,17 @@ class DocumentReviewRequest(BaseModel):
     reason: str | None = None
 
 
-def _serialize_document(doc: Document) -> dict:
+def _serialize_document(
+    doc: Document,
+    *,
+    viewer: User | None = None,
+    application: Application | None = None,
+) -> dict:
     doc_type_value = (
         doc.doc_type.value if hasattr(doc.doc_type, "value") else str(doc.doc_type)
     )
     verification_status = get_document_verification_status(doc)
-    return {
+    payload = {
         "id": doc.id,
         "application_id": doc.application_id,
         "doc_type": doc_type_value,
@@ -80,7 +84,28 @@ def _serialize_document(doc: Document) -> dict:
         "rejection_reason": doc.rejection_reason,
         "reviewed_at": doc.reviewed_at.isoformat() if doc.reviewed_at else None,
         "reviewed_by_id": doc.reviewed_by_id,
+        "review_visibility": "visible",
     }
+
+    if (
+        viewer is not None
+        and viewer.role == UserRole.CANDIDATE
+        and application is not None
+        and application.status
+        in {ApplicationStatus.SUBMITTED, ApplicationStatus.DOCUMENT_REVIEW}
+    ):
+        payload.update(
+            {
+                "is_verified": False,
+                "verification_status": DocumentVerificationStatus.PENDING.value,
+                "rejection_reason": None,
+                "reviewed_at": None,
+                "reviewed_by_id": None,
+                "review_visibility": "hidden_until_finalized",
+            }
+        )
+
+    return payload
 
 
 def _assert_draft(app: Application) -> None:
@@ -166,6 +191,7 @@ def upload_document(
         return {"success": True, "data": _serialize_document(updated), "error": None}
 
     _assert_draft(app)
+    assert_submission_phase(db)
 
     file_path, size_bytes = save_upload(app.id, doc_type, file)
     original_name = (file.filename or f"{doc_type.value}").strip() or f"{doc_type.value}"
@@ -229,6 +255,7 @@ def replace_document(
         return {"success": True, "data": _serialize_document(updated), "error": None}
 
     _assert_draft(app)
+    assert_submission_phase(db)
 
     # Remove old disk file, then save the new one.
     delete_stored_file(doc.file_path)
@@ -273,7 +300,10 @@ def list_documents(
         "success": True,
         "data": {
             "application_id": application_id,
-            "documents": [_serialize_document(d) for d in docs],
+            "documents": [
+                _serialize_document(d, viewer=current_user, application=app)
+                for d in docs
+            ],
             "required_types": [dt.value for dt in DocumentType],
             "limits": {
                 dt.value: {
@@ -369,36 +399,17 @@ def verify_document(
     if not app:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Application missing")
 
-    old_value = doc.is_verified
-    doc.is_verified = bool(payload.is_verified)
-    doc.verification_status = (
-        DocumentVerificationStatus.VERIFIED.value
-        if doc.is_verified
-        else DocumentVerificationStatus.PENDING.value
-    )
-    if doc.is_verified:
-        doc.rejection_reason = None
-        doc.reviewed_at = datetime.now(timezone.utc)
-        doc.reviewed_by_id = current_user.id
-    else:
-        doc.rejection_reason = None
-        doc.reviewed_at = None
-        doc.reviewed_by_id = None
-
-    doc_type_value = (
-        doc.doc_type.value if hasattr(doc.doc_type, "value") else str(doc.doc_type)
-    )
-    db.add(
-        AuditLog(
-            recruiter_id=current_user.id,
-            candidate_id=app.user_id,
-            action_type="document_verification",
-            old_value=str(old_value),
-            new_value=str(doc.is_verified),
-            reason=f"doc_id={doc.id}; doc_type={doc_type_value}",
+    if not payload.is_verified:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Use PUT /api/documents/{doc_id}/review instead.",
         )
-    )
 
-    db.commit()
-    db.refresh(doc)
+    doc = review_document_service(
+        db,
+        doc_id=doc_id,
+        review_status=DocumentVerificationStatus.VERIFIED.value,
+        reason=None,
+        reviewer=current_user,
+    )
     return {"success": True, "data": _serialize_document(doc), "error": None}

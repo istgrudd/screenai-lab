@@ -1,15 +1,15 @@
 """RecruitmentPeriod router — Phase 2B (Task 11).
 
 Endpoints:
-    POST  /api/periods            — Super Admin; create a period (auto-active)
+    POST  /api/periods            — Super Admin; create an active period when none is active
     GET   /api/periods/active     — Public; returns the active period or 404
     GET   /api/periods            — Super Admin; list all periods + app counts
     PUT   /api/periods/{id}       — Super Admin; edit name/end_date/threshold/is_active
     PUT   /api/periods/{id}/close — Super Admin; close a period early
 
-Single-active-period invariant is enforced application-side: every write
-that flips ``is_active`` to True deactivates all other periods inside the
-same transaction.
+Single-active-period invariant is enforced application-side: creating or
+activating a period is rejected when another period is already active. Closing
+the current active period must be an explicit action.
 """
 
 from __future__ import annotations
@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 from backend.database import get_db
 from backend.middleware.auth_middleware import get_current_user, require_role
 from backend.models.application import Application, ApplicationStatus, Division
+from backend.models.audit import AuditLog
 from backend.models.candidate import Candidate
 from backend.models.period import RecruitmentPeriod
 from backend.models.user import User, UserRole
@@ -31,6 +32,10 @@ router = APIRouter(prefix="/api/periods", tags=["periods"])
 
 _super_admin_only = require_role(UserRole.SUPER_ADMIN)
 _recruiter_or_admin = require_role(UserRole.RECRUITER, UserRole.SUPER_ADMIN)
+_ACTIVE_PERIOD_CONFLICT_MESSAGE = (
+    "Masih ada periode rekrutasi aktif. Tutup atau selesaikan periode aktif "
+    "terlebih dahulu sebelum membuat periode baru."
+)
 
 
 # ---------------------------------------------------------------------------
@@ -136,12 +141,29 @@ def _phases_dict(p: RecruitmentPeriod) -> dict:
     }
 
 
-def _deactivate_others(db: Session, exclude_id: int | None = None) -> None:
-    """Set is_active=False on all periods except the optional ``exclude_id``."""
+def _active_period_query(db: Session, exclude_id: int | None = None):
     q = db.query(RecruitmentPeriod).filter(RecruitmentPeriod.is_active == True)  # noqa: E712
     if exclude_id is not None:
         q = q.filter(RecruitmentPeriod.id != exclude_id)
-    q.update({RecruitmentPeriod.is_active: False}, synchronize_session=False)
+    return q
+
+
+def _active_period_other(
+    db: Session,
+    exclude_id: int | None = None,
+) -> RecruitmentPeriod | None:
+    return _active_period_query(db, exclude_id=exclude_id).first()
+
+
+def _reject_if_active_period_exists(
+    db: Session,
+    exclude_id: int | None = None,
+) -> None:
+    if _active_period_other(db, exclude_id=exclude_id) is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=_ACTIVE_PERIOD_CONFLICT_MESSAGE,
+        )
 
 
 def _get_period_or_404(db: Session, period_id: int) -> RecruitmentPeriod:
@@ -241,7 +263,7 @@ def create_period(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Create a new RecruitmentPeriod and make it the only active one."""
+    """Create a new active RecruitmentPeriod when no other period is active."""
     start = _ensure_aware(payload.start_date)
     end = _ensure_aware(payload.end_date)
     sub_end = (
@@ -262,9 +284,7 @@ def create_period(
             detail="start_date harus di masa depan",
         )
 
-    # Single-active invariant: deactivate every existing active period
-    # before inserting the new active one, in the same transaction.
-    _deactivate_others(db)
+    _reject_if_active_period_exists(db)
 
     period = RecruitmentPeriod(
         name=payload.name.strip(),
@@ -388,7 +408,8 @@ def update_period(
     """Edit a period — name, end_date, phase boundaries, threshold_n, is_active.
 
     ``start_date`` is intentionally not editable after creation.
-    Flipping ``is_active`` to True deactivates every other period.
+    Flipping ``is_active`` to True is allowed only when no other period is
+    currently active.
     Phase boundaries (``submission_end_date``, ``evaluation_end_date``,
     ``end_date``) are validated together so the four-point ordering
     ``start < submission_end < evaluation_end < end`` always holds.
@@ -434,7 +455,7 @@ def update_period(
         period.evaluation_end_date = incoming_eval
 
     if payload.is_active is True:
-        _deactivate_others(db, exclude_id=period.id)
+        _reject_if_active_period_exists(db, exclude_id=period.id)
         period.is_active = True
     elif payload.is_active is False:
         period.is_active = False
@@ -451,7 +472,11 @@ def update_period(
 
 
 @router.put("/{period_id}/close", dependencies=[Depends(_super_admin_only)])
-def close_period(period_id: int, db: Session = Depends(get_db)):
+def close_period(
+    period_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Close a period early — sets is_active=False and end_date=now."""
     period = _get_period_or_404(db, period_id)
     if not period.is_active:
@@ -460,6 +485,16 @@ def close_period(period_id: int, db: Session = Depends(get_db)):
             detail="Periode sudah ditutup",
         )
 
+    db.add(
+        AuditLog(
+            recruiter_id=current_user.id,
+            candidate_id=None,
+            action_type="period_closed",
+            old_value="active",
+            new_value="closed",
+            reason=f"period_id={period.id}; name={period.name}",
+        )
+    )
     period.is_active = False
     period.end_date = _now_utc()
     db.commit()

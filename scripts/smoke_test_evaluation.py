@@ -32,6 +32,7 @@ import fitz
 from fastapi.testclient import TestClient
 
 import backend.routers.applications as applications_router
+import backend.services.evaluation_service as evaluation_service
 from backend.config import settings
 from backend.database import SessionLocal
 from backend.main import app as fastapi_app
@@ -111,6 +112,31 @@ def _fake_run_submit_anonymization(application_id: int, session_factory) -> None
         db.close()
 
 
+async def _fake_evaluate_candidate(*args, **kwargs) -> dict:
+    return {
+        "composite_score": 82.0,
+        "profile_summary": "Smoke-test profile summary.",
+        "dimension_scores": [
+            {
+                "dimension": "Technical Skills",
+                "score": 84,
+                "weight": 0.5,
+                "weighted_score": 42.0,
+                "justification": "Strong technical evidence.",
+                "evidence": ["CV project"],
+            },
+            {
+                "dimension": "Soft Skills",
+                "score": 80,
+                "weight": 0.5,
+                "weighted_score": 40.0,
+                "justification": "Clear motivation.",
+                "evidence": ["Motivation letter"],
+            },
+        ],
+    }
+
+
 def _cleanup() -> None:
     """Remove smoke test data so the script is rerunnable."""
     db = SessionLocal()
@@ -187,6 +213,7 @@ def main() -> int:
     _deactivate_all_periods()
     NER_CALLS.clear()
     applications_router.run_submit_anonymization = _fake_run_submit_anonymization
+    evaluation_service.evaluate_candidate = _fake_evaluate_candidate
     failures = 0
     client = TestClient(fastapi_app)
 
@@ -276,6 +303,7 @@ def main() -> int:
     try:
         user = db.query(User).filter(User.email == CAND_EMAIL).first()
         user.email_verified_at = datetime.now(timezone.utc)
+        user.whatsapp = "+6281234567890"
         db.commit()
     finally:
         db.close()
@@ -467,6 +495,37 @@ def main() -> int:
         print(f"     -> eval returned {r.status_code} (LLM likely unavailable, acceptable)")
 
     # =====================================================================
+    db = SessionLocal()
+    try:
+        app = db.query(Application).filter(Application.id == app_id).first()
+        failures += _assert(
+            app.status == ApplicationStatus.SCREENING,
+            "successful evaluation changes status to screening",
+        )
+    finally:
+        db.close()
+
+    r = client.post(
+        "/api/recruiter/evaluate/batch",
+        headers=rec_auth,
+        json={"division": "big_data", "application_ids": [app_id], "force": False},
+    )
+    failures += _assert(r.status_code == 200, "normal re-run request -> 200")
+    if r.status_code == 200:
+        body = r.json()
+        failures += _assert(body["evaluated_count"] == 0, "normal re-run skips screening app")
+        failures += _assert(body["skipped_count"] >= 1, "normal re-run reports skipped scored app")
+
+    r = client.post(
+        "/api/recruiter/evaluate/batch",
+        headers=rec_auth,
+        json={"division": "big_data", "application_ids": [app_id], "force": True},
+    )
+    failures += _assert(r.status_code == 200, "force re-evaluate request -> 200")
+    if r.status_code == 200:
+        body = r.json()
+        failures += _assert(body["evaluated_count"] == 1, "force=true re-evaluates screening app")
+
     # TEST 3: Announcements
     # =====================================================================
 

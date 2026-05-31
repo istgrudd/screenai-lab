@@ -124,6 +124,9 @@ async def evaluate_batch(
 
     warning = _phase_warning(db)
     skipped_count = int(result.pop("skipped", 0))
+    skipped_already_scored_count = int(result.pop("skipped_already_scored_count", 0))
+    skipped_unverified_count = int(result.pop("skipped_unverified_count", 0))
+    skipped_correction_count = int(result.pop("skipped_correction_count", 0))
     evaluated_count = int(result.get("queued", 0))
 
     return {
@@ -131,6 +134,9 @@ async def evaluate_batch(
         "data": result,
         "evaluated_count": evaluated_count,
         "skipped_count": skipped_count,
+        "skipped_already_scored_count": skipped_already_scored_count,
+        "skipped_unverified_count": skipped_unverified_count,
+        "skipped_correction_count": skipped_correction_count,
         "warning": warning,
         "error": None,
     }

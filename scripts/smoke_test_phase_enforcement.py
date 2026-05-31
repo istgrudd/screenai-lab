@@ -269,25 +269,38 @@ def main() -> int:
     # ------------------------------------------------------------------
     # Setup candidate, draft application, six docs.
     # ------------------------------------------------------------------
+    db = SessionLocal()
+    try:
+        candidate = User(
+            email=CAND_EMAIL,
+            password_hash=hash_password(TEST_PASSWORD),
+            full_name="Phase Candidate",
+            nim="1031234500001",
+            faculty="Fakultas Informatika",
+            major="Informatika",
+            year=2023,
+            whatsapp="+6281234500001",
+            role=UserRole.CANDIDATE,
+            is_active=True,
+            email_verified_at=datetime.now(timezone.utc),
+        )
+        db.add(candidate)
+        db.commit()
+    finally:
+        db.close()
+    cand_auth = _login(CAND_EMAIL)
+
+    _shift_period(period_id, phase="CLOSED")
     r = client.post(
-        "/api/auth/register",
-        json={
-            "email": CAND_EMAIL,
-            "password": TEST_PASSWORD,
-            "full_name": "Phase Candidate",
-            "nim": "1031234500001",
-            "faculty": "Fakultas Informatika",
-            "major": "Informatika",
-            "year": 2023,
-        },
+        "/api/applications",
+        headers=cand_auth,
+        json={"division": "big_data"},
     )
     failures += _assert(
-        r.status_code == 201,
-        f"setup: candidate register -> 201 (got {r.status_code})",
+        r.status_code == 403,
+        f"create application outside SUBMISSION -> 403 (got {r.status_code})",
     )
-    cand_auth = {
-        "Authorization": f"Bearer {r.json()['data']['access_token']}"
-    }
+    _shift_period(period_id, phase="SUBMISSION")
 
     r = client.post(
         "/api/applications",
@@ -299,6 +312,18 @@ def main() -> int:
         f"setup: create application -> 201 (got {r.status_code})",
     )
     app_id = r.json()["data"]["id"]
+
+    _shift_period(period_id, phase="EVALUATION")
+    r = client.post(
+        "/api/documents/upload/cv",
+        headers=cand_auth,
+        files={"file": ("cv.pdf", io.BytesIO(_minimal_pdf()), "application/pdf")},
+    )
+    failures += _assert(
+        r.status_code == 403,
+        f"upload draft document outside SUBMISSION -> 403 (got {r.status_code})",
+    )
+    _shift_period(period_id, phase="SUBMISSION")
 
     for dt in ("cv", "khs", "ktm", "motivation_letter", "swot", "supporting_docs"):
         r = client.post(

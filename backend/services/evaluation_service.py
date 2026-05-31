@@ -67,11 +67,12 @@ async def run_evaluation_pipeline(
         application_ids: Specific application IDs to evaluate, or None for all
             eligible applications in the division.
         db: Database session.
-        force: When True, re-evaluate already-scored candidates. Status filter
-            (SUBMITTED only) always applies regardless.
+        force: When True, re-evaluate eligible already-scored candidates in
+            VERIFIED or SCREENING status. Final, draft, document-review, and
+            correction statuses are always skipped.
 
     Returns:
-        { queued: int, results: [...], errors: [...], skipped: int }
+        { queued: int, results: [...], errors: [...], skipped: int, ...counters }
     """
     # --- 1. Find the rubric for the division ---
     rubric = (
@@ -102,43 +103,78 @@ async def run_evaluation_pipeline(
     except ValueError:
         raise ValueError(f"Invalid division '{division}'")
 
-    # Task 13.5.1 — SUBMITTED-only status filter always applies. Non-SUBMITTED
-    # applications (draft, screening, announced_*) are never re-evaluated.
-    q = db.query(Application).filter(
-        Application.division == division_enum,
-        Application.status == ApplicationStatus.VERIFIED,
-    )
+    # Phase 7.5 status filter: VERIFIED normally, VERIFIED + SCREENING with force.
+    # applications outside the eligible set are never evaluated.
+    eligible_statuses = [ApplicationStatus.VERIFIED]
+    if force:
+        eligible_statuses.append(ApplicationStatus.SCREENING)
+
+    q = db.query(Application).filter(Application.division == division_enum)
     if application_ids:
         q = q.filter(Application.id.in_(application_ids))
 
-    candidate_apps = q.all()
+    scoped_apps = q.all()
+    candidate_apps = [
+        app for app in scoped_apps if app.status in eligible_statuses
+    ]
 
     # Task 13.5.1 — when force=False, skip applications whose Candidate row
     # already has a stored composite_score. user_id links Application →
     # Candidate (one Candidate per user, see _ensure_candidate).
-    applications: list[Application] = []
-    skipped = 0
-    if force or not candidate_apps:
-        applications = candidate_apps
-    else:
-        user_ids = [a.user_id for a in candidate_apps]
+    user_ids_in_scope = [app.user_id for app in scoped_apps]
+    scored_user_ids = set()
+    if user_ids_in_scope:
         scored_user_ids = {
             uid
             for (uid,) in db.query(Candidate.user_id)
             .filter(
-                Candidate.user_id.in_(user_ids),
+                Candidate.user_id.in_(user_ids_in_scope),
                 Candidate.composite_score.isnot(None),
             )
             .all()
         }
-        for app in candidate_apps:
-            if app.user_id in scored_user_ids:
-                skipped += 1
-            else:
-                applications.append(app)
+
+    skipped_correction_count = sum(
+        1 for app in scoped_apps if app.status == ApplicationStatus.CORRECTION_REQUESTED
+    )
+    skipped_unverified_count = sum(
+        1
+        for app in scoped_apps
+        if app.status
+        in {
+            ApplicationStatus.DRAFT,
+            ApplicationStatus.SUBMITTED,
+            ApplicationStatus.DOCUMENT_REVIEW,
+            ApplicationStatus.CANCELLED,
+        }
+    )
+    skipped_already_scored_count = 0
+    if not force:
+        skipped_already_scored_count = sum(
+            1
+            for app in scoped_apps
+            if app.user_id in scored_user_ids
+            and app.status in {ApplicationStatus.VERIFIED, ApplicationStatus.SCREENING}
+        )
+
+    applications: list[Application] = []
+    skipped = skipped_already_scored_count
+    if force:
+        applications = candidate_apps
+    else:
+        applications = [
+            app for app in candidate_apps if app.user_id not in scored_user_ids
+        ]
+
+    counters = {
+        "skipped": skipped,
+        "skipped_already_scored_count": skipped_already_scored_count,
+        "skipped_unverified_count": skipped_unverified_count,
+        "skipped_correction_count": skipped_correction_count,
+    }
 
     if not applications:
-        return {"queued": 0, "results": [], "errors": [], "skipped": skipped}
+        return {"queued": 0, "results": [], "errors": [], **counters}
 
     # Bounded-concurrency evaluation. The SQLAlchemy Session is sync and DB
     # work happens between awaits; the DeepSeek request itself is awaitable,
@@ -175,7 +211,7 @@ async def run_evaluation_pipeline(
         "queued": len(applications),
         "results": results,
         "errors": errors,
-        "skipped": skipped,
+        **counters,
     }
 
 
@@ -189,7 +225,7 @@ async def _evaluate_one(
     db: Session,
 ) -> dict:
     """Run the full pipeline for one application."""
-    if app.status != ApplicationStatus.VERIFIED:
+    if app.status not in {ApplicationStatus.VERIFIED, ApplicationStatus.SCREENING}:
         app_status = app.status.value if hasattr(app.status, "value") else str(app.status)
         raise ValueError(
             f"Application {app.id} is not eligible for evaluation while status is '{app_status}'"

@@ -533,6 +533,9 @@ export async function evaluateBatch(division, opts = {}) {
     _warning: json.warning ?? null,
     evaluated_count: json.evaluated_count ?? 0,
     skipped_count: json.skipped_count ?? 0,
+    skipped_already_scored_count: json.skipped_already_scored_count ?? 0,
+    skipped_unverified_count: json.skipped_unverified_count ?? 0,
+    skipped_correction_count: json.skipped_correction_count ?? 0,
   };
 }
 

@@ -60,6 +60,26 @@ export const STATUS_LABELS = {
   cancelled: "Cancelled",
 };
 
+export const REQUIRED_PROFILE_FIELDS = [
+  "full_name",
+  "email",
+  "nim",
+  "faculty",
+  "major",
+  "year",
+  "whatsapp",
+];
+
+export const PROFILE_FIELD_LABELS = {
+  full_name: "Nama lengkap",
+  email: "Email",
+  nim: "NIM",
+  faculty: "Fakultas",
+  major: "Jurusan",
+  year: "Angkatan",
+  whatsapp: "Nomor WhatsApp",
+};
+
 export function formatDivision(division) {
   if (!division) return "-";
   return String(division)
@@ -108,6 +128,34 @@ export function isSubmittedOrLater(applicationOrStatus) {
 
 export function isAnnouncedStatus(status) {
   return status === "announced_pass" || status === "announced_fail";
+}
+
+export function missingRequiredProfileFields(profile) {
+  if (!profile) return REQUIRED_PROFILE_FIELDS;
+  return REQUIRED_PROFILE_FIELDS.filter((field) => {
+    const value = profile[field];
+    if (value == null) return true;
+    return typeof value === "string" ? value.trim() === "" : false;
+  });
+}
+
+export function isCandidateProfileComplete(profile) {
+  return missingRequiredProfileFields(profile).length === 0;
+}
+
+export function isSubmissionPhase(period) {
+  return period?.current_phase === "SUBMISSION";
+}
+
+export function submissionPhaseMessage(period) {
+  if (!period) return "Tidak ada periode rekrutasi aktif saat ini.";
+  const phase = period.current_phase;
+  if (phase === "UPCOMING") return "Periode rekrutasi belum dibuka.";
+  if (phase === "EVALUATION" || phase === "ANNOUNCEMENT") {
+    return "Masa pendaftaran telah ditutup.";
+  }
+  if (phase === "CLOSED") return "Periode rekrutasi telah berakhir.";
+  return "Pendaftaran tidak tersedia saat ini.";
 }
 
 export function documentsByType(documents = []) {

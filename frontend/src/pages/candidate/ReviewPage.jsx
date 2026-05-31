@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import {
   AlertTriangle,
@@ -21,11 +21,18 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 
 import {
-  getMe,
+  getActivePeriod,
   getMyApplication,
+  getMyProfile,
   listApplicationDocuments,
   submitApplication,
 } from "@/lib/api";
+import {
+  isSubmissionPhase,
+  missingRequiredProfileFields,
+  PROFILE_FIELD_LABELS,
+  submissionPhaseMessage,
+} from "@/lib/candidateApplication";
 
 const DOC_LABELS = {
   cv: "Curriculum Vitae",
@@ -56,6 +63,7 @@ export default function ReviewPage() {
   const [user, setUser] = useState(null);
   const [application, setApplication] = useState(null);
   const [documents, setDocuments] = useState([]);
+  const [activePeriod, setActivePeriod] = useState(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
 
@@ -67,7 +75,7 @@ export default function ReviewPage() {
     let cancelled = false;
     async function load() {
       try {
-        const [me, app] = await Promise.all([getMe(), getMyApplication()]);
+        const [me, app] = await Promise.all([getMyProfile(), getMyApplication()]);
         if (cancelled) return;
         setUser(me);
         setApplication(app);
@@ -75,6 +83,12 @@ export default function ReviewPage() {
           // Already submitted — bounce to the confirmation page.
           navigate("/application/status", { replace: true });
           return;
+        }
+        try {
+          const period = await getActivePeriod();
+          if (!cancelled) setActivePeriod(period);
+        } catch {
+          if (!cancelled) setActivePeriod(null);
         }
         const { documents: docs } = await listApplicationDocuments(app.id);
         if (!cancelled) setDocuments(docs);
@@ -97,9 +111,12 @@ export default function ReviewPage() {
   const allAcked = ackAccurate && ackIrreversible && ackAuthentic;
   const docsByType = new Map(documents.map((d) => [d.doc_type, d]));
   const allDocsPresent = REQUIRED_TYPES.every((t) => docsByType.has(t));
+  const missingProfile = missingRequiredProfileFields(user);
+  const profileComplete = missingProfile.length === 0;
+  const submissionOpen = isSubmissionPhase(activePeriod);
 
   const handleSubmit = async () => {
-    if (!allAcked || !allDocsPresent) return;
+    if (!allAcked || !allDocsPresent || !profileComplete || !submissionOpen) return;
     setSubmitting(true);
     try {
       await submitApplication(application.id);
@@ -158,6 +175,7 @@ export default function ReviewPage() {
           <Field label="Full name" value={user.full_name} />
           <Field label="NIM" value={user.nim} mono />
           <Field label="Email" value={user.email} />
+          <Field label="WhatsApp" value={user.whatsapp} />
           <Field label="Angkatan" value={user.year} />
           <Field label="Fakultas" value={user.faculty} />
           <Field label="Jurusan" value={user.major} />
@@ -169,6 +187,40 @@ export default function ReviewPage() {
           <Field label="Status" value={application.status} />
         </CardContent>
       </Card>
+
+      {!profileComplete && (
+        <Card className="border-amber-500/40 bg-amber-500/10">
+          <CardContent className="py-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+              <div>
+                <p className="text-sm font-medium">Profil belum lengkap</p>
+                <p className="text-sm text-muted-foreground mt-1">
+                  Wajib diisi:{" "}
+                  {missingProfile.map((field) => PROFILE_FIELD_LABELS[field] || field).join(", ")}.
+                </p>
+              </div>
+            </div>
+            <Button asChild variant="outline">
+              <Link to="/profile/edit">Edit Profile</Link>
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
+      {!submissionOpen && (
+        <Card className="border-amber-500/40 bg-amber-500/10">
+          <CardContent className="py-4 flex items-start gap-3">
+            <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+            <div>
+              <p className="text-sm font-medium">Submit belum tersedia</p>
+              <p className="text-sm text-muted-foreground mt-1">
+                {submissionPhaseMessage(activePeriod)}
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Documents list */}
       <Card>
@@ -269,7 +321,13 @@ export default function ReviewPage() {
 
             <Button
               onClick={handleSubmit}
-              disabled={!allAcked || !allDocsPresent || submitting}
+              disabled={
+                !allAcked ||
+                !allDocsPresent ||
+                !profileComplete ||
+                !submissionOpen ||
+                submitting
+              }
               className="gap-2"
             >
               {submitting ? (

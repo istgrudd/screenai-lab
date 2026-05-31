@@ -19,11 +19,21 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Literal, TYPE_CHECKING
 
+from fastapi import HTTPException, status
+from sqlalchemy.orm import Session
+
 if TYPE_CHECKING:
     from backend.models.period import RecruitmentPeriod
 
 
 PhaseLiteral = Literal["UPCOMING", "SUBMISSION", "EVALUATION", "ANNOUNCEMENT", "CLOSED"]
+
+_SUBMISSION_PHASE_MESSAGES = {
+    "UPCOMING": "Periode rekrutasi belum dibuka.",
+    "EVALUATION": "Masa pendaftaran telah ditutup.",
+    "ANNOUNCEMENT": "Masa pendaftaran telah ditutup.",
+    "CLOSED": "Periode rekrutasi telah berakhir.",
+}
 
 
 def _ensure_aware(dt: datetime | None) -> datetime | None:
@@ -60,3 +70,36 @@ def get_current_phase(
     if now_aware < end:
         return "ANNOUNCEMENT"
     return "CLOSED"
+
+
+def get_active_period_or_403(db: Session) -> "RecruitmentPeriod":
+    """Return the active period or reject candidate workflow mutations."""
+    from backend.models.period import RecruitmentPeriod
+
+    period = (
+        db.query(RecruitmentPeriod)
+        .filter(RecruitmentPeriod.is_active == True)  # noqa: E712
+        .order_by(RecruitmentPeriod.created_at.desc())
+        .first()
+    )
+    if period is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Tidak ada periode rekrutasi yang aktif saat ini.",
+        )
+    return period
+
+
+def assert_submission_phase(db: Session) -> "RecruitmentPeriod":
+    """Require an active recruitment period currently in SUBMISSION phase."""
+    period = get_active_period_or_403(db)
+    phase = get_current_phase(period, datetime.now(timezone.utc))
+    if phase != "SUBMISSION":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=_SUBMISSION_PHASE_MESSAGES.get(
+                phase,
+                "Pendaftaran tidak diperbolehkan saat ini.",
+            ),
+        )
+    return period

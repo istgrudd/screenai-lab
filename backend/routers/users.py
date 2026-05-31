@@ -39,6 +39,8 @@ _super_admin_only = require_role(UserRole.SUPER_ADMIN)
 
 # Mirror the candidate NIM rule from auth.py — at least 10 numeric digits.
 _NIM_PATTERN = re.compile(r"^\d{10,}$")
+_WHATSAPP_ALLOWED_CHARS = re.compile(r"^\+?[\d\s().-]+$")
+_WHATSAPP_ERROR = "Nomor WhatsApp tidak valid. Gunakan format 08..., 628..., atau +628..."
 
 # Status set that locks academic identity fields (Task 13.4.2). Once a
 # candidate has submitted, they cannot change their NIM, division, etc.
@@ -149,6 +151,28 @@ class ProfileUpdate(BaseModel):
         if not _NIM_PATTERN.match(v):
             raise ValueError("NIM must be a numeric string of at least 10 digits")
         return v
+
+    @field_validator("whatsapp")
+    @classmethod
+    def _validate_whatsapp(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        trimmed = v.strip()
+        if not trimmed:
+            return ""
+        if not _WHATSAPP_ALLOWED_CHARS.match(trimmed):
+            raise ValueError(_WHATSAPP_ERROR)
+        normalized = re.sub(r"[\s().-]", "", trimmed)
+        digits = normalized[1:] if normalized.startswith("+") else normalized
+        if not digits.isdigit() or not (10 <= len(digits) <= 15):
+            raise ValueError(_WHATSAPP_ERROR)
+        if not (
+            re.match(r"^08\d+$", normalized)
+            or re.match(r"^628\d+$", normalized)
+            or re.match(r"^\+628\d+$", normalized)
+        ):
+            raise ValueError(_WHATSAPP_ERROR)
+        return trimmed
 
 
 # ---------------------------------------------------------------------------

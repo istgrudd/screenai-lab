@@ -145,6 +145,7 @@ def _seed_users_and_period() -> None:
             faculty="Fakultas Informatika",
             major="Data Science",
             year=2023,
+            whatsapp="+6281234567890",
             role=UserRole.CANDIDATE,
             is_active=True,
             email_verified_at=now,
@@ -289,6 +290,13 @@ def main() -> int:
     )
     _check(response.status_code == 403, "candidate cannot review document")
 
+    response = client.put(
+        f"/api/documents/{first_doc_id}/verify",
+        headers=candidate_auth,
+        json={"is_verified": True},
+    )
+    _check(response.status_code == 403, "candidate cannot access legacy verify endpoint")
+
     response = client.post(
         "/api/recruiter/evaluate/batch",
         headers=recruiter_auth,
@@ -300,7 +308,32 @@ def main() -> int:
         "evaluation excludes document_review application",
     )
 
+    response = client.put(
+        f"/api/documents/{first_doc_id}/review",
+        headers=recruiter_auth,
+        json={"status": "verified"},
+    )
+    _check(response.status_code == 200, "recruiter verifies first document before finalize")
+
+    response = client.get(f"/api/documents/{app_id}", headers=candidate_auth)
+    candidate_docs = response.json()["data"]["documents"]
+    first_candidate_doc = next(doc for doc in candidate_docs if doc["id"] == first_doc_id)
+    _check(
+        first_candidate_doc["verification_status"] == "pending",
+        "candidate cannot see verified status before finalize",
+    )
+    _check(
+        first_candidate_doc["review_visibility"] == "hidden_until_finalized",
+        "candidate document review visibility is hidden before finalize",
+    )
+    _check(
+        first_candidate_doc["reviewed_at"] is None and first_candidate_doc["reviewed_by_id"] is None,
+        "candidate cannot see reviewer metadata before finalize",
+    )
+
     for doc in docs:
+        if doc["id"] == first_doc_id:
+            continue
         response = client.put(
             f"/api/documents/{doc['id']}/review",
             headers=recruiter_auth,
@@ -321,6 +354,23 @@ def main() -> int:
     _check(body["status"] == "verified", "application status becomes verified")
     _check(body["anonymization_queued"] is True, "final approval queues NER")
     _check(NER_CALLS == [app_id], "NER runs after verification")
+
+    response = client.get(f"/api/documents/{app_id}", headers=candidate_auth)
+    finalized_docs = response.json()["data"]["documents"]
+    _check(
+        all(doc["verification_status"] == "verified" for doc in finalized_docs),
+        "candidate sees verified document state after finalize",
+    )
+
+    response = client.put(
+        f"/api/documents/{first_doc_id}/verify",
+        headers=recruiter_auth,
+        json={"is_verified": True},
+    )
+    _check(
+        response.status_code == 409,
+        "legacy verify cannot bypass invalid finalized application status",
+    )
 
     db = SessionLocal()
     try:

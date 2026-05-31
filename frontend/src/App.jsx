@@ -51,8 +51,11 @@ import {
   isAuthenticated,
   ROLES,
 } from "@/lib/auth";
-import { getMyApplication } from "@/lib/api";
-import { isNotFoundError } from "@/lib/candidateApplication";
+import { getMyApplication, getMyProfile } from "@/lib/api";
+import {
+  isNotFoundError,
+  missingRequiredProfileFields,
+} from "@/lib/candidateApplication";
 
 function AuthenticatedShell({ children }) {
   return (
@@ -70,6 +73,59 @@ function ProtectedShell({ roles, children }) {
     <AuthenticatedShell>
       <ProtectedRoute roles={roles}>{children}</ProtectedRoute>
     </AuthenticatedShell>
+  );
+}
+
+function CandidateProfileGuard({ children }) {
+  const location = useLocation();
+  const [state, setState] = useState({ loading: true, missing: [] });
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadProfile() {
+      if (location.pathname === "/profile/edit") {
+        setState({ loading: false, missing: [] });
+        return;
+      }
+      try {
+        const profile = await getMyProfile();
+        if (!cancelled) {
+          setState({
+            loading: false,
+            missing: missingRequiredProfileFields(profile),
+          });
+        }
+      } catch {
+        if (!cancelled) setState({ loading: false, missing: [] });
+      }
+    }
+
+    setState({ loading: true, missing: [] });
+    loadProfile();
+    return () => {
+      cancelled = true;
+    };
+  }, [location.pathname]);
+
+  if (state.loading) return <RouteLoader />;
+  if (state.missing.length > 0) {
+    return (
+      <Navigate
+        to="/profile/edit"
+        replace
+        state={{ from: location, missingProfileFields: state.missing }}
+      />
+    );
+  }
+  return children;
+}
+
+function CandidateShell({ children }) {
+  return (
+    <ProtectedShell roles={CANDIDATE}>
+      <CandidateProfileGuard>{children}</CandidateProfileGuard>
+    </ProtectedShell>
   );
 }
 
@@ -153,17 +209,17 @@ export default function App() {
           <Route
             path="/dashboard"
             element={
-              <ProtectedShell roles={CANDIDATE}>
+              <CandidateShell>
                 <CandidateDashboardPage />
-              </ProtectedShell>
+              </CandidateShell>
             }
           />
           <Route
             path="/profile"
             element={
-              <ProtectedShell roles={CANDIDATE}>
+              <CandidateShell>
                 <CandidateProfilePage />
-              </ProtectedShell>
+              </CandidateShell>
             }
           />
           <Route
@@ -177,81 +233,81 @@ export default function App() {
           <Route
             path="/application"
             element={
-              <ProtectedShell roles={CANDIDATE}>
+              <CandidateShell>
                 <ApplicationOverviewPage />
-              </ProtectedShell>
+              </CandidateShell>
             }
           />
           <Route
             path="/application/start"
             element={
-              <ProtectedShell roles={CANDIDATE}>
+              <CandidateShell>
                 <StartApplicationPage />
-              </ProtectedShell>
+              </CandidateShell>
             }
           />
           <Route
             path="/documents"
             element={
-              <ProtectedShell roles={CANDIDATE}>
+              <CandidateShell>
                 <DocumentsPage />
-              </ProtectedShell>
+              </CandidateShell>
             }
           />
           <Route
             path="/application/review"
             element={
-              <ProtectedShell roles={CANDIDATE}>
+              <CandidateShell>
                 <ReviewPage />
-              </ProtectedShell>
+              </CandidateShell>
             }
           />
           <Route
             path="/application/status"
             element={
-              <ProtectedShell roles={CANDIDATE}>
+              <CandidateShell>
                 <ApplicationStatusPage />
-              </ProtectedShell>
+              </CandidateShell>
             }
           />
           <Route
             path="/review"
             element={
-              <ProtectedShell roles={CANDIDATE}>
+              <CandidateShell>
                 <LegacyReviewRedirect />
-              </ProtectedShell>
+              </CandidateShell>
             }
           />
           <Route
             path="/submitted"
             element={
-              <ProtectedShell roles={CANDIDATE}>
+              <CandidateShell>
                 <Navigate to="/application/status" replace />
-              </ProtectedShell>
+              </CandidateShell>
             }
           />
           <Route
             path="/result"
             element={
-              <ProtectedShell roles={CANDIDATE}>
+              <CandidateShell>
                 <Navigate to="/application/status" replace />
-              </ProtectedShell>
+              </CandidateShell>
             }
           />
           <Route
             path="/my-applications"
             element={
-              <ProtectedShell roles={CANDIDATE}>
+              <CandidateShell>
                 <MyApplicationsPage />
-              </ProtectedShell>
+              </CandidateShell>
             }
           />
           <Route
             path="/upload"
             element={
-              <ProtectedShell roles={CANDIDATE}>
+              <CandidateShell>
                 <UploadPage />
-              </ProtectedShell>
+              </CandidateShell>
             }
           />
 
