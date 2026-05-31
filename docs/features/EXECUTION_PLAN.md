@@ -203,20 +203,21 @@ The phase is considered complete only after:
 
 ## 7. Phase Overview
 
-| Phase    | Type          | Scope                                                     | Main Smoke Tests                                                    |
-| -------- | ------------- | --------------------------------------------------------- | ------------------------------------------------------------------- |
-| Phase 1  | Frontend-only | Candidate information architecture refactor               | `npm run build` + manual route checklist                            |
-| Phase 2  | Frontend-only | Recruiter and super-admin navigation/workspace split      | `npm run build` + manual route checklist                            |
-| Phase 3  | Backend-first | Email service + candidate email verification              | `smoke_test_email_verification.py`                                  |
-| Phase 4  | Backend-first | Forgot password + session invalidation                    | `smoke_test_forgot_password.py`, `smoke_test_token_invalidation.py` |
-| Phase 5  | Full-stack    | Auth email frontend pages                                 | auth smoke tests + frontend build                                   |
-| Phase 6  | Backend-first | Application status expansion + document verification gate | `smoke_test_document_review_flow.py`                                |
-| Phase 7  | Full-stack    | Document rejection/correction UI                          | `smoke_test_document_rejection.py` + frontend build                 |
-| Phase 8  | Backend-first | NER timing change after document verification             | application/evaluation smoke tests                                  |
-| Phase 9  | Full-stack    | Analytics API + analytics dashboard                       | `smoke_test_analytics.py` + frontend build                          |
-| Phase 10 | Full-stack    | Audit log listing + admin audit page                      | `smoke_test_audit_logs.py`                                          |
-| Phase 11 | Full-stack    | Email notifications lifecycle                             | `smoke_test_email_notifications.py`                                 |
-| Phase 12 | Regression    | Final cleanup, docs, regression suite                     | all smoke tests + frontend build                                    |
+| Phase     | Type                 | Scope                                                                                             | Main Smoke Tests                                                    |
+| --------- | -------------------- | ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| Phase 1   | Frontend-only        | Candidate information architecture refactor                                                       | `npm run build` + manual route checklist                            |
+| Phase 2   | Frontend-only        | Recruiter and super-admin navigation/workspace split                                              | `npm run build` + manual route checklist                            |
+| Phase 3   | Backend-first        | Email service + candidate email verification                                                      | `smoke_test_email_verification.py`                                  |
+| Phase 4   | Backend-first        | Forgot password + session invalidation                                                            | `smoke_test_forgot_password.py`, `smoke_test_token_invalidation.py` |
+| Phase 5   | Full-stack           | Auth email frontend pages                                                                         | auth smoke tests + frontend build                                   |
+| Phase 6   | Backend-first        | Application status expansion + document verification gate                                         | `smoke_test_document_review_flow.py`                                |
+| Phase 7   | Full-stack           | Document rejection/correction UI                                                                  | `smoke_test_document_rejection.py` + frontend build                 |
+| Phase 7.5 | Full-stack hardening | Workflow hardening, evaluation bug fixes, period safety, candidate visibility, profile completion | document/evaluation/period/profile smoke tests + frontend build     |
+| Phase 8   | Backend-first        | NER timing change after document verification                                                     | application/evaluation smoke tests                                  |
+| Phase 9   | Full-stack           | Analytics API + analytics dashboard                                                               | `smoke_test_analytics.py` + frontend build                          |
+| Phase 10  | Full-stack           | Audit log listing + admin audit page                                                              | `smoke_test_audit_logs.py`                                          |
+| Phase 11  | Full-stack           | Email notifications lifecycle                                                                     | `smoke_test_email_notifications.py`                                 |
+| Phase 12  | Regression           | Final cleanup, docs, regression suite                                                             | all smoke tests + frontend build                                    |
 
 ---
 
@@ -1087,6 +1088,479 @@ Manual checks:
 
 ---
 
+# Phase 7.5 — Workflow Hardening and Bug Fixes
+
+## Type
+
+Full-stack hardening.
+
+## Goal
+
+Stabilize the recruitment workflow after Phase 6 and Phase 7 before continuing to NER/evaluation timing, analytics, audit logs, and notification lifecycle.
+
+This phase fixes workflow gaps found during manual end-to-end testing of the Recruitment Period flow, especially around document review finalization, evaluation eligibility, active period safety, candidate phase restrictions, and small frontend usability issues.
+
+## Dependency
+
+Phase 7.5 must be completed before Phase 8.
+
+Phase 8 assumes the following behaviors are already stable:
+
+* application and document review states are consistent;
+* candidate-facing document status visibility follows the official finalize step;
+* evaluation target filtering is correct;
+* active recruitment period safety is enforced;
+* candidates cannot bypass recruitment phase rules through draft/application/document endpoints.
+
+## Scope
+
+* Fix `Re-evaluate All` so force re-evaluation can process already-screened candidates when allowed.
+* Prevent super admin from creating or activating a new recruitment period while another period is still active.
+* Prevent accidental early closure of an active recruitment period without explicit validation.
+* Hide candidate-facing per-document verification results until document review is finalized.
+* Enforce submission-phase rules for application creation and document upload.
+* Guard or deprecate the legacy document verification endpoint so it cannot bypass the new review/finalize flow.
+* Add clearer recruiter/admin handling for pending document review when the recruitment period is already in evaluation phase.
+* Require candidates to complete essential profile/contact data before final submission.
+* Add frontend document preview toggle in recruiter/admin Document Verification.
+* Add password visibility toggle on the login page.
+
+## Target Behavior
+
+### Recruitment period safety
+
+Current:
+
+```text
+create new period
+-> automatically deactivates existing active period
+-> new period becomes active
+````
+
+Target:
+
+```text
+if an active period exists:
+   creating a new active period is rejected
+   activating another period is rejected
+   closing the active period requires explicit close action
+
+else:
+   new period can be created as active
+```
+
+Recommended response:
+
+```text
+409 Conflict
+"Masih ada periode rekrutasi aktif. Tutup atau selesaikan periode aktif terlebih dahulu sebelum membuat periode baru."
+```
+
+### Candidate phase enforcement
+
+Current:
+
+```text
+candidate can create draft outside submission phase
+candidate can upload documents outside submission phase
+candidate cannot final-submit outside submission phase
+```
+
+Target:
+
+```text
+only during SUBMISSION phase:
+   candidate can create application draft
+   candidate can upload/replace draft documents
+   candidate can final-submit application
+
+during CORRECTION_REQUESTED:
+   candidate can replace rejected documents only
+   replacement is allowed even if submission phase has ended, because it is part of admin-requested correction
+
+outside SUBMISSION phase:
+   new application creation is blocked
+   new draft document upload is blocked
+   final submit is blocked
+```
+
+### Candidate document status visibility
+
+Current:
+
+```text
+recruiter verifies individual document
+-> candidate can immediately see document.verification_status = verified/rejected
+-> even before recruiter finalizes review
+```
+
+Target:
+
+```text
+while application.status = document_review:
+   candidate sees general message: "Dokumen sedang diverifikasi"
+   candidate does not see per-document verified/rejected decisions
+
+after recruiter finalizes:
+   if all accepted:
+      application.status = verified
+      candidate sees documents accepted
+   if any rejected:
+      application.status = correction_requested
+      candidate sees rejected documents and rejection reasons
+```
+
+### Evaluation and re-evaluation
+
+Current:
+
+```text
+run evaluation:
+   targets application.status = verified
+   after success -> application.status = screening
+
+re-evaluate all with force=true:
+   still targets only verified
+   screening applications are skipped
+   result can be 0 candidates evaluated
+```
+
+Target:
+
+```text
+run evaluation with force=false:
+   targets verified applications without existing score
+
+run evaluation with force=true:
+   targets verified applications
+   also targets screening applications that already have scores
+   does not target document_review, correction_requested, draft, cancelled, announced_pass, announced_fail
+```
+
+Recommended rule:
+
+```text
+force=false eligible statuses:
+   verified
+
+force=true eligible statuses:
+   verified
+   screening
+```
+
+### Pending documents during evaluation phase
+
+Target:
+
+```text
+if recruitment period is in EVALUATION phase:
+   applications in document_review remain visible in Document Verification queue
+   recruiter/admin sees warning that pending/correction candidates will be skipped by evaluation
+   evaluation response includes skipped pending/correction counts when possible
+```
+
+### Profile completion
+
+Target:
+
+```text
+candidate must complete essential profile/contact data before final submission
+
+required minimum:
+   full_name
+   email
+   nim
+   faculty
+   major
+   year
+   whatsapp
+
+if missing:
+   frontend redirects candidate to Edit Profile
+   backend submit endpoint rejects final submission
+```
+
+### Frontend polish
+
+Target:
+
+```text
+Document Verification:
+   recruiter/admin can toggle preview for each uploaded document
+   PDF renders in iframe
+   image renders as img
+   fallback download/open link remains available
+
+Login:
+   password field has eye icon toggle
+   hidden by default
+   visible only when user clicks toggle
+```
+
+## Suggested API / Backend Changes
+
+### Recruitment periods
+
+```text
+POST /api/periods
+PUT  /api/periods/{period_id}
+PUT  /api/periods/{period_id}/close
+```
+
+Expected changes:
+
+* `POST /api/periods` must reject creation when another period is active.
+* `PUT /api/periods/{period_id}` must reject activating a period while another period is active.
+* `PUT /api/periods/{period_id}/close` should remain explicit and should not be triggered implicitly by creating another period.
+* Closing an active period should be auditable or at least clearly validated.
+
+### Applications
+
+```text
+POST /api/applications
+POST /api/applications/{application_id}/submit
+GET  /api/applications/my
+GET  /api/recruiter/applications
+```
+
+Expected changes:
+
+* `POST /api/applications` must require an active period in `SUBMISSION` phase.
+* `POST /api/applications/{application_id}/submit` must continue requiring `SUBMISSION` phase.
+* `POST /api/applications/{application_id}/submit` must reject if required candidate profile/contact data is incomplete.
+* Recruiter application listing should expose enough status/progress data for pending document review warnings.
+
+### Documents
+
+```text
+POST /api/documents/upload/{doc_type}
+PUT  /api/documents/{doc_id}/replace
+PUT  /api/documents/{doc_id}/review
+PUT  /api/documents/{doc_id}/verify
+GET  /api/documents/{application_id}
+GET  /api/documents/{doc_id}/file
+```
+
+Expected changes:
+
+* `POST /api/documents/upload/{doc_type}` must require `SUBMISSION` phase when application is still `draft`.
+* `POST /api/documents/upload/{doc_type}` may allow replacement during `correction_requested` only for rejected documents.
+* `PUT /api/documents/{doc_id}/replace` must follow the same rule.
+* `PUT /api/documents/{doc_id}/review` remains the canonical document review endpoint.
+* `PUT /api/documents/{doc_id}/verify` must be guarded, deprecated, or internally routed through the new review service.
+* `GET /api/documents/{application_id}` should avoid exposing per-document verification status to candidates before finalization.
+
+### Evaluation
+
+```text
+POST /api/recruiter/evaluate/batch
+```
+
+Expected changes:
+
+* `force=false` targets eligible `verified` applications only.
+* `force=true` targets eligible `verified` and `screening` applications.
+* Evaluation must continue skipping `document_review`, `correction_requested`, `draft`, `cancelled`, `announced_pass`, and `announced_fail`.
+* Response should make skipped counts clearer where feasible.
+
+Recommended response fields:
+
+```text
+evaluated_count
+skipped_count
+skipped_already_scored_count
+skipped_unverified_count
+skipped_correction_count
+warning
+```
+
+If adding separate skipped counters is too large for this phase, keep the existing response shape and add the detailed counters in Phase 8.
+
+## Affected Files
+
+Backend:
+
+```text
+backend/routers/periods.py
+backend/routers/applications.py
+backend/routers/documents.py
+backend/routers/evaluate_batch.py
+backend/routers/users.py
+backend/services/document_review_service.py
+backend/services/evaluation_service.py
+backend/services/submit_anonymization.py
+backend/utils/period_utils.py
+backend/models/application.py
+backend/models/document.py
+backend/models/audit.py
+```
+
+Frontend:
+
+```text
+frontend/src/pages/LoginPage.jsx
+frontend/src/pages/admin/RecruitmentPeriodPage.jsx
+frontend/src/pages/recruiter/DocumentVerificationPage.jsx
+frontend/src/pages/recruiter/EvaluationPage.jsx
+frontend/src/pages/candidate/EditProfilePage.jsx
+frontend/src/pages/candidate/DocumentsPage.jsx
+frontend/src/pages/candidate/ReviewPage.jsx
+frontend/src/pages/candidate/ApplicationStatusPage.jsx
+frontend/src/pages/candidate/StartApplicationPage.jsx
+frontend/src/components/DocumentUploadStep.jsx
+frontend/src/components/candidate/CandidateProfileForm.jsx
+frontend/src/lib/api.js
+frontend/src/lib/candidateApplication.js
+frontend/src/lib/recruiterWorkspace.js
+frontend/src/App.jsx
+```
+
+New or updated smoke tests:
+
+```text
+scripts/smoke_test_period_safety.py
+scripts/smoke_test_phase_enforcement.py
+scripts/smoke_test_document_review_flow.py
+scripts/smoke_test_document_rejection.py
+scripts/smoke_test_evaluation.py
+scripts/smoke_test_candidate_profile_completion.py
+```
+
+Optional new smoke test:
+
+```text
+scripts/smoke_test_workflow_hardening.py
+```
+
+## Do Not Change
+
+* Do not allow evaluation for applications in `document_review`, `correction_requested`, `draft`, or `cancelled`.
+* Do not evaluate applications after final announcement unless explicitly decided later.
+* Do not expose per-document official verification decisions to candidates before recruiter/admin finalizes document review.
+* Do not auto-deactivate an active recruitment period when creating a new one.
+* Do not allow candidates to replace verified documents unless policy explicitly changes.
+* Do not allow candidates to create new applications outside the `SUBMISSION` phase.
+* Do not block admin-requested correction uploads only because the submission phase has ended.
+* Do not send new email notifications in this phase; notification lifecycle belongs to Phase 11.
+* Do not remove existing fallback behavior in the evaluation/NER pipeline unless Phase 8 replaces it safely.
+* Do not expose anonymized candidate content to candidates.
+
+## Smoke Tests
+
+Run:
+
+```bash
+python -m scripts.smoke_test_period_safety
+python -m scripts.smoke_test_phase_enforcement
+python -m scripts.smoke_test_document_review_flow
+python -m scripts.smoke_test_document_rejection
+python -m scripts.smoke_test_evaluation
+python -m scripts.smoke_test_candidate_profile_completion
+```
+
+Must verify:
+
+### Period safety
+
+* Creating a period when no active period exists succeeds.
+* Creating another period while one period is active returns `409`.
+* Activating an inactive period while another period is active returns `409`.
+* Closing an active period still works through the explicit close endpoint.
+* After closing the active period, a new period can be created.
+
+### Phase enforcement
+
+* Candidate cannot create an application when there is no active period.
+* Candidate cannot create an application in `UPCOMING`, `EVALUATION`, `ANNOUNCEMENT`, or `CLOSED`.
+* Candidate can create an application in `SUBMISSION`.
+* Candidate cannot upload draft documents outside `SUBMISSION`.
+* Candidate can upload draft documents in `SUBMISSION`.
+* Candidate cannot final-submit outside `SUBMISSION`.
+* Candidate can replace rejected documents in `correction_requested` even if submission phase has ended.
+
+### Document review visibility
+
+* Recruiter can verify/reject individual documents.
+* Candidate cannot see per-document `verified`/`rejected` decisions while application is still `document_review`.
+* Candidate can see rejection reason only after application becomes `correction_requested`.
+* Candidate can see accepted document state only after application becomes `verified`.
+
+### Legacy document verify endpoint
+
+* Candidate cannot access legacy verify endpoint.
+* Recruiter/admin cannot use legacy verify endpoint to bypass invalid application status.
+* Legacy verify endpoint either routes through the new review service or returns a clear deprecation error.
+* Audit behavior remains consistent.
+
+### Evaluation and re-evaluation
+
+* Normal evaluation processes eligible `verified` applications.
+* Normal evaluation skips already-scored candidates.
+* Normal evaluation skips `document_review` and `correction_requested`.
+* Successful evaluation changes application status to `screening`.
+* `force=true` re-evaluates eligible `screening` applications.
+* `force=true` still skips `document_review`, `correction_requested`, `draft`, `cancelled`, and announced applications.
+* `Re-evaluate All` no longer returns `0 candidates evaluated` when scored `screening` candidates exist in the selected division.
+
+### Profile completion
+
+* Candidate with missing WhatsApp cannot final-submit.
+* Candidate with complete required profile/contact fields can final-submit.
+* Candidate profile update validates WhatsApp format.
+* Candidate academic identity fields remain locked after submit.
+
+## Regression Tests
+
+Run existing related tests:
+
+```bash
+python -m scripts.smoke_test_applications
+python -m scripts.smoke_test_document_review_flow
+python -m scripts.smoke_test_document_rejection
+python -m scripts.smoke_test_evaluation
+python -m scripts.smoke_test_periods
+python -m scripts.smoke_test_phase_enforcement
+```
+
+## Frontend Validation
+
+```bash
+cd frontend
+npm run build
+```
+
+Manual checks:
+
+* Login page password visibility toggle works and does not break submit.
+* Candidate missing required contact/profile data is redirected or blocked before final submit.
+* Candidate cannot start application outside submission phase.
+* Candidate cannot upload draft documents outside submission phase.
+* Candidate can fix rejected documents during correction flow.
+* Candidate does not see per-document verified/rejected decisions before finalize.
+* Recruiter/admin can preview uploaded documents in Document Verification.
+* Recruiter/admin can finalize document review after all documents are reviewed.
+* Recruiter/admin sees clear warning when evaluation phase starts but some applications are still pending document review.
+* Super admin cannot create a new active period while another period is active.
+* Re-evaluate All works for already-screened candidates.
+
+## Done Criteria
+
+* Active recruitment period cannot be accidentally replaced by creating or activating another period.
+* Candidate application creation, document upload, and final submit respect recruitment phase rules.
+* Candidate correction upload remains possible when explicitly requested by recruiter/admin.
+* Candidate-facing document status visibility follows the finalize decision point.
+* Legacy document verification endpoint cannot bypass the Phase 6/7 review/finalize flow.
+* Evaluation and re-evaluation target the correct application statuses.
+* Candidate profile/contact completion is enforced before final submission.
+* Recruiter/admin document preview is usable.
+* Login password visibility toggle works.
+* All Phase 7.5 smoke tests pass.
+* Related regression smoke tests pass.
+* Frontend build passes.
+* Phase 8 can proceed without changing the core document review or period safety rules.
+
+---
+
 # Phase 8 — NER and Evaluation Flow Adjustment
 
 ## Type
@@ -1096,6 +1570,10 @@ Backend-first.
 ## Goal
 
 Ensure NER anonymization and evaluation operate only on verified documents.
+
+## Dependency
+
+Phase 7.5 must be completed first because Phase 8 assumes document review, period safety, candidate visibility, phase enforcement, and evaluation force behavior are already stable.
 
 ## Scope
 
