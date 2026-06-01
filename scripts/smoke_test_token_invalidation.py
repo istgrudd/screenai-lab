@@ -21,6 +21,7 @@ from fastapi.testclient import TestClient
 
 from backend.database import SessionLocal, init_db
 from backend.main import app
+from backend.models.audit import AuditLog
 from backend.models.email_verification import EmailVerificationLink
 from backend.models.password_reset import PasswordResetLink
 from backend.models.user import User, UserRole
@@ -39,7 +40,7 @@ TARGET_NIM = "1031234600002"
 OLD_PASSWORD = "oldpasswordsecure"
 RESET_NEW_PASSWORD = "resetnewsecure"
 PROFILE_NEW_PASSWORD = "profilenewsecure"
-ADMIN_NEW_PASSWORD = "adminnewsecure"
+ADMIN_LINK_NEW_PASSWORD = "adminlinknewsecure"
 
 
 def _check(cond: bool, msg: str) -> None:
@@ -61,6 +62,10 @@ def _cleanup() -> None:
         )
         user_ids = [user.id for user in users]
         if user_ids:
+            db.query(AuditLog).filter(
+                (AuditLog.recruiter_id.in_(user_ids))
+                | (AuditLog.candidate_id.in_(user_ids))
+            ).delete(synchronize_session=False)
             db.query(PasswordResetLink).filter(
                 PasswordResetLink.user_id.in_(user_ids)
             ).delete(synchronize_session=False)
@@ -184,20 +189,45 @@ def main() -> int:
     response = client.get("/api/auth/me", headers=_auth(target_old_token))
     _check(response.status_code == 200, "target old token works before admin reset")
 
-    admin_reset = client.post(
-        "/api/auth/admin/reset-password",
+    admin_reset_link = client.post(
+        f"/api/auth/admin/users/{target_id}/send-password-reset",
         headers=_auth(admin_token),
-        json={"user_id": target_id, "new_password": ADMIN_NEW_PASSWORD},
     )
     _check(
-        admin_reset.status_code == 200,
-        f"admin reset password -> 200, got {admin_reset.status_code}: {admin_reset.text}",
+        admin_reset_link.status_code == 200,
+        (
+            "admin send password reset link -> 200, got "
+            f"{admin_reset_link.status_code}: {admin_reset_link.text}"
+        ),
     )
 
     response = client.get("/api/auth/me", headers=_auth(target_old_token))
-    _check(response.status_code == 401, "target old token rejected after admin reset")
+    _check(
+        response.status_code == 200,
+        "target old token still works after admin only sends reset link",
+    )
 
-    target_new_token = _login(client, TARGET_EMAIL, ADMIN_NEW_PASSWORD)
+    target_still_old_token = _login(client, TARGET_EMAIL, OLD_PASSWORD)
+    response = client.get("/api/auth/me", headers=_auth(target_still_old_token))
+    _check(
+        response.status_code == 200,
+        "target old password still works before reset link is used",
+    )
+
+    admin_link_code = _latest_reset_code_for(TARGET_EMAIL)
+    target_reset = client.post(
+        "/api/auth/reset-password",
+        json={"code": admin_link_code, "new_password": ADMIN_LINK_NEW_PASSWORD},
+    )
+    _check(target_reset.status_code == 200, "target uses admin-sent reset link -> 200")
+
+    response = client.get("/api/auth/me", headers=_auth(target_old_token))
+    _check(
+        response.status_code == 401,
+        "target old token rejected after target completes reset",
+    )
+
+    target_new_token = _login(client, TARGET_EMAIL, ADMIN_LINK_NEW_PASSWORD)
     response = client.get("/api/auth/me", headers=_auth(target_new_token))
     _check(response.status_code == 200, "target new token can access /me")
 
@@ -208,7 +238,10 @@ def main() -> int:
         target = db.query(User).filter(User.id == target_id).first()
         _check(reset_user.password_changed_at is not None, "reset user has password_changed_at")
         _check(admin.password_changed_at is None, "admin token issuer is unchanged")
-        _check(target.password_changed_at is not None, "admin reset target has password_changed_at")
+        _check(
+            target.password_changed_at is not None,
+            "admin reset-link target has password_changed_at after completion",
+        )
     finally:
         db.close()
 

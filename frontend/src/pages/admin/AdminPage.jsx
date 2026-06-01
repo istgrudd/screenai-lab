@@ -40,12 +40,12 @@ import {
 } from "@/components/ui/table";
 
 import {
-  adminResetPassword,
   deactivateUser,
   getActivePeriod,
   getActivePeriodStats,
   listUsers,
   reactivateUser,
+  sendAdminPasswordResetLink,
   updateUserRole,
 } from "@/lib/api";
 import { getCurrentUser } from "@/lib/auth";
@@ -166,21 +166,18 @@ export default function AdminPage() {
   };
 
   const handleResetPassword = async (user) => {
-    const newPassword = window.prompt(
-      `Set a new password for ${user.full_name} (${user.email}).\n` +
-        `Minimum 8 characters. Share securely — this is an admin-assisted reset.`
+    const confirmed = window.confirm(
+      `Send a password reset link to ${user.full_name} (${user.email})?\n\n` +
+        "The user will set their own new password via email."
     );
-    if (newPassword == null) return; // cancelled
-    if (newPassword.length < 8) {
-      toast.error("Password must be at least 8 characters.");
-      return;
-    }
+    if (!confirmed) return;
+
     setBusyUserId(user.id);
     try {
-      await adminResetPassword(user.id, newPassword);
-      toast.success(`Password reset for ${user.full_name}.`);
+      await sendAdminPasswordResetLink(user.id);
+      toast.success(`Password reset link sent to ${user.full_name}.`);
     } catch (err) {
-      toast.error(err.message || "Password reset failed");
+      toast.error(err.message || "Failed to send password reset link");
     } finally {
       setBusyUserId(null);
     }
@@ -360,10 +357,10 @@ export default function AdminPage() {
                             onClick={() => handleResetPassword(u)}
                             disabled={busy}
                             className="gap-1"
-                            title="Set a new password for this user"
+                            title="Send a password reset link to this user"
                           >
                             <KeyRound className="w-3.5 h-3.5" />
-                            Reset password
+                            Send reset link
                           </Button>
                         </div>
                         {isSelf && (

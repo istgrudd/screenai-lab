@@ -10,7 +10,6 @@ Endpoints:
 """
 
 import re
-from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, EmailStr, Field, field_validator
@@ -19,6 +18,7 @@ from sqlalchemy.orm import Session
 from backend.database import get_db
 from backend.middleware.auth_middleware import get_current_user, require_role
 from backend.middleware.rate_limit import limiter
+from backend.models.audit import AuditLog
 from backend.models.user import User, UserRole
 from backend.services.auth_service import (
     AuthResult,
@@ -35,6 +35,7 @@ from backend.services.email_verification_service import (
 from backend.services.password_reset_service import (
     GENERIC_FORGOT_PASSWORD_MESSAGE,
     ResetPasswordStatus,
+    create_and_send_password_reset,
     request_password_reset_if_allowed,
     reset_password_with_code,
 )
@@ -88,13 +89,6 @@ class ForgotPasswordRequest(BaseModel):
 
 class ResetPasswordRequest(BaseModel):
     code: str = Field(..., max_length=512)
-    new_password: str = Field(..., min_length=8, max_length=72)
-
-
-class AdminResetPasswordRequest(BaseModel):
-    """Super-admin assisted password reset fallback."""
-
-    user_id: int
     new_password: str = Field(..., min_length=8, max_length=72)
 
 
@@ -390,28 +384,49 @@ def me(current_user: User = Depends(get_current_user)):
 
 
 @router.post(
-    "/admin/reset-password",
-    dependencies=[Depends(require_role(UserRole.SUPER_ADMIN))],
+    "/admin/users/{user_id}/send-password-reset",
 )
-def admin_reset_password(
-    payload: AdminResetPasswordRequest,
+def send_admin_password_reset_link(
+    user_id: int,
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(UserRole.SUPER_ADMIN)),
 ):
-    """Super-admin-only assisted password reset.
+    """Super-admin-only password reset link sender.
 
-    Hashes the new password with bcrypt, replaces the target user's stored
-    hash, and updates ``password_changed_at`` so previously issued JWTs are
-    rejected by the auth middleware.
+    The admin never chooses or sees a password. The target user receives the
+    normal one-time reset link and changes their own password through the
+    public reset flow.
     """
-    target = db.query(User).filter(User.id == payload.user_id).first()
+    target = db.query(User).filter(User.id == user_id).first()
     if not target:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found",
         )
+    if not target.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Cannot send a password reset link to a deactivated account",
+        )
 
-    target.password_hash = hash_password(payload.new_password)
-    target.password_changed_at = datetime.now(timezone.utc)
+    send_result = create_and_send_password_reset(db, target)
+    if not send_result.success:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Password reset email could not be sent. Please try again later.",
+        )
+
+    db.add(
+        AuditLog(
+            recruiter_id=current_user.id,
+            candidate_id=target.id,
+            action_type="admin_password_reset_requested",
+            old_value=None,
+            new_value="account_recovery_email_sent",
+            reason="admin_initiated_account_recovery_email",
+        )
+    )
     db.commit()
     db.refresh(target)
 
@@ -420,7 +435,22 @@ def admin_reset_password(
         "data": {
             "user_id": target.id,
             "email": target.email,
-            "message": "Password has been reset.",
+            "message": "Account recovery email has been sent.",
         },
         "error": None,
     }
+
+
+@router.post(
+    "/admin/reset-password",
+    dependencies=[Depends(require_role(UserRole.SUPER_ADMIN))],
+)
+def deprecated_admin_reset_password():
+    """Reject the legacy admin-set-password endpoint."""
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail=(
+            "Direct admin password reset is deprecated. "
+            "Send a password reset link instead."
+        ),
+    )

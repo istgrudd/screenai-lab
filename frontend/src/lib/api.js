@@ -417,15 +417,13 @@ export async function reactivateUser(userId) {
 }
 
 /**
- * Super Admin only — assisted password reset for a user.
- * Phase-2 stop-gap until self-service email reset is wired in Phase 3.
+ * Super Admin only - send a password reset link for a user.
+ * The admin never sets or sees the user's new password.
  * @param {number} userId
- * @param {string} newPassword - min 8 chars (server-enforced)
  */
-export async function adminResetPassword(userId, newPassword) {
-  return request("/auth/admin/reset-password", {
+export async function sendAdminPasswordResetLink(userId) {
+  return request(`/auth/admin/users/${userId}/send-password-reset`, {
     method: "POST",
-    body: JSON.stringify({ user_id: userId, new_password: newPassword }),
   });
 }
 
