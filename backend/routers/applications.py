@@ -238,10 +238,10 @@ def get_swot_text(
 ):
     """Return plain-text content of the application's uploaded SWOT PDF.
 
-    Reads from the submit-time cache on ``CandidateDocument`` (Perf 3) so the
-    server doesn't re-open the PDF on every request. Falls back to inline
-    PyMuPDF extraction if the cache is empty (e.g. submit-time NER task
-    crashed, or the application predates the cache feature).
+    Reads from the post-verification cache on ``CandidateDocument`` (Perf 3)
+    so the server doesn't re-open the PDF on every request. Falls back to
+    inline PyMuPDF extraction if the cache is empty (e.g. background NER
+    failed, or the application predates the cache feature).
     """
     app = db.query(Application).filter(Application.id == application_id).first()
     if not app:

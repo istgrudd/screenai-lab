@@ -1,11 +1,11 @@
-"""Submit-time NER anonymization — Task 10.1.
+"""Post-verification NER anonymization.
 
 Background task that runs NER anonymization on CV and Motivation Letter
-immediately after a candidate submits their application.  Results are
-cached in ``candidate_documents`` so the evaluation pipeline can skip
-the NER step later (Task 10.3).
+after recruiter/admin document review is finalized as accepted. Results are
+cached in ``candidate_documents`` so the evaluation pipeline can skip the
+NER step later when the cache is still current.
 
-Called via FastAPI BackgroundTasks — must never raise.
+Called via FastAPI BackgroundTasks; must never raise.
 """
 
 from __future__ import annotations
@@ -43,18 +43,19 @@ def _generate_anon_id() -> str:
 def run_submit_anonymization(
     application_id: int, session_factory: sessionmaker
 ) -> None:
-    """Run NER anonymization on CV + Motivation Letter for a submitted application.
+    """Run NER anonymization on CV + Motivation Letter for a verified application.
 
-    Called as a FastAPI BackgroundTask after submit_application commits.
+    Called as a FastAPI BackgroundTask after document review finalization
+    commits with ``Application.status == verified``.
     Creates/updates Candidate (rubric_id=None) and CandidateDocument records
     with anonymized text for later use by the evaluation pipeline.
 
-    On any exception: logs the error but does NOT raise — background tasks
+    On any exception: logs the error but does NOT raise; background tasks
     must never crash the server.
 
     Args:
         application_id: The Application.id to process.
-        session_factory: SessionLocal — the task opens and closes its own
+        session_factory: SessionLocal; the task opens and closes its own
             session so the request-scoped session never leaks into the
             background context.
     """
@@ -63,7 +64,7 @@ def run_submit_anonymization(
         _run_anonymization(application_id, db)
     except Exception:
         logger.error(
-            "Submit-time NER failed for application %d:\n%s",
+            "Post-verification NER failed for application %d:\n%s",
             application_id,
             traceback.format_exc(),
         )
@@ -81,7 +82,10 @@ def _run_anonymization(application_id: int, db: Session) -> None:
     # 1. Load application
     app = db.query(Application).filter(Application.id == application_id).first()
     if not app:
-        logger.warning("Application %d not found for submit-time NER", application_id)
+        logger.warning(
+            "Application %d not found for post-verification NER",
+            application_id,
+        )
         return
 
     if app.status != ApplicationStatus.VERIFIED:
@@ -152,12 +156,13 @@ def _run_anonymization(application_id: int, db: Session) -> None:
             raw_text=raw_text,
             normalised=normalised,
             anonymised=anonymised,
+            metadata=extraction.get("metadata") or {},
             db=db,
         )
         processed += 1
 
-    # 4. SWOT — extract raw text only, no NER. Failures are non-fatal so a
-    #    SWOT that fails to parse doesn't poison the rest of submit-time work.
+    # 4. SWOT: extract raw text only, no NER. Failures are non-fatal so a
+    #    SWOT that fails to parse doesn't poison post-verification work.
     swot_processed = _store_swot_text(application_id, candidate, db)
     if swot_processed:
         processed += 1
@@ -174,7 +179,7 @@ def _run_anonymization(application_id: int, db: Session) -> None:
 def _store_swot_text(
     application_id: int, candidate: Candidate, db: Session
 ) -> bool:
-    """Extract SWOT raw text at submit time so the GET endpoint can serve from DB.
+    """Extract SWOT raw text after verification so the GET endpoint can use DB.
 
     Returns True if a SWOT CandidateDocument row was written.
     """
@@ -206,6 +211,7 @@ def _store_swot_text(
 
     raw_text = (extraction.get("raw_text") or "").strip()
     page_count = (extraction.get("metadata") or {}).get("page_count")
+    file_size_kb = (extraction.get("metadata") or {}).get("file_size_kb")
 
     existing = (
         db.query(CandidateDocument)
@@ -220,6 +226,7 @@ def _store_swot_text(
         existing.filename = swot_doc.file_name
         existing.file_path = swot_doc.file_path
         existing.page_count = page_count
+        existing.file_size_kb = file_size_kb
         db.flush()
         return True
 
@@ -230,6 +237,7 @@ def _store_swot_text(
         document_type=DocumentType.SWOT.value,
         raw_text=raw_text,
         page_count=page_count,
+        file_size_kb=file_size_kb,
     )
     db.add(cand_doc)
     db.flush()
@@ -241,7 +249,7 @@ def _store_swot_text(
 # ---------------------------------------------------------------------------
 
 def _ensure_candidate_for_submit(app: Application, db: Session) -> Candidate:
-    """Find or create a Candidate record for submit-time NER (rubric_id=None)."""
+    """Find or create a Candidate record for post-verification NER."""
     existing = (
         db.query(Candidate)
         .filter(Candidate.user_id == app.user_id)
@@ -270,9 +278,11 @@ def _store_candidate_document(
     raw_text: str,
     normalised: dict,
     anonymised: dict,
+    metadata: dict | None,
     db: Session,
 ) -> CandidateDocument:
     """Create or update a CandidateDocument with anonymized text."""
+    metadata = metadata or {}
     existing = (
         db.query(CandidateDocument)
         .filter(
@@ -283,11 +293,15 @@ def _store_candidate_document(
     )
 
     if existing:
+        existing.filename = portal_doc.file_name
+        existing.file_path = portal_doc.file_path
         existing.raw_text = raw_text
         existing.normalized_text = normalised.get("normalized_text", "")
         existing.sections_json = normalised.get("sections")
         existing.anonymized_text = anonymised.get("anonymized_text", "")
         existing.entities_json = anonymised.get("entities_found", [])
+        existing.page_count = metadata.get("page_count")
+        existing.file_size_kb = metadata.get("file_size_kb")
         db.flush()
         return existing
 
@@ -301,6 +315,8 @@ def _store_candidate_document(
         sections_json=normalised.get("sections"),
         anonymized_text=anonymised.get("anonymized_text", ""),
         entities_json=anonymised.get("entities_found", []),
+        page_count=metadata.get("page_count"),
+        file_size_kb=metadata.get("file_size_kb"),
     )
     db.add(cand_doc)
     db.flush()

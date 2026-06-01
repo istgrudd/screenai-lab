@@ -106,10 +106,6 @@ def seed_rubric():
             .first()
         )
 
-        if existing:
-            print(f"[SKIP] Rubric for '{RUBRIC_DATA['position']}' already exists (id={existing.id})")
-            return existing.id
-
         # Create rubric
         rubric = Rubric(
             name=RUBRIC_DATA["name"],

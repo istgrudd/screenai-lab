@@ -42,7 +42,7 @@ class EvaluateBatchRequest(BaseModel):
     division: Division
     application_ids: list[int] | None = None
     # Task 13.5.1 — when True, re-evaluate already-scored candidates.
-    # The SUBMITTED-only status filter still applies.
+    # The verified/screening eligibility filter still applies.
     force: bool = False
 
 
@@ -61,8 +61,8 @@ async def evaluate_batch(
     If application_ids is null, evaluates all eligible applications in the
     given division. By default (force=False) candidates whose Candidate row
     already carries a composite_score are skipped to avoid recomputation.
-    With force=True the score filter is bypassed; the SUBMITTED-only status
-    filter still applies regardless.
+    With force=True the score filter is bypassed; the verified/screening
+    eligibility filter still applies regardless.
 
     Precondition: the division's rubric must have at least one dimension.
     Returns 400 if the rubric has zero dimensions.

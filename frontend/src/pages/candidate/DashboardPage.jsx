@@ -341,7 +341,6 @@ export default function DashboardPage() {
               <CardContent>
                 <RecruitmentJourney
                   status={application.status}
-                  currentPhase={activePeriod?.current_phase || null}
                 />
               </CardContent>
             </Card>

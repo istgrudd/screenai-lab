@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from backend.models.application import Application, ApplicationStatus
 from backend.models.audit import AuditLog
+from backend.models.candidate import Candidate, CandidateDocument
 from backend.models.document import (
     Document,
     DocumentType,
@@ -32,6 +33,12 @@ REVIEWABLE_APPLICATION_STATUSES = {
 FINAL_DOCUMENT_STATUSES = {
     DocumentVerificationStatus.VERIFIED.value,
     DocumentVerificationStatus.REJECTED.value,
+}
+
+NER_CACHE_DOCUMENT_TYPES = {
+    DocumentType.CV.value,
+    DocumentType.MOTIVATION_LETTER.value,
+    DocumentType.SWOT.value,
 }
 
 
@@ -93,6 +100,36 @@ def sync_legacy_verification_flag(doc: Document) -> None:
     doc.is_verified = (
         get_document_verification_status(doc)
         == DocumentVerificationStatus.VERIFIED.value
+    )
+
+
+def invalidate_candidate_document_cache(
+    db: Session,
+    *,
+    app: Application,
+    doc_type: DocumentType | str,
+) -> int:
+    """Delete stale NER/cache rows for a replaced application document."""
+    doc_type_value = _enum_value(doc_type)
+    if doc_type_value not in NER_CACHE_DOCUMENT_TYPES:
+        return 0
+
+    candidate_ids = [
+        candidate_id
+        for (candidate_id,) in db.query(Candidate.id)
+        .filter(Candidate.user_id == app.user_id)
+        .all()
+    ]
+    if not candidate_ids:
+        return 0
+
+    return (
+        db.query(CandidateDocument)
+        .filter(
+            CandidateDocument.candidate_id.in_(candidate_ids),
+            CandidateDocument.document_type == doc_type_value,
+        )
+        .delete(synchronize_session=False)
     )
 
 
@@ -350,6 +387,11 @@ def replace_rejected_document(
     doc.file_size = size_bytes
     doc.uploaded_at = _utcnow()
     reset_document_review_state(doc)
+    invalidated_cache_rows = invalidate_candidate_document_cache(
+        db,
+        app=app,
+        doc_type=doc.doc_type,
+    )
 
     remaining_rejected = (
         db.query(Document)
@@ -372,7 +414,8 @@ def replace_rejected_document(
             new_value=DocumentVerificationStatus.PENDING.value,
             reason=(
                 f"application_id={app.id}; doc_id={doc.id}; "
-                f"doc_type={_document_type(doc)}; old_file={old_file_name}"
+                f"doc_type={_document_type(doc)}; old_file={old_file_name}; "
+                f"cache_invalidated={invalidated_cache_rows}"
             ),
         )
     )

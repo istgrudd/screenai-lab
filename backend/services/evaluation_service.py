@@ -259,7 +259,13 @@ async def _evaluate_one(
     # --- Task 10.3/10.4: Ensure Candidate exists (moved up for cache check) ---
     candidate = _ensure_candidate(app, rubric, user, db)
 
-    # --- Task 10.3: Check NER cache from submit-time anonymization ---
+    cv_doc = _get_doc(app.id, DocumentType.CV, db)
+    if not cv_doc:
+        raise ValueError(f"No CV document found for application {app.id}")
+    ml_doc = _get_doc(app.id, DocumentType.MOTIVATION_LETTER, db)
+    ml_fallback_attempted = False
+
+    # --- Task 10.3: Check NER cache from post-verification anonymization ---
     cached_cv = (
         db.query(CandidateDocument)
         .filter(
@@ -267,8 +273,12 @@ async def _evaluate_one(
             CandidateDocument.document_type == "cv",
             CandidateDocument.anonymized_text != None,  # noqa: E711
         )
+        .order_by(CandidateDocument.created_at.desc())
         .first()
     )
+    if cached_cv and not _cache_matches_document(cached_cv, cv_doc):
+        logger.info("Ignoring stale CV NER cache for application %d", app.id)
+        cached_cv = None
 
     if cached_cv and cached_cv.anonymized_text:
         # Cache hit — use pre-computed anonymized text
@@ -285,17 +295,31 @@ async def _evaluate_one(
                 CandidateDocument.document_type == "motivation_letter",
                 CandidateDocument.anonymized_text != None,  # noqa: E711
             )
+            .order_by(CandidateDocument.created_at.desc())
             .first()
         )
+        if cached_ml and ml_doc and not _cache_matches_document(cached_ml, ml_doc):
+            logger.info(
+                "Ignoring stale motivation letter NER cache for application %d",
+                app.id,
+            )
+            cached_ml = None
         ml_anon_text = cached_ml.anonymized_text if cached_ml else ""
 
         # We still need raw_text for _ensure_candidate_document bookkeeping
         cv_doc = _get_doc(app.id, DocumentType.CV, db)
         raw_text = cached_cv.raw_text or ""
-        normalised = {"normalized_text": cached_cv.normalized_text or ""}
+        normalised = {
+            "normalized_text": cached_cv.normalized_text or "",
+            "sections": cached_cv.sections_json,
+        }
         anonymised = {
             "anonymized_text": cached_cv.anonymized_text,
             "entities_found": cached_cv.entities_json or [],
+        }
+        cv_metadata = {
+            "page_count": cached_cv.page_count,
+            "file_size_kb": cached_cv.file_size_kb,
         }
     else:
         # Cache miss — run inline NER as fallback
@@ -309,6 +333,7 @@ async def _evaluate_one(
             raise ValueError(f"No CV document found for application {app.id}")
 
         extraction = extract_text_from_pdf(cv_doc.file_path)
+        cv_metadata = extraction.get("metadata") or {}
         raw_text = extraction.get("raw_text", "")
         normalised = normalize_and_segment(raw_text)
         anonymised = anonymize_text(normalised["normalized_text"])
@@ -317,14 +342,63 @@ async def _evaluate_one(
         # Also anonymize motivation letter if present
         ml_doc = _get_doc(app.id, DocumentType.MOTIVATION_LETTER, db)
         ml_anon_text = ""
-        if ml_doc and os.path.exists(ml_doc.file_path):
+        cached_ml = (
+            _get_ready_candidate_document(
+                candidate,
+                "motivation_letter",
+                ml_doc,
+                db,
+            )
+            if ml_doc
+            else None
+        )
+        if cached_ml:
+            ml_anon_text = cached_ml.anonymized_text or ""
+        elif ml_doc and os.path.exists(ml_doc.file_path):
+            ml_fallback_attempted = True
             try:
                 ml_extraction = extract_text_from_pdf(ml_doc.file_path)
+                ml_metadata = ml_extraction.get("metadata") or {}
                 ml_norm = normalize_and_segment(ml_extraction.get("raw_text", ""))
                 ml_anonymised = anonymize_text(ml_norm["normalized_text"])
                 ml_anon_text = ml_anonymised.get("anonymized_text", "")
+                _ensure_candidate_document(
+                    candidate,
+                    ml_doc,
+                    ml_extraction.get("raw_text", ""),
+                    ml_norm,
+                    ml_anonymised,
+                    db,
+                    document_type="motivation_letter",
+                    metadata=ml_metadata,
+                )
             except Exception:
                 pass  # graceful fallback — ML is bonus context
+
+    if (
+        not ml_anon_text
+        and not ml_fallback_attempted
+        and ml_doc
+        and os.path.exists(ml_doc.file_path)
+    ):
+        try:
+            ml_extraction = extract_text_from_pdf(ml_doc.file_path)
+            ml_metadata = ml_extraction.get("metadata") or {}
+            ml_norm = normalize_and_segment(ml_extraction.get("raw_text", ""))
+            ml_anonymised = anonymize_text(ml_norm["normalized_text"])
+            ml_anon_text = ml_anonymised.get("anonymized_text", "")
+            _ensure_candidate_document(
+                candidate,
+                ml_doc,
+                ml_extraction.get("raw_text", ""),
+                ml_norm,
+                ml_anonymised,
+                db,
+                document_type="motivation_letter",
+                metadata=ml_metadata,
+            )
+        except Exception:
+            pass  # graceful fallback — ML is bonus context
 
     # --- Build full anonymized text with ML + KHS blocks ---
     if ml_anon_text:
@@ -347,7 +421,15 @@ async def _evaluate_one(
         )
 
     # --- Bridge: update CandidateDocument ---
-    cand_doc = _ensure_candidate_document(candidate, cv_doc, raw_text, normalised, anonymised, db)
+    cand_doc = _ensure_candidate_document(
+        candidate,
+        cv_doc,
+        raw_text,
+        normalised,
+        anonymised,
+        db,
+        metadata=cv_metadata,
+    )
 
     # --- RAG evaluation ---
     evaluation = await evaluate_candidate(
@@ -403,6 +485,43 @@ def _get_doc(application_id: int, doc_type: DocumentType, db: Session) -> Docume
     )
 
 
+def _cache_matches_document(cached: CandidateDocument, doc: Document) -> bool:
+    """Return True when a NER cache row still points at the current upload."""
+    if cached.file_path and cached.file_path != doc.file_path:
+        return False
+    if cached.filename and cached.filename != doc.file_name:
+        return False
+    if cached.file_size_kb is not None and doc.file_size is not None:
+        expected_size_kb = round(doc.file_size / 1024.0, 2)
+        if abs(cached.file_size_kb - expected_size_kb) > 0.01:
+            return False
+    return True
+
+
+def _get_ready_candidate_document(
+    candidate: Candidate,
+    document_type: str,
+    doc: Document,
+    db: Session,
+) -> CandidateDocument | None:
+    """Fetch an anonymized cache row if it belongs to the current upload."""
+    cached = (
+        db.query(CandidateDocument)
+        .filter(
+            CandidateDocument.candidate_id == candidate.id,
+            CandidateDocument.document_type == document_type,
+            CandidateDocument.anonymized_text != None,  # noqa: E711
+        )
+        .order_by(CandidateDocument.created_at.desc())
+        .first()
+    )
+    if not cached:
+        return None
+    if not _cache_matches_document(cached, doc):
+        return None
+    return cached
+
+
 def _run_ktm(app: Application, user: User | None, db: Session) -> dict:
     """Validate KTM — returns ktm_validator output or synthetic error."""
     ktm_doc = _get_doc(app.id, DocumentType.KTM, db)
@@ -442,8 +561,8 @@ def _ensure_candidate(
 ) -> Candidate:
     """Find or create a Candidate pipeline record linked to this application.
 
-    Task 10.4: rubric is optional.  At submit-time the Candidate is created
-    with rubric_id=None; the rubric_id is set when evaluation actually runs.
+    Task 10.4: rubric is optional. Post-verification NER may create the
+    Candidate with rubric_id=None; evaluation fills the rubric_id.
     """
     existing = (
         db.query(Candidate)
@@ -470,41 +589,51 @@ def _ensure_candidate(
 
 def _ensure_candidate_document(
     candidate: Candidate,
-    cv_doc: Document,
+    portal_doc: Document,
     raw_text: str,
     normalised: dict,
     anonymised: dict,
     db: Session,
+    *,
+    document_type: str = "cv",
+    metadata: dict | None = None,
 ) -> CandidateDocument:
-    """Find or create a CandidateDocument for the CV."""
+    """Find or create a CandidateDocument cache row for an application file."""
+    metadata = metadata or {}
     existing = (
         db.query(CandidateDocument)
         .filter(
             CandidateDocument.candidate_id == candidate.id,
-            CandidateDocument.document_type == "cv",
+            CandidateDocument.document_type == document_type,
         )
         .first()
     )
 
     if existing:
+        existing.filename = portal_doc.file_name
+        existing.file_path = portal_doc.file_path
         existing.raw_text = raw_text
         existing.normalized_text = normalised.get("normalized_text", "")
         existing.sections_json = normalised.get("sections")
         existing.anonymized_text = anonymised.get("anonymized_text", "")
         existing.entities_json = anonymised.get("entities_found", [])
+        existing.page_count = metadata.get("page_count")
+        existing.file_size_kb = metadata.get("file_size_kb")
         db.flush()
         return existing
 
     cand_doc = CandidateDocument(
         candidate_id=candidate.id,
-        filename=cv_doc.file_name,
-        file_path=cv_doc.file_path,
-        document_type="cv",
+        filename=portal_doc.file_name,
+        file_path=portal_doc.file_path,
+        document_type=document_type,
         raw_text=raw_text,
         normalized_text=normalised.get("normalized_text", ""),
         sections_json=normalised.get("sections"),
         anonymized_text=anonymised.get("anonymized_text", ""),
         entities_json=anonymised.get("entities_found", []),
+        page_count=metadata.get("page_count"),
+        file_size_kb=metadata.get("file_size_kb"),
     )
     db.add(cand_doc)
     db.flush()
