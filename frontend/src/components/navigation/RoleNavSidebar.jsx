@@ -136,7 +136,7 @@ const ADMIN_GROUPS = [
       { to: "/admin/users", label: "Users", icon: UserCog },
       { to: "/admin/periods", label: "Periods", icon: CalendarClock },
       { to: "/admin/audit-logs", label: "Audit Logs", icon: ShieldCheck },
-      { to: "/admin/email-templates", label: "Email Templates", icon: Mail },
+      { to: "/admin/email-templates", label: "Emails", icon: Mail },
       { to: "/admin/settings", label: "Settings", icon: Settings },
     ],
   },

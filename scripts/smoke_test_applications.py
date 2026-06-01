@@ -28,6 +28,7 @@ from backend.database import SessionLocal
 from backend.main import app as fastapi_app
 from backend.models.application import Application
 from backend.models.document import Document, DocumentType
+from backend.models.email_notification import EmailNotification
 from backend.models.email_verification import EmailVerificationLink
 from backend.models.period import RecruitmentPeriod
 from backend.models.user import User, UserRole
@@ -59,6 +60,9 @@ def _check(cond: bool, msg: str) -> None:
 def _cleanup_user() -> None:
     db = SessionLocal()
     try:
+        db.query(EmailNotification).filter(
+            EmailNotification.to_email.in_([TEST_EMAIL, PERIOD_ADMIN_EMAIL])
+        ).delete(synchronize_session=False)
         users = (
             db.query(User)
             .filter(

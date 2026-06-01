@@ -33,6 +33,7 @@ from backend.routers.users import router as users_router
 from backend.routers.periods import router as periods_router
 from backend.routers.analytics import router as analytics_router
 from backend.routers.audit_logs import router as audit_logs_router
+from backend.routers.email_notifications import router as email_notifications_router
 
 
 @asynccontextmanager
@@ -123,6 +124,7 @@ app.include_router(users_router)
 app.include_router(periods_router)
 app.include_router(analytics_router)
 app.include_router(audit_logs_router)
+app.include_router(email_notifications_router)
 
 
 # --- Health Check ---

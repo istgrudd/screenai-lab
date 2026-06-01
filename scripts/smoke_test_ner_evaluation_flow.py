@@ -29,6 +29,7 @@ from backend.models.application import Application
 from backend.models.audit import AuditLog
 from backend.models.candidate import Candidate, CandidateDocument, DimensionScore
 from backend.models.document import Document, DocumentType
+from backend.models.email_notification import EmailNotification
 from backend.models.period import RecruitmentPeriod
 from backend.models.rubric import Dimension, Rubric
 from backend.models.user import User, UserRole
@@ -187,6 +188,9 @@ def _cleanup() -> None:
     try:
         emails = [REC_EMAIL] + [email for email, _nim in CANDIDATES.values()]
         nims = [nim for _email, nim in CANDIDATES.values()]
+        db.query(EmailNotification).filter(
+            EmailNotification.to_email.in_(emails)
+        ).delete(synchronize_session=False)
         users = db.query(User).filter((User.email.in_(emails)) | (User.nim.in_(nims))).all()
         user_ids = [user.id for user in users]
 

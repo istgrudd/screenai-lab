@@ -401,6 +401,36 @@ export async function getAdminAuditLogs({
   return request(`/admin/audit-logs?${params.toString()}`);
 }
 
+export async function getAdminEmailNotifications({
+  page = 1,
+  limit = 20,
+  notification_type,
+  status,
+  to_email,
+  date_from,
+  date_to,
+} = {}) {
+  const params = new URLSearchParams({
+    page: String(page),
+    limit: String(limit),
+  });
+  const optionalParams = {
+    notification_type,
+    status,
+    to_email,
+    date_from,
+    date_to,
+  };
+
+  Object.entries(optionalParams).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && String(value).trim() !== "") {
+      params.set(key, String(value).trim());
+    }
+  });
+
+  return request(`/admin/email-notifications?${params.toString()}`);
+}
+
 export async function updateUserRole(userId, role) {
   return request(`/users/${userId}/role`, {
     method: "PUT",

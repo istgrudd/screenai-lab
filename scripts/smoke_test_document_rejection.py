@@ -19,6 +19,7 @@ from backend.models.application import Application
 from backend.models.audit import AuditLog
 from backend.models.candidate import Candidate, CandidateDocument, DimensionScore
 from backend.models.document import Document, DocumentType
+from backend.models.email_notification import EmailNotification
 from backend.models.period import RecruitmentPeriod
 from backend.models.user import User, UserRole
 from backend.utils.file_storage import purge_application_dir
@@ -52,6 +53,9 @@ def _check(cond: bool, msg: str) -> None:
 def _cleanup() -> None:
     db = SessionLocal()
     try:
+        db.query(EmailNotification).filter(
+            EmailNotification.to_email.in_([REC_EMAIL, CAND_EMAIL])
+        ).delete(synchronize_session=False)
         users = (
             db.query(User)
             .filter(

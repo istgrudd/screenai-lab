@@ -26,6 +26,7 @@ from backend.database import SessionLocal
 from backend.main import app as fastapi_app
 from backend.models.application import Application, ApplicationStatus, Division
 from backend.models.audit import AuditLog
+from backend.models.email_notification import EmailNotification
 from backend.models.period import RecruitmentPeriod
 from backend.models.user import User, UserRole
 from backend.utils.security import hash_password
@@ -60,6 +61,9 @@ def _cleanup() -> None:
             PEND_EMAIL,
             OTHER_DIV_EMAIL,
         )
+        db.query(EmailNotification).filter(
+            EmailNotification.to_email.in_(emails)
+        ).delete(synchronize_session=False)
         users = db.query(User).filter(User.email.in_(emails)).all()
         user_ids = [u.id for u in users]
 
@@ -118,6 +122,7 @@ def main() -> int:
         (PEND_EMAIL, "Bulk Pending Candidate", "1039876600003"),
         (OTHER_DIV_EMAIL, "Bulk Other Div", "1039876600004"),
     ]
+    seed_now = datetime.now(timezone.utc)
     cand_users = [
         User(
             email=email,
@@ -129,6 +134,7 @@ def main() -> int:
             year=2023,
             role=UserRole.CANDIDATE,
             is_active=True,
+            email_verified_at=seed_now,
         )
         for email, name, nim in candidates_seed
     ]

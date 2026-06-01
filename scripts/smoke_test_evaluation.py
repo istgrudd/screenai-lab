@@ -40,6 +40,7 @@ from backend.models.application import Application, ApplicationStatus, Division
 from backend.models.audit import AuditLog
 from backend.models.candidate import Candidate, CandidateDocument, DimensionScore
 from backend.models.document import Document, DocumentType
+from backend.models.email_notification import EmailNotification
 from backend.models.period import RecruitmentPeriod
 from backend.models.rubric import Dimension, Rubric
 from backend.models.user import User, UserRole
@@ -141,6 +142,9 @@ def _cleanup() -> None:
     """Remove smoke test data so the script is rerunnable."""
     db = SessionLocal()
     try:
+        db.query(EmailNotification).filter(
+            EmailNotification.to_email.in_([REC_EMAIL, ADMIN_EMAIL, CAND_EMAIL])
+        ).delete(synchronize_session=False)
         # Clean users + cascades
         for email in (REC_EMAIL, ADMIN_EMAIL, CAND_EMAIL):
             users = db.query(User).filter(User.email == email).all()

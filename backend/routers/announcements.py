@@ -21,6 +21,7 @@ from backend.models.application import Application, ApplicationStatus, Division
 from backend.models.audit import AuditLog
 from backend.models.period import RecruitmentPeriod
 from backend.models.user import User, UserRole
+from backend.services.notification_service import send_announcement_published_notification
 from backend.utils.period_utils import get_current_phase
 
 router = APIRouter(prefix="/api/announcements", tags=["announcements"])
@@ -119,6 +120,17 @@ def create_announcement(
     db.commit()
     db.refresh(app)
 
+    candidate_user = db.query(User).filter(User.id == app.user_id).first()
+    if candidate_user:
+        send_announcement_published_notification(
+            db,
+            application=app,
+            user=candidate_user,
+            result=payload.result,
+            notes=payload.notes,
+            related_audit_log_id=audit.id,
+        )
+
     return {
         "success": True,
         "data": {
@@ -203,6 +215,7 @@ def bulk_announce(
     passed_set = set(payload.passed_application_ids)
     pass_count = 0
     fail_count = 0
+    notifications_to_send: list[tuple[int, int, str, AuditLog]] = []
 
     for app in scope:
         new_status = (
@@ -214,14 +227,21 @@ def bulk_announce(
 
         if app.status != new_status:
             app.status = new_status
-            db.add(
-                AuditLog(
-                    recruiter_id=current_user.id,
-                    candidate_id=app.user_id,
-                    action_type="bulk_announcement",
-                    old_value=old_status,
-                    new_value=new_status.value,
-                    reason=None,
+            audit = AuditLog(
+                recruiter_id=current_user.id,
+                candidate_id=app.user_id,
+                action_type="bulk_announcement",
+                old_value=old_status,
+                new_value=new_status.value,
+                reason=None,
+            )
+            db.add(audit)
+            notifications_to_send.append(
+                (
+                    app.id,
+                    app.user_id,
+                    "pass" if new_status == ApplicationStatus.ANNOUNCED_PASS else "fail",
+                    audit,
                 )
             )
 
@@ -230,7 +250,21 @@ def bulk_announce(
         else:
             fail_count += 1
 
+    db.flush()
     db.commit()
+
+    for app_id, user_id, result_value, audit in notifications_to_send:
+        app = db.query(Application).filter(Application.id == app_id).first()
+        candidate_user = db.query(User).filter(User.id == user_id).first()
+        if app and candidate_user:
+            send_announcement_published_notification(
+                db,
+                application=app,
+                user=candidate_user,
+                result=result_value,
+                notes=None,
+                related_audit_log_id=audit.id,
+            )
 
     return {
         "success": True,

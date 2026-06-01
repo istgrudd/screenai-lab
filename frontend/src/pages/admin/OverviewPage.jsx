@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { BarChart3, CalendarClock, ClipboardList, Settings, ShieldCheck, UserCog, Users } from "lucide-react";
+import { BarChart3, CalendarClock, ClipboardList, Mail, Settings, ShieldCheck, UserCog, Users } from "lucide-react";
 import { toast } from "sonner";
 
 import RecruitmentPhaseCard from "@/components/RecruitmentPhaseCard";
@@ -36,6 +36,12 @@ const ADMIN_SHORTCUTS = [
     description: "Review recruiter and admin audit entries.",
     to: "/admin/audit-logs",
     icon: ShieldCheck,
+  },
+  {
+    title: "Emails",
+    description: "Monitor workflow email delivery logs.",
+    to: "/admin/email-templates",
+    icon: Mail,
   },
   {
     title: "Analytics",

@@ -36,6 +36,7 @@ from backend.models.application import Application, ApplicationStatus, Division
 from backend.models.audit import AuditLog
 from backend.models.candidate import Candidate, CandidateDocument, DimensionScore
 from backend.models.document import Document
+from backend.models.email_notification import EmailNotification
 from backend.models.period import RecruitmentPeriod
 from backend.models.user import User, UserRole
 from backend.utils.file_storage import purge_application_dir
@@ -73,6 +74,9 @@ def _cleanup() -> None:
             PASS_EMAIL,
             FAIL_EMAIL,
         )
+        db.query(EmailNotification).filter(
+            EmailNotification.to_email.in_(emails)
+        ).delete(synchronize_session=False)
         users = db.query(User).filter(User.email.in_(emails)).all()
         user_ids = [u.id for u in users]
 

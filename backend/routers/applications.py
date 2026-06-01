@@ -30,13 +30,17 @@ from backend.database import SessionLocal, get_db
 from backend.middleware.auth_middleware import get_current_user, require_role
 from backend.models.application import Application, ApplicationStatus, Division
 from backend.models.candidate import Candidate, CandidateDocument
-from backend.models.document import Document, DocumentType
+from backend.models.document import Document, DocumentType, DocumentVerificationStatus
 from backend.models.period import RecruitmentPeriod
 from backend.models.user import User, UserRole
 from backend.services.document_review_service import (
     document_review_progress,
     finalize_document_review,
     reset_document_review_state,
+)
+from backend.services.notification_service import (
+    send_application_submitted_notification,
+    send_document_rejected_notification,
 )
 from backend.services.extractor import extract_text_from_pdf
 from backend.services.submit_anonymization import run_submit_anonymization
@@ -152,6 +156,21 @@ def _mask_candidate_review_progress(app: Application, progress: dict) -> dict:
     }
 
 
+def _rejection_reasons_for_application(db: Session, application_id: int) -> dict[str, str | None]:
+    rejected_docs = (
+        db.query(Document)
+        .filter(
+            Document.application_id == application_id,
+            Document.verification_status == DocumentVerificationStatus.REJECTED.value,
+        )
+        .all()
+    )
+    return {
+        (doc.doc_type.value if hasattr(doc.doc_type, "value") else str(doc.doc_type)): doc.rejection_reason
+        for doc in rejected_docs
+    }
+
+
 # ---------------------------------------------------------------------------
 # Candidate endpoints
 # ---------------------------------------------------------------------------
@@ -197,6 +216,12 @@ def create_application(
     db.add(app)
     db.commit()
     db.refresh(app)
+
+    send_application_submitted_notification(
+        db,
+        application=app,
+        user=current_user,
+    )
 
     return {
         "success": True,
@@ -425,6 +450,19 @@ def finalize_application_document_review(
             result.application.id,
             SessionLocal,
         )
+    else:
+        candidate_user = db.query(User).filter(User.id == result.application.user_id).first()
+        if candidate_user:
+            send_document_rejected_notification(
+                db,
+                application=result.application,
+                user=candidate_user,
+                rejected_document_types=result.rejected_document_types,
+                rejection_reasons=_rejection_reasons_for_application(
+                    db,
+                    result.application.id,
+                ),
+            )
 
     return {
         "success": True,
