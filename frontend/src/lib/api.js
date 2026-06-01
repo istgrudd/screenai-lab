@@ -371,6 +371,36 @@ export async function listUsers({ page = 1, limit = 20, role, q } = {}) {
   return request(`/users?${params.toString()}`);
 }
 
+export async function getAdminAuditLogs({
+  page = 1,
+  limit = 20,
+  action_type,
+  recruiter_id,
+  candidate_id,
+  date_from,
+  date_to,
+} = {}) {
+  const params = new URLSearchParams({
+    page: String(page),
+    limit: String(limit),
+  });
+  const optionalParams = {
+    action_type,
+    recruiter_id,
+    candidate_id,
+    date_from,
+    date_to,
+  };
+
+  Object.entries(optionalParams).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && String(value).trim() !== "") {
+      params.set(key, String(value).trim());
+    }
+  });
+
+  return request(`/admin/audit-logs?${params.toString()}`);
+}
+
 export async function updateUserRole(userId, role) {
   return request(`/users/${userId}/role`, {
     method: "PUT",

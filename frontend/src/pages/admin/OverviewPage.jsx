@@ -33,13 +33,13 @@ const ADMIN_SHORTCUTS = [
   },
   {
     title: "Audit Logs",
-    description: "Placeholder until the audit-log listing API is implemented.",
+    description: "Review recruiter and admin audit entries.",
     to: "/admin/audit-logs",
     icon: ShieldCheck,
   },
   {
     title: "Analytics",
-    description: "Shared analytics placeholder for the future analytics API.",
+    description: "Shared active-period recruitment analytics.",
     to: "/recruiter/analytics",
     icon: BarChart3,
   },
