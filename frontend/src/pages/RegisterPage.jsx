@@ -1,23 +1,18 @@
-import { useState, useEffect } from "react";
-import { useNavigate, Link } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import {
   ArrowLeft,
-  GraduationCap,
+  Eye,
+  EyeOff,
   Loader2,
   MailCheck,
   RefreshCw,
   UserPlus,
 } from "lucide-react";
 
+import AuthLayout from "@/components/layout/AuthLayout";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
@@ -27,9 +22,9 @@ import {
   resendVerification,
 } from "@/lib/api";
 import {
-  isAuthenticated,
-  getCurrentUser,
   defaultPathForRole,
+  getCurrentUser,
+  isAuthenticated,
 } from "@/lib/auth";
 
 const NIM_PATTERN = /^\d{10,}$/;
@@ -47,6 +42,7 @@ export default function RegisterPage() {
   const [submitting, setSubmitting] = useState(false);
   const [registrationResult, setRegistrationResult] = useState(null);
   const [resending, setResending] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
   useEffect(() => {
     if (isAuthenticated()) {
@@ -73,20 +69,20 @@ export default function RegisterPage() {
       !trimmed.major ||
       !year
     ) {
-      toast.error("All fields are required.");
+      toast.error("Semua field wajib diisi.");
       return;
     }
     if (!NIM_PATTERN.test(trimmed.nim)) {
-      toast.error("NIM must be 13 digits starting with '103'.");
+      toast.error("NIM harus berupa angka minimal 10 digit.");
       return;
     }
     if (password.length < 8) {
-      toast.error("Password must be at least 8 characters.");
+      toast.error("Password minimal 8 karakter.");
       return;
     }
     const yearNum = Number(year);
     if (!Number.isInteger(yearNum) || yearNum < 2000 || yearNum > 2100) {
-      toast.error("Please enter a valid year.");
+      toast.error("Masukkan tahun angkatan yang valid.");
       return;
     }
     setSubmitting(true);
@@ -110,7 +106,7 @@ export default function RegisterPage() {
         "Akun berhasil dibuat. Silakan cek email untuk verifikasi sebelum login."
       );
     } catch (err) {
-      toast.error(getApiErrorMessage(err, "Registration failed"));
+      toast.error(getApiErrorMessage(err, "Registrasi gagal"));
     } finally {
       setSubmitting(false);
     }
@@ -135,74 +131,96 @@ export default function RegisterPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background p-6">
-      <Card className="w-full max-w-lg">
-        <CardHeader className="space-y-3 text-center">
-          <div className="mx-auto w-11 h-11 rounded-lg bg-primary flex items-center justify-center">
-            {registrationResult ? (
-              <MailCheck className="w-6 h-6 text-primary-foreground" />
-            ) : (
-              <GraduationCap className="w-6 h-6 text-primary-foreground" />
-            )}
-          </div>
-          <CardTitle className="text-2xl">
-            {registrationResult
-              ? "Verifikasi email diperlukan"
-              : "Create your candidate account"}
-          </CardTitle>
-          <CardDescription>
-            {registrationResult
-              ? registrationResult.message
-              : "Register to apply to an MBC Laboratory division."}
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {registrationResult ? (
-            <div className="space-y-4">
-              <div className="rounded-lg border bg-muted/40 px-3 py-3 text-sm">
-                <div className="font-medium">
-                  Akun berhasil dibuat. Silakan cek email untuk verifikasi sebelum login.
+    <AuthLayout
+      eyebrow="Pendaftaran Kandidat"
+      title={registrationResult ? "Verifikasi Email Diperlukan" : "Buat Akun Kandidat"}
+      description={
+        registrationResult
+          ? "Satu langkah lagi sebelum kamu bisa masuk ke portal rekrutmen."
+          : "Mulai perjalanan seleksi bersama MBC Laboratory."
+      }
+      sideTitle="Bergabung dengan MBC Laboratory"
+      sideDescription="Lengkapi identitas kandidat dan pilih jalur divisi yang sesuai untuk mengikuti proses seleksi ScreenAI Lab."
+      footer={
+        !registrationResult && (
+          <p className="text-center text-sm text-muted-foreground">
+            Sudah punya akun?{" "}
+            <Link to="/login" className="font-semibold text-primary hover:underline">
+              Masuk ke portal
+            </Link>
+          </p>
+        )
+      }
+    >
+      {registrationResult ? (
+        <div className="space-y-5">
+          <div className="rounded-2xl border border-primary/15 bg-primary/10 px-4 py-5 text-sm">
+            <div className="flex items-start gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground">
+                <MailCheck className="h-5 w-5" />
+              </div>
+              <div>
+                <div className="font-heading text-base font-bold tracking-normal text-foreground">
+                  Akun kandidat berhasil dibuat
                 </div>
+                <p className="mt-2 leading-6 text-muted-foreground">
+                  {registrationResult.message}
+                </p>
                 {registrationResult.email && (
-                  <div className="mt-2 break-all text-muted-foreground">
-                    Email tujuan: {registrationResult.email}
+                  <div className="mt-3 rounded-xl bg-card/80 px-3 py-2 text-xs text-muted-foreground">
+                    Email tujuan:{" "}
+                    <span className="break-all font-semibold text-foreground">
+                      {registrationResult.email}
+                    </span>
                   </div>
                 )}
               </div>
-
-              <div className="flex flex-col gap-2 sm:flex-row">
-                <Button asChild className="flex-1">
-                  <Link to="/login">
-                    <ArrowLeft className="w-4 h-4" />
-                    Kembali ke Login
-                  </Link>
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="flex-1"
-                  disabled={resending}
-                  onClick={handleResendVerification}
-                >
-                  {resending ? (
-                    <>
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      Mengirim...
-                    </>
-                  ) : (
-                    <>
-                      <RefreshCw className="w-4 h-4" />
-                      Kirim Ulang Email Verifikasi
-                    </>
-                  )}
-                </Button>
-              </div>
             </div>
-          ) : (
-            <form onSubmit={onSubmit} className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          </div>
+
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <Button asChild className="brand-gradient h-10 flex-1 rounded-full shadow-sm hover:opacity-95">
+              <Link to="/login">
+                <ArrowLeft className="h-4 w-4" />
+                Kembali ke Login
+              </Link>
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              className="h-10 flex-1 rounded-full"
+              disabled={resending}
+              onClick={handleResendVerification}
+            >
+              {resending ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Mengirim...
+                </>
+              ) : (
+                <>
+                  <RefreshCw className="h-4 w-4" />
+                  Kirim Ulang Email
+                </>
+              )}
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <form onSubmit={onSubmit} className="space-y-6">
+          <div className="space-y-4">
+            <div>
+              <h2 className="font-heading text-sm font-bold tracking-normal text-foreground">
+                Identitas Kandidat
+              </h2>
+              <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                Gunakan data akademik yang sesuai untuk proses verifikasi.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
               <div className="space-y-2 md:col-span-2">
-                <Label htmlFor="full_name">Full name</Label>
+                <Label htmlFor="full_name">Nama lengkap</Label>
                 <Input
                   id="full_name"
                   type="text"
@@ -210,7 +228,8 @@ export default function RegisterPage() {
                   required
                   value={fullName}
                   onChange={(e) => setFullName(e.target.value)}
-                  placeholder="Full legal name"
+                  placeholder="Nama sesuai data akademik"
+                  className="h-10 bg-input/70"
                 />
               </div>
 
@@ -226,9 +245,10 @@ export default function RegisterPage() {
                   value={nim}
                   onChange={(e) => setNim(e.target.value.replace(/[^0-9]/g, ""))}
                   placeholder="103XXXXXXXXXX"
+                  className="h-10 bg-input/70"
                 />
-                <p className="text-xs text-muted-foreground">
-                  13 digits, starts with 103.
+                <p className="text-xs leading-5 text-muted-foreground">
+                  Masukkan NIM numerik sesuai data akademik.
                 </p>
               </div>
 
@@ -243,9 +263,23 @@ export default function RegisterPage() {
                   value={year}
                   onChange={(e) => setYear(e.target.value)}
                   placeholder="2023"
+                  className="h-10 bg-input/70"
                 />
               </div>
+            </div>
+          </div>
 
+          <div className="space-y-4">
+            <div>
+              <h2 className="font-heading text-sm font-bold tracking-normal text-foreground">
+                Kontak dan Akun
+              </h2>
+              <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                Email ini akan menerima link verifikasi dan informasi seleksi.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
               <div className="space-y-2 md:col-span-2">
                 <Label htmlFor="email">Email</Label>
                 <Input
@@ -255,26 +289,57 @@ export default function RegisterPage() {
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="you@student.telkomuniversity.ac.id"
+                  placeholder="nama@student.telkomuniversity.ac.id"
+                  className="h-10 bg-input/70"
                 />
               </div>
 
               <div className="space-y-2 md:col-span-2">
                 <Label htmlFor="password">Password</Label>
-                <Input
-                  id="password"
-                  type="password"
-                  autoComplete="new-password"
-                  minLength={8}
-                  required
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                />
-                <p className="text-xs text-muted-foreground">
-                  Minimum 8 characters.
+                <div className="relative">
+                  <Input
+                    id="password"
+                    type={showPassword ? "text" : "password"}
+                    autoComplete="new-password"
+                    minLength={8}
+                    required
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className="h-10 bg-input/70 pr-11"
+                  />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="absolute right-1 top-1/2 h-8 w-8 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                    onClick={() => setShowPassword((value) => !value)}
+                    aria-label={showPassword ? "Sembunyikan password" : "Tampilkan password"}
+                  >
+                    {showPassword ? (
+                      <EyeOff className="h-4 w-4" />
+                    ) : (
+                      <Eye className="h-4 w-4" />
+                    )}
+                  </Button>
+                </div>
+                <p className="text-xs leading-5 text-muted-foreground">
+                  Minimum 8 karakter.
                 </p>
               </div>
+            </div>
+          </div>
 
+          <div className="space-y-4">
+            <div>
+              <h2 className="font-heading text-sm font-bold tracking-normal text-foreground">
+                Program Studi
+              </h2>
+              <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                Informasi ini membantu tim meninjau profil akademik kandidat.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
               <div className="space-y-2">
                 <Label htmlFor="faculty">Fakultas</Label>
                 <Input
@@ -284,6 +349,7 @@ export default function RegisterPage() {
                   value={faculty}
                   onChange={(e) => setFaculty(e.target.value)}
                   placeholder="Fakultas Informatika"
+                  className="h-10 bg-input/70"
                 />
               </div>
 
@@ -296,37 +362,31 @@ export default function RegisterPage() {
                   value={major}
                   onChange={(e) => setMajor(e.target.value)}
                   placeholder="Data Science"
+                  className="h-10 bg-input/70"
                 />
               </div>
             </div>
+          </div>
 
-            <Button type="submit" className="w-full" disabled={submitting}>
-              {submitting ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  Creating account...
-                </>
-              ) : (
-                <>
-                  <UserPlus className="w-4 h-4" />
-                  Create account
-                </>
-              )}
-            </Button>
-
-            <p className="text-sm text-muted-foreground text-center">
-              Already have an account?{" "}
-              <Link
-                to="/login"
-                className="font-medium text-primary hover:underline"
-              >
-                Sign in
-              </Link>
-            </p>
-          </form>
-          )}
-        </CardContent>
-      </Card>
-    </div>
+          <Button
+            type="submit"
+            className="brand-gradient h-10 w-full rounded-full shadow-sm hover:opacity-95"
+            disabled={submitting}
+          >
+            {submitting ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Membuat akun...
+              </>
+            ) : (
+              <>
+                <UserPlus className="h-4 w-4" />
+                Buat Akun Kandidat
+              </>
+            )}
+          </Button>
+        </form>
+      )}
+    </AuthLayout>
   );
 }

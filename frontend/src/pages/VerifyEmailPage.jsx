@@ -11,14 +11,8 @@ import {
   ShieldCheck,
 } from "lucide-react";
 
+import AuthLayout from "@/components/layout/AuthLayout";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -40,6 +34,16 @@ function verifyEmailOnce(code) {
     );
   }
   return verifyEmailRequests.get(code);
+}
+
+function initialVerificationState(code) {
+  return {
+    requestCode: code,
+    status: code ? "loading" : "error",
+    email: null,
+    code: code ? null : "MISSING_CODE",
+    message: code ? "Memverifikasi email..." : null,
+  };
 }
 
 function verificationCopy(code) {
@@ -81,39 +85,20 @@ function verificationCopy(code) {
 export default function VerifyEmailPage() {
   const [searchParams] = useSearchParams();
   const code = searchParams.get("code")?.trim() || "";
-  const [state, setState] = useState({
-    status: code ? "loading" : "error",
-    email: null,
-    code: code ? null : "MISSING_CODE",
-    message: code ? "Memverifikasi email..." : null,
-  });
+  const [state, setState] = useState(() => initialVerificationState(code));
   const [resendEmail, setResendEmail] = useState("");
   const [resending, setResending] = useState(false);
   const [resendSent, setResendSent] = useState(false);
 
   useEffect(() => {
-    if (!code) {
-      setState({
-        status: "error",
-        email: null,
-        code: "MISSING_CODE",
-        message: null,
-      });
-      return;
-    }
+    if (!code) return;
 
     let cancelled = false;
-    setState({
-      status: "loading",
-      email: null,
-      code: null,
-      message: "Memverifikasi email...",
-    });
-
     verifyEmailOnce(code).then(({ data, error }) => {
       if (cancelled) return;
       if (error) {
         setState({
+          requestCode: code,
           status: "error",
           email: null,
           code: getApiErrorCode(error),
@@ -122,6 +107,7 @@ export default function VerifyEmailPage() {
         return;
       }
       setState({
+        requestCode: code,
         status: "success",
         email: data?.email || null,
         code: null,
@@ -155,104 +141,154 @@ export default function VerifyEmailPage() {
     }
   };
 
-  const isSuccess = state.status === "success";
-  const isLoading = state.status === "loading";
-  const copy = verificationCopy(state.code);
+  const currentState =
+    state.requestCode === code ? state : initialVerificationState(code);
+  const isSuccess = currentState.status === "success";
+  const isLoading = currentState.status === "loading";
+  const copy = verificationCopy(currentState.code);
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background p-6">
-      <Card className="w-full max-w-md">
-        <CardHeader className="space-y-3 text-center">
-          <div className="mx-auto w-11 h-11 rounded-lg bg-primary flex items-center justify-center">
-            {isLoading ? (
-              <Loader2 className="w-6 h-6 animate-spin text-primary-foreground" />
-            ) : isSuccess ? (
-              <ShieldCheck className="w-6 h-6 text-primary-foreground" />
-            ) : (
-              <AlertCircle className="w-6 h-6 text-primary-foreground" />
-            )}
-          </div>
-          <CardTitle className="text-2xl">
-            {isLoading
-              ? "Memverifikasi email"
-              : isSuccess
-                ? "Email berhasil diverifikasi"
-                : copy.title}
-          </CardTitle>
-          <CardDescription>
-            {isLoading
-              ? "Mohon tunggu sebentar."
-              : isSuccess
-                ? state.message
-                : copy.description}
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {isSuccess && state.email && (
-            <div className="flex items-center gap-2 rounded-lg border bg-muted/40 px-3 py-2 text-sm">
-              <CheckCircle2 className="w-4 h-4 text-primary" />
-              <span className="break-all">{state.email}</span>
-            </div>
-          )}
-
-          {!isLoading && !isSuccess && state.message && (
-            <div className="rounded-lg border border-destructive/25 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-              {state.message}
-            </div>
-          )}
-
-          {!isLoading && !isSuccess && copy.canResend && (
-            <form onSubmit={handleResend} className="space-y-3 rounded-lg border p-3">
-              <div className="space-y-2">
-                <Label htmlFor="resend_email">Email</Label>
-                <Input
-                  id="resend_email"
-                  type="email"
-                  autoComplete="email"
-                  value={resendEmail}
-                  onChange={(event) => setResendEmail(event.target.value)}
-                  placeholder="you@example.com"
-                />
+    <AuthLayout
+      eyebrow="Verifikasi Akun"
+      title="Verifikasi Email"
+      description={
+        isLoading
+          ? "Mohon tunggu sebentar, kami sedang memproses kode verifikasi."
+          : isSuccess
+            ? "Email berhasil diverifikasi. Kamu dapat masuk ke portal rekrutmen."
+            : copy.description
+      }
+      sideTitle="Aktivasi akun kandidat"
+      sideDescription="Verifikasi email memastikan setiap akun kandidat terhubung dengan alamat yang benar sebelum melanjutkan proses seleksi."
+    >
+      <div className="space-y-5">
+        {isLoading && (
+          <div className="rounded-2xl border border-primary/15 bg-primary/10 px-4 py-5 text-sm">
+            <div className="flex items-start gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground">
+                <Loader2 className="h-5 w-5 animate-spin" />
               </div>
-              <Button type="submit" variant="outline" className="w-full" disabled={resending}>
-                {resending ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    Mengirim...
-                  </>
-                ) : (
-                  <>
-                    <RefreshCw className="w-4 h-4" />
-                    Kirim Ulang Email Verifikasi
-                  </>
-                )}
-              </Button>
-              {resendSent && (
-                <p className="text-xs text-muted-foreground">
-                  Jika akun kandidat belum diverifikasi, email verifikasi telah dikirim.
+              <div>
+                <div className="font-heading text-base font-bold tracking-normal text-foreground">
+                  Memverifikasi email
+                </div>
+                <p className="mt-2 leading-6 text-muted-foreground">
+                  {currentState.message || "Memverifikasi email..."}
                 </p>
-              )}
-            </form>
-          )}
+              </div>
+            </div>
+          </div>
+        )}
 
-          <div className="flex flex-col gap-2 sm:flex-row">
-            <Button asChild className="flex-1">
-              <Link to="/login">
-                <ArrowLeft className="w-4 h-4" />
-                Kembali ke Login
+        {isSuccess && (
+          <div className="rounded-2xl border border-primary/15 bg-primary/10 px-4 py-5 text-sm">
+            <div className="flex items-start gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground">
+                <ShieldCheck className="h-5 w-5" />
+              </div>
+              <div>
+                <div className="font-heading text-base font-bold tracking-normal text-foreground">
+                  Akun sudah aktif
+                </div>
+                <p className="mt-2 leading-6 text-muted-foreground">
+                  {currentState.message}
+                </p>
+                {currentState.email && (
+                  <div className="mt-3 flex items-center gap-2 rounded-xl bg-card/80 px-3 py-2 text-xs">
+                    <CheckCircle2 className="h-4 w-4 shrink-0 text-primary" />
+                    <span className="break-all font-semibold text-foreground">
+                      {currentState.email}
+                    </span>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {!isLoading && !isSuccess && (
+          <div className="rounded-2xl border border-destructive/20 bg-destructive/10 px-4 py-4 text-sm text-destructive">
+            <div className="flex items-start gap-2">
+              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+              <div>
+                <div className="font-semibold">{copy.title}</div>
+                <div className="mt-1 leading-6">{copy.description}</div>
+                {currentState.message && (
+                  <div className="mt-2 leading-6">{currentState.message}</div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {!isLoading && !isSuccess && copy.canResend && (
+          <form onSubmit={handleResend} className="space-y-4 rounded-2xl border border-border/70 bg-muted/40 p-4">
+            <div>
+              <h2 className="font-heading text-sm font-bold tracking-normal text-foreground">
+                Kirim ulang email verifikasi
+              </h2>
+              <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                Masukkan email akun kandidat untuk menerima link verifikasi baru.
+              </p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="resend_email">Email</Label>
+              <Input
+                id="resend_email"
+                type="email"
+                autoComplete="email"
+                value={resendEmail}
+                onChange={(event) => setResendEmail(event.target.value)}
+                placeholder="nama@email.com"
+                className="h-10 bg-card"
+              />
+            </div>
+            <Button
+              type="submit"
+              variant="outline"
+              className="h-10 w-full rounded-full bg-card"
+              disabled={resending}
+            >
+              {resending ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Mengirim...
+                </>
+              ) : (
+                <>
+                  <RefreshCw className="h-4 w-4" />
+                  Kirim Ulang Email Verifikasi
+                </>
+              )}
+            </Button>
+            {resendSent && (
+              <p className="rounded-xl bg-primary/10 px-3 py-2 text-xs leading-5 text-primary-deep">
+                Jika akun kandidat belum diverifikasi, email verifikasi telah dikirim.
+              </p>
+            )}
+          </form>
+        )}
+
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <Button
+            asChild
+            className="brand-gradient h-10 flex-1 rounded-full shadow-sm hover:opacity-95"
+          >
+            <Link to="/login">
+              <ArrowLeft className="h-4 w-4" />
+              Kembali ke Login
+            </Link>
+          </Button>
+          {!isLoading && !isSuccess && !copy.canResend && (
+            <Button asChild variant="outline" className="h-10 flex-1 rounded-full">
+              <Link to="/forgot-password">
+                <Mail className="h-4 w-4" />
+                Bantuan Akun
               </Link>
             </Button>
-            {!isLoading && !isSuccess && !copy.canResend && (
-              <Button asChild variant="outline" className="flex-1">
-                <Link to="/forgot-password">
-                  <Mail className="w-4 h-4" />
-                  Bantuan Akun
-                </Link>
-              </Button>
-            )}
-          </div>
-        </CardContent>
-      </Card>
-    </div>
+          )}
+        </div>
+      </div>
+    </AuthLayout>
   );
 }

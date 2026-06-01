@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
 
-import RoleNavSidebar from "@/components/navigation/RoleNavSidebar";
+import AppShell from "@/components/layout/AppShell";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "@/components/ui/sonner";
@@ -58,14 +58,7 @@ import {
 } from "@/lib/candidateApplication";
 
 function AuthenticatedShell({ children }) {
-  return (
-    <div className="flex min-h-screen bg-background">
-      <RoleNavSidebar />
-      <main className="flex-1 ml-64">
-        <div className="p-6 lg:p-8 max-w-7xl mx-auto">{children}</div>
-      </main>
-    </div>
-  );
+  return <AppShell>{children}</AppShell>;
 }
 
 function ProtectedShell({ roles, children }) {

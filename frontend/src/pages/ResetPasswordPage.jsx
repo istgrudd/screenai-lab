@@ -5,19 +5,15 @@ import {
   AlertCircle,
   ArrowLeft,
   CheckCircle2,
+  Eye,
+  EyeOff,
   KeyRound,
   Loader2,
   Send,
 } from "lucide-react";
 
+import AuthLayout from "@/components/layout/AuthLayout";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -68,6 +64,8 @@ export default function ResetPasswordPage() {
   const [errorState, setErrorState] = useState(
     code ? null : { code: "MISSING_CODE", message: null }
   );
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
   const handleSubmit = async (event) => {
     event.preventDefault();
@@ -121,115 +119,174 @@ export default function ResetPasswordPage() {
     ].includes(errorState.code);
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background p-6">
-      <Card className="w-full max-w-md">
-        <CardHeader className="space-y-3 text-center">
-          <div className="mx-auto w-11 h-11 rounded-lg bg-primary flex items-center justify-center">
-            {success ? (
-              <CheckCircle2 className="w-6 h-6 text-primary-foreground" />
-            ) : terminalCodeError ? (
-              <AlertCircle className="w-6 h-6 text-primary-foreground" />
-            ) : (
-              <KeyRound className="w-6 h-6 text-primary-foreground" />
-            )}
-          </div>
-          <CardTitle className="text-2xl">
-            {success
-              ? "Password berhasil direset"
-              : terminalCodeError
-                ? errorCopy.title
-                : "Buat password baru"}
-          </CardTitle>
-          <CardDescription>
-            {success
-              ? "Silakan login ulang menggunakan password baru."
-              : terminalCodeError
-                ? errorCopy.description
-                : "Masukkan password baru untuk akun kamu."}
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {success ? (
-            <Button asChild className="w-full">
+    <AuthLayout
+      eyebrow="Keamanan Akun"
+      title={
+        success
+          ? "Password Berhasil Direset"
+          : terminalCodeError
+            ? errorCopy.title
+            : "Atur Password Baru"
+      }
+      description={
+        success
+          ? "Silakan login ulang menggunakan password baru."
+          : terminalCodeError
+            ? errorCopy.description
+            : "Masukkan password baru untuk mengamankan akses akun kandidat."
+      }
+      sideTitle="Pulihkan akses portal"
+      sideDescription="Gunakan link reset dari email resmi untuk mengganti password dan kembali melanjutkan proses rekrutmen."
+    >
+      <div className="space-y-5">
+        {success ? (
+          <div className="space-y-5">
+            <div className="rounded-2xl border border-primary/15 bg-primary/10 px-4 py-5 text-sm">
+              <div className="flex items-start gap-3">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground">
+                  <CheckCircle2 className="h-5 w-5" />
+                </div>
+                <div>
+                  <div className="font-heading text-base font-bold tracking-normal text-foreground">
+                    Password baru sudah aktif
+                  </div>
+                  <p className="mt-2 leading-6 text-muted-foreground">
+                    Token sesi lama telah dihapus. Masuk kembali untuk melanjutkan.
+                  </p>
+                </div>
+              </div>
+            </div>
+            <Button asChild className="brand-gradient h-10 w-full rounded-full shadow-sm hover:opacity-95">
               <Link to="/login">
-                <ArrowLeft className="w-4 h-4" />
+                <ArrowLeft className="h-4 w-4" />
                 Kembali ke Login
               </Link>
             </Button>
-          ) : (
-            <>
-              {code && !terminalCodeError && (
-                <form onSubmit={handleSubmit} className="space-y-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="new_password">Password baru</Label>
+          </div>
+        ) : (
+          <>
+            {code && !terminalCodeError && (
+              <form onSubmit={handleSubmit} className="space-y-5">
+                <div className="space-y-2">
+                  <Label htmlFor="new_password">Password baru</Label>
+                  <div className="relative">
                     <Input
                       id="new_password"
-                      type="password"
+                      type={showNewPassword ? "text" : "password"}
                       autoComplete="new-password"
                       minLength={8}
                       required
                       value={newPassword}
                       onChange={(event) => setNewPassword(event.target.value)}
+                      className="h-10 bg-input/70 pr-11"
                     />
-                    <p className="text-xs text-muted-foreground">
-                      Minimum 8 karakter.
-                    </p>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="absolute right-1 top-1/2 h-8 w-8 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                      onClick={() => setShowNewPassword((value) => !value)}
+                      aria-label={
+                        showNewPassword ? "Sembunyikan password baru" : "Tampilkan password baru"
+                      }
+                    >
+                      {showNewPassword ? (
+                        <EyeOff className="h-4 w-4" />
+                      ) : (
+                        <Eye className="h-4 w-4" />
+                      )}
+                    </Button>
                   </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="confirm_password">Konfirmasi password</Label>
+                  <p className="text-xs leading-5 text-muted-foreground">
+                    Minimum 8 karakter.
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="confirm_password">Konfirmasi password</Label>
+                  <div className="relative">
                     <Input
                       id="confirm_password"
-                      type="password"
+                      type={showConfirmPassword ? "text" : "password"}
                       autoComplete="new-password"
                       minLength={8}
                       required
                       value={confirmPassword}
                       onChange={(event) => setConfirmPassword(event.target.value)}
+                      className="h-10 bg-input/70 pr-11"
                     />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="absolute right-1 top-1/2 h-8 w-8 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                      onClick={() => setShowConfirmPassword((value) => !value)}
+                      aria-label={
+                        showConfirmPassword
+                          ? "Sembunyikan konfirmasi password"
+                          : "Tampilkan konfirmasi password"
+                      }
+                    >
+                      {showConfirmPassword ? (
+                        <EyeOff className="h-4 w-4" />
+                      ) : (
+                        <Eye className="h-4 w-4" />
+                      )}
+                    </Button>
                   </div>
-                  <Button type="submit" className="w-full" disabled={submitting}>
-                    {submitting ? (
-                      <>
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                        Menyimpan...
-                      </>
-                    ) : (
-                      <>
-                        <Send className="w-4 h-4" />
-                        Reset Password
-                      </>
-                    )}
-                  </Button>
-                </form>
-              )}
-
-              {errorState && (
-                <div className="space-y-3 rounded-lg border border-destructive/25 bg-destructive/10 px-3 py-3 text-sm text-destructive">
-                  <div className="font-medium">{errorCopy.title}</div>
-                  <div>{errorCopy.description}</div>
                 </div>
-              )}
 
-              <div className="flex flex-col gap-2 sm:flex-row">
-                <Button asChild variant="outline" className="flex-1">
-                  <Link to="/login">
-                    <ArrowLeft className="w-4 h-4" />
-                    Kembali ke Login
+                <Button
+                  type="submit"
+                  className="brand-gradient h-10 w-full rounded-full shadow-sm hover:opacity-95"
+                  disabled={submitting}
+                >
+                  {submitting ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Menyimpan...
+                    </>
+                  ) : (
+                    <>
+                      <Send className="h-4 w-4" />
+                      Reset Password
+                    </>
+                  )}
+                </Button>
+              </form>
+            )}
+
+            {errorState && (
+              <div className="rounded-2xl border border-destructive/20 bg-destructive/10 px-4 py-4 text-sm text-destructive">
+                <div className="flex items-start gap-2">
+                  <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                  <div>
+                    <div className="font-semibold">{errorCopy.title}</div>
+                    <div className="mt-1 leading-6">{errorCopy.description}</div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <Button asChild variant="outline" className="h-10 flex-1 rounded-full">
+                <Link to="/login">
+                  <ArrowLeft className="h-4 w-4" />
+                  Kembali ke Login
+                </Link>
+              </Button>
+              {errorState && (
+                <Button asChild className="brand-gradient h-10 flex-1 rounded-full shadow-sm hover:opacity-95">
+                  <Link to="/forgot-password">
+                    <KeyRound className="h-4 w-4" />
+                    Minta Link Baru
                   </Link>
                 </Button>
-                {errorState && (
-                  <Button asChild className="flex-1">
-                    <Link to="/forgot-password">
-                      <KeyRound className="w-4 h-4" />
-                      Minta Link Baru
-                    </Link>
-                  </Button>
-                )}
-              </div>
-            </>
-          )}
-        </CardContent>
-      </Card>
-    </div>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+    </AuthLayout>
   );
 }
