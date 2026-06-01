@@ -106,6 +106,7 @@ def _zero_payload(division: Division | None) -> dict:
         "demographics": {
             "faculty_distribution": [],
             "major_distribution": [],
+            "year_distribution": [],
         },
         "message": "No active recruitment period.",
     }
@@ -370,14 +371,22 @@ def _demographic_scope(apps: list[Application]) -> list[Application]:
     ]
 
 
-def _clean_demographic_label(value: str | None) -> str:
+def _clean_demographic_label(value: object | None) -> str:
     if value is None:
         return "Unknown"
     cleaned = str(value).strip()
     return cleaned or "Unknown"
 
 
-def _distribution(items: list[str]) -> list[dict]:
+def _year_distribution_sort_key(pair: tuple[str, int]) -> tuple[int, int, str]:
+    label, _count = pair
+    try:
+        return (0, -int(label), label)
+    except (TypeError, ValueError):
+        return (1, 0, label.lower())
+
+
+def _distribution(items: list[str], *, sort_by_year: bool = False) -> list[dict]:
     total = len(items)
     if total == 0:
         return []
@@ -386,16 +395,19 @@ def _distribution(items: list[str]) -> list[dict]:
     for item in items:
         counts[item] = counts.get(item, 0) + 1
 
+    sort_key = (
+        _year_distribution_sort_key
+        if sort_by_year
+        else lambda pair: (-pair[1], pair[0].lower())
+    )
+
     return [
         {
             "label": label,
             "count": count,
             "percentage": round((count / total) * 100, 1),
         }
-        for label, count in sorted(
-            counts.items(),
-            key=lambda pair: (-pair[1], pair[0].lower()),
-        )
+        for label, count in sorted(counts.items(), key=sort_key)
     ]
 
 
@@ -406,15 +418,18 @@ def _demographics_payload(
     scoped_apps = _demographic_scope(apps)
     faculties: list[str] = []
     majors: list[str] = []
+    years: list[str] = []
 
     for app in scoped_apps:
         user = users_by_id.get(app.user_id)
         faculties.append(_clean_demographic_label(user.faculty if user else None))
         majors.append(_clean_demographic_label(user.major if user else None))
+        years.append(_clean_demographic_label(user.year if user else None))
 
     return {
         "faculty_distribution": _distribution(faculties),
         "major_distribution": _distribution(majors),
+        "year_distribution": _distribution(years, sort_by_year=True),
     }
 
 

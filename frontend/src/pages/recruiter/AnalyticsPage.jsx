@@ -67,6 +67,7 @@ const EMPTY_ANALYTICS = {
   demographics: {
     faculty_distribution: [],
     major_distribution: [],
+    year_distribution: [],
   },
 };
 
@@ -174,6 +175,7 @@ export default function RecruiterAnalyticsPage() {
   const funnelCounts = analytics?.funnel_counts || {};
   const facultyDistribution = demographics.faculty_distribution || [];
   const majorDistribution = demographics.major_distribution || [];
+  const yearDistribution = demographics.year_distribution || [];
 
   const maxDivisionTotal = useMemo(
     () => maxOf(applicantsByDivision, "total"),
@@ -207,6 +209,10 @@ export default function RecruiterAnalyticsPage() {
   const maxMajorCount = useMemo(
     () => maxOf(majorDistribution, "count"),
     [majorDistribution]
+  );
+  const maxYearCount = useMemo(
+    () => maxOf(yearDistribution, "count"),
+    [yearDistribution]
   );
 
   const selectedDivisionLabel =
@@ -350,7 +356,7 @@ export default function RecruiterAnalyticsPage() {
         />
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -399,6 +405,35 @@ export default function RecruiterAnalyticsPage() {
                 max={maxFunnelCount}
               />
             ))}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <GraduationCap className="w-4 h-4 text-primary" />
+              Distribusi Angkatan
+            </CardTitle>
+            <CardDescription>
+              Year distribution for submitted or later applications in scope.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {yearDistribution.length ? (
+              yearDistribution.map((item) => (
+                <BarRow
+                  key={item.label}
+                  label={item.label}
+                  value={item.count}
+                  max={maxYearCount}
+                  detail={`${formatScore(item.percentage)}% of scope`}
+                />
+              ))
+            ) : (
+              <p className="text-sm text-muted-foreground py-4">
+                Belum ada data angkatan.
+              </p>
+            )}
           </CardContent>
         </Card>
       </div>

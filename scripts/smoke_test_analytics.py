@@ -28,6 +28,7 @@ FAIL = "[FAIL]"
 TEST_PASSWORD = "hunter2secure"
 EMAIL_PREFIX = "smoke+analytics_"
 PERIOD_NAME = "smoke+analytics active period"
+_UNSET = object()
 
 
 def _assert(cond: bool, msg: str) -> int:
@@ -107,6 +108,7 @@ def _create_user(
     nim: str | None = None,
     faculty: str | None = None,
     major: str | None = None,
+    year: int | None | object = _UNSET,
 ) -> User:
     now = datetime.now(timezone.utc)
     user = User(
@@ -124,7 +126,11 @@ def _create_user(
             if major is not None
             else ("Data Science" if role == UserRole.CANDIDATE else None)
         ),
-        year=2023 if role == UserRole.CANDIDATE else None,
+        year=(
+            year
+            if year is not _UNSET
+            else (2023 if role == UserRole.CANDIDATE else None)
+        ),
         whatsapp="+6281234567890" if role == UserRole.CANDIDATE else None,
         role=role,
         is_active=True,
@@ -220,6 +226,7 @@ def _add_application(
     score: float | None = None,
     faculty: str | None = None,
     major: str | None = None,
+    year: int | None | object = _UNSET,
 ) -> Application:
     user = _create_user(
         db,
@@ -229,6 +236,7 @@ def _add_application(
         nim=nim,
         faculty=faculty,
         major=major,
+        year=year,
     )
     app = Application(
         user_id=user.id,
@@ -280,6 +288,7 @@ def _seed_applications(period_id: int) -> None:
             doc_types=[DocumentType.CV, DocumentType.KHS, DocumentType.KTM],
             faculty="Fakultas Informatika",
             major="Data Science",
+            year=2023,
         )
         _add_application(
             db,
@@ -297,6 +306,7 @@ def _seed_applications(period_id: int) -> None:
             ],
             faculty="Fakultas Informatika",
             major="Software Engineering",
+            year=2023,
         )
         _add_application(
             db,
@@ -308,6 +318,7 @@ def _seed_applications(period_id: int) -> None:
             doc_types=all_docs,
             faculty="Fakultas Rekayasa Industri",
             major="Industrial Engineering",
+            year=2022,
         )
         _add_application(
             db,
@@ -320,6 +331,7 @@ def _seed_applications(period_id: int) -> None:
             score=10.0,
             faculty="Fakultas Informatika",
             major="Data Science",
+            year=2024,
         )
         _add_application(
             db,
@@ -331,6 +343,7 @@ def _seed_applications(period_id: int) -> None:
             doc_types=[DocumentType.CV, DocumentType.KHS],
             faculty="Fakultas Informatika",
             major="Cyber Security",
+            year=2024,
         )
         _add_application(
             db,
@@ -343,6 +356,7 @@ def _seed_applications(period_id: int) -> None:
             score=25.0,
             faculty="Fakultas Teknik Elektro",
             major="Computer Engineering",
+            year=2023,
         )
         _add_application(
             db,
@@ -355,6 +369,7 @@ def _seed_applications(period_id: int) -> None:
             score=45.0,
             faculty="",
             major="",
+            year=None,
         )
         _add_application(
             db,
@@ -367,6 +382,7 @@ def _seed_applications(period_id: int) -> None:
             score=75.0,
             faculty="Fakultas Informatika",
             major="Data Science",
+            year=2025,
         )
         _add_application(
             db,
@@ -379,6 +395,7 @@ def _seed_applications(period_id: int) -> None:
             score=95.0,
             faculty="Fakultas Industri Kreatif",
             major="Game Development",
+            year=2022,
         )
         _add_application(
             db,
@@ -437,13 +454,26 @@ def main() -> int:
             all(item["total"] == 0 for item in data["applicants_per_division"]),
             "empty active period division counts are zero",
         )
+        empty_demographics = data.get("demographics", {})
         failures += _assert(
-            data["demographics"]["faculty_distribution"] == [],
+            {
+                "faculty_distribution",
+                "major_distribution",
+                "year_distribution",
+            }.issubset(empty_demographics),
+            "empty active period returns all demographic keys",
+        )
+        failures += _assert(
+            empty_demographics.get("faculty_distribution") == [],
             "empty active period faculty distribution is empty",
         )
         failures += _assert(
-            data["demographics"]["major_distribution"] == [],
+            empty_demographics.get("major_distribution") == [],
             "empty active period major distribution is empty",
+        )
+        failures += _assert(
+            empty_demographics.get("year_distribution") == [],
+            "empty active period year distribution is empty",
         )
 
     _seed_applications(period_id)
@@ -529,6 +559,14 @@ def main() -> int:
         failures += _assert(bucket_counts.get(label) == 1, f"score bucket {label}=1")
 
     demographics = data.get("demographics", {})
+    failures += _assert(
+        {
+            "faculty_distribution",
+            "major_distribution",
+            "year_distribution",
+        }.issubset(demographics),
+        "seeded analytics returns all demographic keys",
+    )
     faculty_counts = {
         item["label"]: item["count"]
         for item in demographics.get("faculty_distribution", [])
@@ -558,6 +596,28 @@ def main() -> int:
     }
     for label, expected in expected_majors.items():
         failures += _assert(major_counts.get(label) == expected, f"major {label}={expected}")
+
+    year_counts = {
+        item["label"]: item["count"]
+        for item in demographics.get("year_distribution", [])
+    }
+    year_labels = [item["label"] for item in demographics.get("year_distribution", [])]
+    expected_years = {
+        "2025": 1,
+        "2024": 2,
+        "2023": 3,
+        "2022": 2,
+        "Unknown": 1,
+    }
+    for label, expected in expected_years.items():
+        failures += _assert(
+            year_counts.get(label) == expected,
+            f"year {label}={expected}",
+        )
+    failures += _assert(
+        year_labels == ["2025", "2024", "2023", "2022", "Unknown"],
+        "year distribution sorts numeric years descending with Unknown last",
+    )
 
     response = client.get(
         "/api/recruiter/analytics?division=big_data",
@@ -606,6 +666,20 @@ def main() -> int:
         filtered_major_counts.get("Software Engineering") == 1,
         "division filter keeps software major",
     )
+    filtered_year_counts = {
+        item["label"]: item["count"]
+        for item in filtered_demographics.get("year_distribution", [])
+    }
+    expected_filtered_years = {
+        "2024": 1,
+        "2023": 2,
+        "2022": 1,
+    }
+    for label, expected in expected_filtered_years.items():
+        failures += _assert(
+            filtered_year_counts.get(label) == expected,
+            f"division filter scopes year {label}={expected}",
+        )
     filtered_divisions = {
         item["division"]: item for item in filtered.get("applicants_per_division", [])
     }

@@ -14,7 +14,7 @@ Phase 9 - Analytics API and Dashboard
 
 ## Summary
 
-Implemented active-period recruitment analytics for recruiter and super admin users. The backend now computes application summary metrics, division counts, funnel counts, document completeness, missing document counts, evaluation progress, and score distribution. The frontend `/recruiter/analytics` page now consumes the API and renders metric cards, filters, bar visuals, progress indicators, and empty states.
+Implemented active-period recruitment analytics for recruiter and super admin users. The backend now computes application summary metrics, division counts, funnel counts, document completeness, missing document counts, evaluation progress, score distribution, and candidate demographics. The frontend `/recruiter/analytics` page now consumes the API and renders metric cards, filters, bar visuals, progress indicators, demographic distributions, and empty states.
 
 ## Previous Phase Dependency
 
@@ -39,7 +39,7 @@ Phase 9 follows the finalized Phase 7.5 and Phase 8 workflow:
 - Missing documents by type.
 - Evaluation progress.
 - Score distribution.
-- Candidate demographics by faculty and major.
+- Candidate demographics by faculty, major, and angkatan/year.
 - Frontend analytics dashboard.
 - Smoke tests.
 
@@ -63,8 +63,9 @@ Phase 9 follows the finalized Phase 7.5 and Phase 8 workflow:
 - Empty active period returns `200` with zero metrics.
 - Invalid `division` query values return FastAPI's normal `422`.
 - Metrics are computed on the backend from `Application`, `Document`, `DocumentType`, `RecruitmentPeriod`, and `Candidate`.
-- Added `demographics.faculty_distribution` and `demographics.major_distribution`, computed from active-period non-draft/non-cancelled applications joined to `User.faculty` and `User.major`.
+- Added `demographics.faculty_distribution`, `demographics.major_distribution`, and `demographics.year_distribution`, computed from active-period non-draft/non-cancelled applications joined to `User.faculty`, `User.major`, and `User.year`.
 - Demographic labels defensively collapse null/blank values to `Unknown`.
+- Year distribution sorts numeric years descending and keeps `Unknown` last.
 
 ## Frontend Changes
 
@@ -73,7 +74,7 @@ Phase 9 follows the finalized Phase 7.5 and Phase 8 workflow:
 - Added a division filter dropdown.
 - Added active-period summary and no-active-period/empty-period states.
 - Added metric cards, applicants per division, funnel counts, document completeness, missing documents, evaluation progress, and score distribution visuals.
-- Added readable faculty and major distribution sections using the existing card/bar UI style.
+- Added readable faculty, major, and angkatan distribution sections using the existing card/bar UI style.
 - Route and sidebar link already existed and were reused without duplication.
 
 ## API / Endpoint Behavior
@@ -122,12 +123,13 @@ Division filter behavior:
 - `score_distribution`: latest linked `Candidate.composite_score` for active-period applications in scope, bucketed into `0-20`, `21-40`, `41-60`, `61-80`, and `81-100`.
 - `demographics.faculty_distribution`: non-draft and non-cancelled active-period applications in scope, grouped by linked `User.faculty`; each item returns `{ label, count, percentage }`.
 - `demographics.major_distribution`: non-draft and non-cancelled active-period applications in scope, grouped by linked `User.major`; each item returns `{ label, count, percentage }`.
+- `demographics.year_distribution`: non-draft and non-cancelled active-period applications in scope, grouped by linked `User.year`; each item returns `{ label, count, percentage }`, numeric years are sorted descending, and missing values are returned as `Unknown`.
 
 Draft applications without `period_id` are not included because the active-period scope is `Application.period_id == active_period.id`. This matches the current model where `period_id` is stamped at submit time, except directly seeded/test draft rows that already carry a period.
 
 ## Smoke Test Results
 
-- `python -m scripts.smoke_test_analytics`: passed; includes demographic distribution counts, division-scoped demographics, and empty-period demographic arrays.
+- `python -m scripts.smoke_test_analytics`: passed; includes faculty/major/year demographic counts, division-scoped demographics, empty-period demographic arrays, and year sort coverage.
 - `python -m scripts.smoke_test_period_safety`: passed.
 - `python -m scripts.smoke_test_phase_enforcement`: passed.
 - `python -m scripts.smoke_test_document_review_flow`: passed.
@@ -147,9 +149,10 @@ Draft applications without `period_id` are not included because the active-perio
 - Candidate cannot access analytics: backend smoke-tested with `403`.
 - Empty active period state is readable: implemented and smoke-tested.
 - Division filter works: smoke-tested for `big_data`.
-- Faculty and major distributions are empty for an empty active period: smoke-tested.
-- Faculty and major distributions are counted from seeded candidates: smoke-tested.
-- Division filter also scopes faculty and major distributions: smoke-tested.
+- Faculty, major, and year distributions are empty for an empty active period: smoke-tested.
+- Faculty, major, and year distributions are counted from seeded candidates: smoke-tested.
+- Division filter also scopes faculty, major, and year distributions: smoke-tested.
+- Year distribution sorts numeric years descending with `Unknown` last: smoke-tested.
 - Applicants per division renders: implemented and smoke-tested via response shape.
 - Funnel counts render: implemented and smoke-tested.
 - Document completeness renders: implemented and smoke-tested.
@@ -166,7 +169,7 @@ Draft applications without `period_id` are not included because the active-perio
 - Real-time evaluation task monitoring is out of scope.
 - OCR/scanned PDF extraction error analytics are not included.
 - Evaluation error count is limited to linked `Candidate.status` values of `error` or `failed`; the current evaluation pipeline does not persist per-run error analytics.
-- Demographic analytics depend on candidate profile `faculty` and `major` fields and group missing/blank values as `Unknown`.
+- Demographic analytics depend on candidate profile `faculty`, `major`, and `year` fields and group missing/blank values as `Unknown`.
 - Browser automation/screenshot QA was not added; frontend verification used `npm run build`.
 - An in-app browser sanity check was attempted, but the Browser plugin reported `iab` unavailable in this session.
 
