@@ -352,6 +352,13 @@ export async function listRecruiterApplications({ division, status } = {}) {
   return request(`/recruiter/applications${qs ? `?${qs}` : ""}`);
 }
 
+export async function getRecruiterAnalytics({ division } = {}) {
+  const params = new URLSearchParams();
+  if (division && division !== "all") params.set("division", division);
+  const qs = params.toString();
+  return request(`/recruiter/analytics${qs ? `?${qs}` : ""}`);
+}
+
 // ── Super Admin: users management ───────────────────────────────────────────
 
 export async function listUsers({ page = 1, limit = 20, role, q } = {}) {
