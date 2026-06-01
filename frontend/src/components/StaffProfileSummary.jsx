@@ -48,7 +48,7 @@ export default function StaffProfileSummary({ title, description, editPath }) {
       }
     }
 
-    load();
+    Promise.resolve().then(load);
     return () => {
       cancelled = true;
     };

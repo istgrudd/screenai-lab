@@ -7,11 +7,13 @@ export default function SettingsPage() {
     <AdminPlaceholderPage
       icon={Settings}
       title="Settings"
-      description="Global operational settings placeholder for future backend support."
-      pending="No settings API is available in this frontend-only phase. This page keeps the route and navigation stable without implying that settings are already configurable."
+      description="System settings placeholder for future backend-supported controls."
+      pending="No settings API is available in this phase. This page keeps the route and navigation stable without implying that settings can be saved today."
       items={[
-        "Possible settings: email sender identity and notification toggles.",
-        "Possible settings: analytics defaults and operational feature flags.",
+        "Recruitment defaults",
+        "Email provider",
+        "Evaluation parameters",
+        "Access control",
       ]}
     />
   );

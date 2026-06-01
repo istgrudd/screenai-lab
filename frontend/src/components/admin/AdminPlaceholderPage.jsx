@@ -1,6 +1,9 @@
+import { createElement } from "react";
 import { Clock } from "lucide-react";
 
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import ActionCard from "@/components/common/ActionCard";
+import EmptyState from "@/components/common/EmptyState";
+import PageHeader from "@/components/layout/PageHeader";
 
 export default function AdminPlaceholderPage({
   icon: Icon = Clock,
@@ -11,29 +14,38 @@ export default function AdminPlaceholderPage({
 }) {
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
-          <Icon className="w-6 h-6 text-primary" />
-          {title}
-        </h1>
-        <p className="text-muted-foreground mt-1">{description}</p>
-      </div>
+      <PageHeader
+        eyebrow="Super Admin"
+        title={title}
+        description={description}
+        status={
+          <span className="inline-flex items-center gap-2 rounded-full bg-warning/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.08em] text-warning">
+            {createElement(Icon, { className: "h-3.5 w-3.5" })}
+            Backend pending
+          </span>
+        }
+      />
 
-      <Card className="border-dashed">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-lg">Backend support pending</CardTitle>
-          <CardDescription>{pending}</CardDescription>
-        </CardHeader>
-        {items.length > 0 && (
-          <CardContent className="space-y-2 text-sm text-muted-foreground">
-            {items.map((item) => (
-              <div key={item} className="rounded-lg border px-3 py-2">
-                {item}
-              </div>
-            ))}
-          </CardContent>
-        )}
-      </Card>
+      <EmptyState
+        icon={Icon}
+        title="Backend support pending"
+        description={pending}
+        className="border-dashed"
+      />
+
+      {items.length > 0 && (
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          {items.map((item) => (
+            <ActionCard
+              key={item}
+              icon={Clock}
+              title={item}
+              description="Planned setting only. No save action is available until the backend exposes a supported API."
+              tone="info"
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 }

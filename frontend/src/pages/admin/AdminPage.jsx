@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import {
@@ -8,21 +8,20 @@ import {
   KeyRound,
   Loader2,
   Power,
-  Search,
   ShieldAlert,
   UserCog,
 } from "lucide-react";
 
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import ConfirmActionDialog from "@/components/common/ConfirmActionDialog";
+import EmptyState from "@/components/common/EmptyState";
+import LoadingState from "@/components/common/LoadingState";
+import MetricCard from "@/components/common/MetricCard";
+import StatusBadge from "@/components/common/StatusBadge";
+import PageHeader from "@/components/layout/PageHeader";
+import PeriodSafetyPanel from "@/components/admin/PeriodSafetyPanel";
+import UserManagementPanel from "@/components/admin/UserManagementPanel";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Select,
   SelectContent,
@@ -38,7 +37,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-
 import {
   deactivateUser,
   getActivePeriod,
@@ -49,22 +47,35 @@ import {
   updateUserRole,
 } from "@/lib/api";
 import { getCurrentUser } from "@/lib/auth";
-import RecruitmentPhaseCard from "@/components/RecruitmentPhaseCard";
 
 const PAGE_SIZE = 20;
 
-const ROLES = [
-  { id: "all", label: "All roles" },
-  { id: "candidate", label: "Candidate" },
-  { id: "recruiter", label: "Recruiter" },
-  { id: "super_admin", label: "Super Admin" },
+const ROLE_OPTIONS = [
+  { id: "candidate", label: "candidate" },
+  { id: "recruiter", label: "recruiter" },
+  { id: "super_admin", label: "super_admin" },
 ];
 
-const ROLE_BADGE_VARIANT = {
-  super_admin: "default",
-  recruiter: "secondary",
-  candidate: "outline",
-};
+function roleTone(role) {
+  if (role === "super_admin") return "destructive";
+  if (role === "recruiter") return "brand";
+  return "neutral";
+}
+
+function roleLabel(role) {
+  return String(role || "unknown").replace("_", " ");
+}
+
+function formatDate(value) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+  return date.toLocaleDateString("id-ID", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
+}
 
 export default function AdminPage() {
   const me = getCurrentUser();
@@ -76,31 +87,34 @@ export default function AdminPage() {
   const [appliedQuery, setAppliedQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [busyUserId, setBusyUserId] = useState(null);
+  const [confirmAction, setConfirmAction] = useState(null);
 
-  // Task 13.4.1 — phase card at the top of the admin panel.
   const [activePeriod, setActivePeriod] = useState(null);
   const [activeStats, setActiveStats] = useState(null);
   const [periodLoading, setPeriodLoading] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
-    (async () => {
+
+    async function loadPeriodContext() {
       setPeriodLoading(true);
       try {
-        const p = await getActivePeriod();
-        if (!cancelled) setActivePeriod(p);
+        const period = await getActivePeriod();
+        if (!cancelled) setActivePeriod(period);
       } catch {
         if (!cancelled) setActivePeriod(null);
       }
       try {
-        const s = await getActivePeriodStats();
-        if (!cancelled) setActiveStats(s);
+        const stats = await getActivePeriodStats();
+        if (!cancelled) setActiveStats(stats);
       } catch {
         if (!cancelled) setActiveStats(null);
       } finally {
         if (!cancelled) setPeriodLoading(false);
       }
-    })();
+    }
+
+    Promise.resolve().then(loadPeriodContext);
     return () => {
       cancelled = true;
     };
@@ -125,11 +139,21 @@ export default function AdminPage() {
   }, [page, roleFilter, appliedQuery]);
 
   useEffect(() => {
-    fetchPage();
+    Promise.resolve().then(fetchPage);
   }, [fetchPage]);
 
-  const onSearchSubmit = (e) => {
-    e.preventDefault();
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const activeUsers = useMemo(
+    () => users.filter((user) => user.is_active).length,
+    [users]
+  );
+  const superAdmins = useMemo(
+    () => users.filter((user) => user.role === "super_admin").length,
+    [users]
+  );
+
+  const onSearchSubmit = (event) => {
+    event.preventDefault();
     setPage(1);
     setAppliedQuery(query.trim());
   };
@@ -139,7 +163,7 @@ export default function AdminPage() {
     try {
       await updateUserRole(userId, newRole);
       toast.success("Role updated.");
-      fetchPage();
+      await fetchPage();
     } catch (err) {
       toast.error(err.message || "Role update failed");
     } finally {
@@ -147,267 +171,298 @@ export default function AdminPage() {
     }
   };
 
-  const handleToggleActive = async (user) => {
+  const executeConfirmedAction = async () => {
+    if (!confirmAction?.user) return;
+    const user = confirmAction.user;
     setBusyUserId(user.id);
     try {
-      if (user.is_active) {
+      if (confirmAction.type === "deactivate") {
         await deactivateUser(user.id);
         toast.success(`${user.full_name} deactivated.`);
-      } else {
+        await fetchPage();
+      } else if (confirmAction.type === "reactivate") {
         await reactivateUser(user.id);
         toast.success(`${user.full_name} reactivated.`);
+        await fetchPage();
+      } else if (confirmAction.type === "reset-password") {
+        await sendAdminPasswordResetLink(user.id);
+        toast.success(`Password reset link sent to ${user.full_name}.`);
       }
-      fetchPage();
     } catch (err) {
       toast.error(err.message || "Action failed");
     } finally {
       setBusyUserId(null);
+      setConfirmAction(null);
     }
   };
 
-  const handleResetPassword = async (user) => {
-    const confirmed = window.confirm(
-      `Send a password reset link to ${user.full_name} (${user.email})?\n\n` +
-        "The user will set their own new password via email."
-    );
-    if (!confirmed) return;
-
-    setBusyUserId(user.id);
-    try {
-      await sendAdminPasswordResetLink(user.id);
-      toast.success(`Password reset link sent to ${user.full_name}.`);
-    } catch (err) {
-      toast.error(err.message || "Failed to send password reset link");
-    } finally {
-      setBusyUserId(null);
-    }
-  };
-
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const confirmTitle =
+    confirmAction?.type === "deactivate"
+      ? `Deactivate ${confirmAction.user?.full_name}?`
+      : confirmAction?.type === "reactivate"
+      ? `Reactivate ${confirmAction.user?.full_name}?`
+      : "Send assisted password reset?";
+  const confirmDescription =
+    confirmAction?.type === "deactivate"
+      ? "This disables account access. The account can be reactivated later by a super admin."
+      : confirmAction?.type === "reactivate"
+      ? "This restores account access for the selected user."
+      : confirmAction?.user
+      ? `Send a password reset link to ${confirmAction.user.full_name} (${confirmAction.user.email}). The user will set their own password via email.`
+      : "";
 
   return (
     <div className="space-y-6">
-      <div className="flex items-start justify-between gap-3 flex-wrap">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
-            <UserCog className="w-6 h-6 text-primary" />
-            User Management
-          </h1>
-          <p className="text-muted-foreground mt-1">
-            Promote users, change roles, and deactivate accounts.
-          </p>
-        </div>
-        <Button asChild variant="outline" className="gap-2">
-          <Link to="/admin/periods">
-            <CalendarClock className="w-4 h-4" />
-            Kelola Periode Rekrutasi
-          </Link>
-        </Button>
+      <PageHeader
+        eyebrow="Super Admin / Users"
+        title="User Management"
+        description="Manage roles, account status, and assisted password reset with clear self-protection."
+        action={
+          <Button asChild variant="outline" className="gap-2">
+            <Link to="/admin/periods">
+              <CalendarClock className="h-4 w-4" />
+              Kelola Periode
+            </Link>
+          </Button>
+        }
+      />
+
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+        <MetricCard
+          icon={UserCog}
+          label="Users in current page"
+          value={loading ? "..." : users.length}
+          helper={`${Number(total || 0).toLocaleString()} total matched records.`}
+        />
+        <MetricCard
+          icon={Power}
+          label="Active on page"
+          value={loading ? "..." : activeUsers}
+          helper="Current page only; use filters for narrower review."
+          tone="success"
+        />
+        <MetricCard
+          icon={ShieldAlert}
+          label="Super admins on page"
+          value={loading ? "..." : superAdmins}
+          helper="Review role changes carefully before promoting users."
+          tone="warning"
+        />
       </div>
 
-      {/* Task 13.4.1 — phase timeline + stats. */}
-      <RecruitmentPhaseCard
-        role="super_admin"
-        period={activePeriod}
-        stats={activeStats}
+      <PeriodSafetyPanel
+        activePeriod={activePeriod}
+        activeStats={activeStats}
+        applications={[]}
         loading={periodLoading}
       />
 
-      {/* Filters */}
-      <Card>
-        <CardContent className="py-4 flex flex-wrap gap-3 items-center">
-          <form onSubmit={onSearchSubmit} className="flex items-center gap-2 flex-1 min-w-[220px]">
-            <div className="relative flex-1">
-              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <Input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search by name, email, or NIM"
-                className="pl-8"
-              />
-            </div>
-            <Button type="submit" variant="outline" size="sm">
-              Search
-            </Button>
-          </form>
-          <Select
-            value={roleFilter}
-            onValueChange={(v) => {
-              setRoleFilter(v);
-              setPage(1);
-            }}
-          >
-            <SelectTrigger className="w-48">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {ROLES.map((r) => (
-                <SelectItem key={r.id} value={r.id}>
-                  {r.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </CardContent>
-      </Card>
+      <UserManagementPanel
+        query={query}
+        onQueryChange={setQuery}
+        roleFilter={roleFilter}
+        onRoleFilterChange={(value) => {
+          setRoleFilter(value);
+          setPage(1);
+        }}
+        onSearchSubmit={onSearchSubmit}
+        total={total}
+        page={page}
+        totalPages={totalPages}
+      />
 
-      {/* Table */}
-      <Card>
+      <Card className="brand-card">
         <CardHeader className="pb-3">
-          <CardTitle className="text-base">
-            {total.toLocaleString()} user{total === 1 ? "" : "s"}
+          <CardTitle className="font-heading text-xl tracking-normal">
+            Accounts
           </CardTitle>
-          <CardDescription>
-            Page {page} of {totalPages}
-          </CardDescription>
+          <p className="text-sm text-muted-foreground">
+            Page {page} of {totalPages}. Role updates refetch this page after
+            the backend confirms the change.
+          </p>
         </CardHeader>
         <CardContent className="p-0">
           {loading ? (
-            <div className="py-16 flex items-center justify-center gap-2 text-sm text-muted-foreground">
-              <Loader2 className="w-4 h-4 animate-spin" />
-              Loading users…
+            <div className="p-5">
+              <LoadingState variant="table" label="Loading users..." />
             </div>
           ) : users.length === 0 ? (
-            <div className="py-16 text-center text-sm text-muted-foreground">
-              No users match those filters.
+            <div className="p-5">
+              <EmptyState
+                icon={UserCog}
+                title="No users match those filters"
+                description="Try a wider search query or switch role filter back to all roles."
+              />
             </div>
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Full name</TableHead>
-                  <TableHead>Email</TableHead>
-                  <TableHead>NIM</TableHead>
-                  <TableHead>Role</TableHead>
-                  <TableHead>Active</TableHead>
-                  <TableHead>Created</TableHead>
-                  <TableHead className="w-[260px] text-right">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {users.map((u) => {
-                  const isSelf = me?.id === u.id;
-                  const busy = busyUserId === u.id;
-                  return (
-                    <TableRow key={u.id}>
-                      <TableCell className="font-medium">{u.full_name}</TableCell>
-                      <TableCell className="text-muted-foreground">
-                        {u.email}
-                      </TableCell>
-                      <TableCell className="font-mono text-xs">
-                        {u.nim || "—"}
-                      </TableCell>
-                      <TableCell>
-                        <Badge
-                          variant={ROLE_BADGE_VARIANT[u.role] || "secondary"}
-                          className="text-[10px] uppercase"
-                        >
-                          {u.role.replace("_", " ")}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>
-                        {u.is_active ? (
-                          <Badge variant="secondary" className="text-[10px] uppercase">
-                            Active
-                          </Badge>
-                        ) : (
-                          <Badge variant="destructive" className="text-[10px] uppercase">
-                            Deactivated
-                          </Badge>
-                        )}
-                      </TableCell>
-                      <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
-                        {u.created_at
-                          ? new Date(u.created_at).toLocaleDateString()
-                          : "—"}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex items-center justify-end gap-2">
-                          <Select
-                            value={u.role}
-                            onValueChange={(v) => handleRoleChange(u.id, v)}
-                            disabled={busy || isSelf}
-                          >
-                            <SelectTrigger className="w-[150px] h-8 text-xs">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="candidate">candidate</SelectItem>
-                              <SelectItem value="recruiter">recruiter</SelectItem>
-                              <SelectItem value="super_admin">super_admin</SelectItem>
-                            </SelectContent>
-                          </Select>
-                          <Button
-                            variant={u.is_active ? "outline" : "default"}
-                            size="sm"
-                            onClick={() => handleToggleActive(u)}
-                            disabled={busy || isSelf}
-                            className="gap-1"
-                          >
-                            {busy ? (
-                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                            ) : (
-                              <Power className="w-3.5 h-3.5" />
-                            )}
-                            {u.is_active ? "Deactivate" : "Reactivate"}
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleResetPassword(u)}
-                            disabled={busy}
-                            className="gap-1"
-                            title="Send a password reset link to this user"
-                          >
-                            <KeyRound className="w-3.5 h-3.5" />
-                            Send reset link
-                          </Button>
-                        </div>
-                        {isSelf && (
-                          <p className="text-[10px] text-muted-foreground inline-flex items-center gap-1 mt-1">
-                            <ShieldAlert className="w-3 h-3" />
-                            You can't modify your own account
-                          </p>
-                        )}
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
+            <div className="overflow-x-auto">
+              <Table className="min-w-[1080px]">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>User</TableHead>
+                    <TableHead>NIM</TableHead>
+                    <TableHead>Role</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Created</TableHead>
+                    <TableHead className="w-[420px] text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {users.map((user) => {
+                    const isSelf = me?.id === user.id;
+                    const busy = busyUserId === user.id;
+                    return (
+                      <TableRow key={user.id}>
+                        <TableCell>
+                          <div className="min-w-0">
+                            <p className="font-medium">{user.full_name}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {user.email}
+                            </p>
+                          </div>
+                        </TableCell>
+                        <TableCell className="font-mono text-xs">
+                          {user.nim || "-"}
+                        </TableCell>
+                        <TableCell>
+                          <StatusBadge
+                            label={roleLabel(user.role)}
+                            tone={roleTone(user.role)}
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <StatusBadge
+                            status={user.is_active ? "active" : "deactivated"}
+                            entityType="user"
+                          />
+                        </TableCell>
+                        <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
+                          {formatDate(user.created_at)}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex flex-wrap items-center justify-end gap-2">
+                            <Select
+                              value={user.role}
+                              onValueChange={(value) =>
+                                handleRoleChange(user.id, value)
+                              }
+                              disabled={busy || isSelf}
+                            >
+                              <SelectTrigger className="h-9 w-[150px] text-xs">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {ROLE_OPTIONS.map((role) => (
+                                  <SelectItem key={role.id} value={role.id}>
+                                    {role.label}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                            <Button
+                              type="button"
+                              variant={user.is_active ? "outline" : "default"}
+                              size="sm"
+                              onClick={() =>
+                                setConfirmAction({
+                                  type: user.is_active
+                                    ? "deactivate"
+                                    : "reactivate",
+                                  user,
+                                })
+                              }
+                              disabled={busy || isSelf}
+                              className="gap-2"
+                            >
+                              {busy ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              ) : (
+                                <Power className="h-3.5 w-3.5" />
+                              )}
+                              {user.is_active ? "Deactivate" : "Reactivate"}
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              onClick={() =>
+                                setConfirmAction({
+                                  type: "reset-password",
+                                  user,
+                                })
+                              }
+                              disabled={busy || isSelf}
+                              className="gap-2"
+                            >
+                              <KeyRound className="h-3.5 w-3.5" />
+                              Assisted Password Reset
+                            </Button>
+                          </div>
+                          {isSelf && (
+                            <p className="mt-2 inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+                              <ShieldAlert className="h-3 w-3" />
+                              You cannot modify your own account.
+                            </p>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </div>
           )}
         </CardContent>
       </Card>
 
-      {/* Pagination */}
       {total > PAGE_SIZE && (
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-3">
           <p className="text-xs text-muted-foreground">
-            Showing {(page - 1) * PAGE_SIZE + 1} –{" "}
+            Showing {(page - 1) * PAGE_SIZE + 1} -{" "}
             {Math.min(page * PAGE_SIZE, total)} of {total}
           </p>
           <div className="flex items-center gap-2">
             <Button
               variant="outline"
               size="sm"
-              disabled={page <= 1}
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={page <= 1 || loading}
+              onClick={() => setPage((current) => Math.max(1, current - 1))}
             >
-              <ChevronLeft className="w-4 h-4" />
+              <ChevronLeft className="h-4 w-4" />
               Prev
             </Button>
             <Button
               variant="outline"
               size="sm"
-              disabled={page >= totalPages}
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              disabled={page >= totalPages || loading}
+              onClick={() =>
+                setPage((current) => Math.min(totalPages, current + 1))
+              }
             >
               Next
-              <ChevronRight className="w-4 h-4" />
+              <ChevronRight className="h-4 w-4" />
             </Button>
           </div>
         </div>
       )}
+
+      <ConfirmActionDialog
+        open={Boolean(confirmAction)}
+        onOpenChange={(open) => {
+          if (!open) setConfirmAction(null);
+        }}
+        title={confirmTitle}
+        description={confirmDescription}
+        confirmLabel={
+          confirmAction?.type === "reset-password"
+            ? "Send Reset Link"
+            : "Confirm"
+        }
+        cancelLabel="Cancel"
+        destructive={confirmAction?.type === "deactivate"}
+        loading={Boolean(confirmAction?.user && busyUserId === confirmAction.user.id)}
+        onConfirm={executeConfirmedAction}
+      />
     </div>
   );
 }

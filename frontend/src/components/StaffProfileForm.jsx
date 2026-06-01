@@ -35,7 +35,7 @@ export default function StaffProfileForm({ title, description }) {
 
   useEffect(() => {
     let cancelled = false;
-    (async () => {
+    async function loadProfile() {
       try {
         const me = await getMyProfile();
         if (!cancelled) {
@@ -48,7 +48,9 @@ export default function StaffProfileForm({ title, description }) {
       } finally {
         if (!cancelled) setLoading(false);
       }
-    })();
+    }
+
+    Promise.resolve().then(loadProfile);
     return () => {
       cancelled = true;
     };
