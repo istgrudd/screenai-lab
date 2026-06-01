@@ -11,6 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Progress } from "@/components/ui/progress";
+import CommonStatusBadge from "@/components/common/StatusBadge";
 import {
   Table,
   TableBody,
@@ -27,9 +28,9 @@ import {
 import {
   candidateEvaluationId,
   formatDivision,
-  formatStatus,
   isEvaluatedApplication,
 } from "@/lib/recruiterWorkspace";
+import { makeDetailNavigationState } from "@/lib/navigationContext";
 
 export function ScoreBadge({ score }) {
   if (score == null) {
@@ -52,24 +53,7 @@ export function ScoreBadge({ score }) {
 }
 
 export function StatusBadge({ status }) {
-  const variant =
-    status === "announced_pass"
-      ? "default"
-      : status === "announced_fail"
-      ? "destructive"
-      : status === "correction_requested"
-      ? "destructive"
-      : status === "verified"
-      ? "secondary"
-      : status === "screening"
-      ? "secondary"
-      : "outline";
-
-  return (
-    <Badge variant={variant} className="uppercase text-[10px]">
-      {formatStatus(status)}
-    </Badge>
-  );
+  return <CommonStatusBadge status={status} />;
 }
 
 export function DivisionBadge({ division }) {
@@ -113,6 +97,9 @@ export default function ApplicationsTable({
   emptyTitle = "No submitted applications",
   emptyDescription = "Once candidates finish uploading and submit, they will show up here.",
   lockUnevaluatedSelection = true,
+  detailFrom,
+  detailFromLabel,
+  detailReturnLabel,
 }) {
   const navigate = useNavigate();
 
@@ -189,7 +176,16 @@ export default function ApplicationsTable({
                   className={`transition-colors ${rowHighlight} ${
                     canOpen ? "cursor-pointer hover:bg-muted/50" : "opacity-90"
                   }`}
-                  onClick={() => canOpen && navigate(`/candidates/${candidateId}`)}
+                  onClick={() =>
+                    canOpen &&
+                    navigate(`/candidates/${candidateId}`, {
+                      state: makeDetailNavigationState(
+                        detailFrom,
+                        detailFromLabel,
+                        detailReturnLabel
+                      ),
+                    })
+                  }
                 >
                   {selectable && (
                     <TableCell onClick={(event) => event.stopPropagation()}>

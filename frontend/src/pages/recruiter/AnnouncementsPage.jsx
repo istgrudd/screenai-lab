@@ -1,28 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AlertCircle, Bell, Loader2, Megaphone, Sparkles } from "lucide-react";
+import { Bell, Megaphone, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 
-import RecruitmentPhaseCard from "@/components/RecruitmentPhaseCard";
+import ConfirmActionDialog from "@/components/common/ConfirmActionDialog";
+import MetricCard from "@/components/common/MetricCard";
+import PageHeader from "@/components/layout/PageHeader";
+import AnnouncementSafetyPanel from "@/components/recruiter/AnnouncementSafetyPanel";
 import ApplicationFilters from "@/components/recruiter/ApplicationFilters";
 import ApplicationsTable from "@/components/recruiter/ApplicationsTable";
-import { MetricCard } from "@/components/recruiter/WorkspaceCards";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
 import {
   bulkAnnounce,
   getActivePeriod,
@@ -86,11 +73,11 @@ export default function RecruiterAnnouncementsPage() {
   }, []);
 
   useEffect(() => {
-    loadActivePeriod();
+    Promise.resolve().then(loadActivePeriod);
   }, [loadActivePeriod]);
 
   useEffect(() => {
-    loadApplications();
+    Promise.resolve().then(loadApplications);
   }, [loadApplications]);
 
   const checkedIds = useMemo(
@@ -147,59 +134,51 @@ export default function RecruiterAnnouncementsPage() {
     }
   };
 
+  const disabledReason = !activePeriod
+    ? "No active period."
+    : divisionFilter === "all"
+    ? "Select one division before publishing."
+    : !phaseAllowsPublish
+    ? "Announcements can only be published during announcement phase."
+    : checkedCount === 0
+    ? "Select at least one pass candidate."
+    : null;
+
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
-          <Bell className="w-6 h-6 text-primary" />
-          Announcements
-        </h1>
-        <p className="text-muted-foreground mt-1">
-          Select evaluated candidates who pass, then publish pass/fail results by division.
-        </p>
-      </div>
-
-      <RecruitmentPhaseCard
-        role="recruiter"
-        period={activePeriod}
-        loading={periodLoading}
-        submittedCount={applications.length}
+      <PageHeader
+        eyebrow="Recruiter / Announcements"
+        title="Announcements"
+        description="Prepare pass/fail results by division with safety checks before publishing."
       />
 
-      {isSuperAdmin && activePeriod && phase !== "ANNOUNCEMENT" && (
-        <Card className="border-yellow-500/40 bg-yellow-500/10">
-          <CardContent className="py-4 flex items-start gap-3">
-            <AlertCircle className="w-5 h-5 text-yellow-700 mt-0.5" />
-            <div>
-              <p className="text-sm font-medium text-yellow-800 dark:text-yellow-200">
-                Super admin bypass is available.
-              </p>
-              <p className="text-xs text-yellow-700/80 dark:text-yellow-200/80 mt-0.5">
-                Backend permits super admins to publish outside the announcement phase.
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-      )}
+      <AnnouncementSafetyPanel
+        activePeriod={activePeriod}
+        divisionFilter={divisionFilter}
+        checkedCount={checkedCount}
+        evaluatedCount={evaluatedInView.length}
+        phaseAllowsPublish={phaseAllowsPublish}
+        isSuperAdmin={isSuperAdmin}
+      />
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
         <MetricCard
           icon={Sparkles}
           label="Evaluated in view"
           value={loading ? "..." : evaluatedInView.length}
-          tone="green"
+          tone="success"
         />
         <MetricCard
           icon={Megaphone}
           label="Selected pass"
           value={checkedCount}
-          tone="green"
+          tone="success"
         />
         <MetricCard
           icon={Bell}
           label="Already announced"
           value={loading ? "..." : summary.announcedCount}
-          tone="yellow"
+          tone="warning"
         />
       </div>
 
@@ -209,48 +188,46 @@ export default function RecruiterAnnouncementsPage() {
         onDivisionChange={setDivisionFilter}
         onStatusChange={setStatusFilter}
       >
-        <div className="ml-auto flex items-center gap-2">
-          {divisionFilter === "all" && checkedCount > 0 && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span className="text-xs text-muted-foreground inline-flex items-center gap-1">
-                  <AlertCircle className="w-3.5 h-3.5" />
-                  Filter to one division
-                </span>
-              </TooltipTrigger>
-              <TooltipContent>
-                Select one division before publishing results.
-              </TooltipContent>
-            </Tooltip>
+        <div className="ml-auto flex flex-col gap-2 sm:flex-row sm:items-center">
+          {disabledReason && (
+            <span className="text-xs text-muted-foreground">{disabledReason}</span>
           )}
-          {divisionFilter !== "all" && activePeriod == null && checkedCount > 0 && (
-            <span className="text-xs text-destructive inline-flex items-center gap-1">
-              <AlertCircle className="w-3.5 h-3.5" />
-              No active period
-            </span>
-          )}
-          {checkedCount > 0 && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span tabIndex={!phaseAllowsPublish && activePeriod ? 0 : -1}>
-                  <Button
-                    onClick={() => setConfirmOpen(true)}
-                    disabled={!canPublish}
-                  >
-                    <Megaphone className="w-4 h-4 mr-2" />
-                    Publish Results ({checkedCount})
-                  </Button>
-                </span>
-              </TooltipTrigger>
-              {!phaseAllowsPublish && activePeriod && (
-                <TooltipContent>
-                  Announcements can only be published during the announcement phase.
-                </TooltipContent>
-              )}
-            </Tooltip>
-          )}
+          <Button
+            type="button"
+            onClick={() => setConfirmOpen(true)}
+            disabled={!canPublish || publishing || periodLoading}
+            className="gap-2"
+          >
+            <Megaphone className="h-4 w-4" />
+            Publish Results ({checkedCount})
+          </Button>
         </div>
       </ApplicationFilters>
+
+      {divisionFilter !== "all" && (
+        <Card className="brand-card">
+          <CardContent className="grid grid-cols-1 gap-3 p-5 sm:grid-cols-3">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                Division
+              </p>
+              <p className="mt-1 font-medium">{formatDivision(divisionFilter)}</p>
+            </div>
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                Candidate-facing pass
+              </p>
+              <p className="mt-1 font-medium">{checkedCount} candidates</p>
+            </div>
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                Candidate-facing fail
+              </p>
+              <p className="mt-1 font-medium">{failCount} candidates</p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <ApplicationsTable
         applications={applications}
@@ -260,63 +237,22 @@ export default function RecruiterAnnouncementsPage() {
         onToggleChecked={handleToggleChecked}
         emptyTitle="No evaluated applications"
         emptyDescription="Run evaluation before publishing pass/fail announcements."
+        detailFrom="/recruiter/announcements"
+        detailFromLabel="Announcements"
+        detailReturnLabel="Kembali ke Announcements"
       />
 
-      <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Confirm result publication</AlertDialogTitle>
-            <AlertDialogDescription asChild>
-              <div className="space-y-3 pt-1">
-                <p>
-                  This will publish results for{" "}
-                  <span className="font-medium text-foreground">
-                    {divisionFilter !== "all"
-                      ? formatDivision(divisionFilter)
-                      : "-"}
-                  </span>
-                  .
-                </p>
-                <div className="rounded-md border bg-muted/40 p-3 text-sm space-y-1">
-                  <p>
-                    <span className="text-green-600 font-medium">Pass:</span>{" "}
-                    {checkedCount} candidates
-                  </p>
-                  <p>
-                    <span className="text-destructive font-medium">Fail:</span>{" "}
-                    {failCount} candidates
-                  </p>
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  Candidates not selected as pass will be announced as fail.
-                </p>
-                <p className="text-xs font-medium text-destructive">
-                  This action cannot be undone.
-                </p>
-              </div>
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={publishing}>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={(event) => {
-                event.preventDefault();
-                handleConfirmPublish();
-              }}
-              disabled={publishing || !canPublish}
-            >
-              {publishing ? (
-                <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  Publishing...
-                </>
-              ) : (
-                "Publish"
-              )}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <ConfirmActionDialog
+        open={confirmOpen}
+        onOpenChange={setConfirmOpen}
+        title="Confirm result publication"
+        description={`Publish ${checkedCount} pass and ${failCount} fail result(s) for ${formatDivision(divisionFilter)}. This action cannot be undone.`}
+        confirmLabel={publishing ? "Publishing..." : "Publish Results"}
+        cancelLabel="Cancel"
+        loading={publishing}
+        destructive
+        onConfirm={handleConfirmPublish}
+      />
     </div>
   );
 }

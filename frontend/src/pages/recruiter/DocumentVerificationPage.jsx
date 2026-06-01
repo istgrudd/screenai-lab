@@ -12,11 +12,14 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
+import ConfirmActionDialog from "@/components/common/ConfirmActionDialog";
+import MetricCard from "@/components/common/MetricCard";
+import StatusBadge from "@/components/common/StatusBadge";
+import PageHeader from "@/components/layout/PageHeader";
 import ApplicationFilters from "@/components/recruiter/ApplicationFilters";
-import { MetricCard } from "@/components/recruiter/WorkspaceCards";
-import { Badge } from "@/components/ui/badge";
+import VerificationQueuePanel from "@/components/recruiter/VerificationQueuePanel";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import {
   fetchDocumentBlob,
@@ -27,17 +30,6 @@ import {
   reviewDocument,
 } from "@/lib/api";
 import { formatDivision, formatStatus } from "@/lib/recruiterWorkspace";
-
-function statusVariant(status) {
-  if (status === "verified") return "secondary";
-  if (status === "rejected") return "destructive";
-  return "outline";
-}
-
-function progressText(progress) {
-  if (!progress) return "0 verified, 0 rejected";
-  return `${progress.verified_count} verified, ${progress.rejected_count} rejected, ${progress.pending_count} pending`;
-}
 
 export default function RecruiterDocumentVerificationPage() {
   const [applications, setApplications] = useState([]);
@@ -54,6 +46,7 @@ export default function RecruiterDocumentVerificationPage() {
   const [workingDocId, setWorkingDocId] = useState(null);
   const [previewLoadingDocId, setPreviewLoadingDocId] = useState(null);
   const [finalizing, setFinalizing] = useState(false);
+  const [confirmFinalizeOpen, setConfirmFinalizeOpen] = useState(false);
 
   const loadApplications = async () => {
     setLoading(true);
@@ -100,8 +93,10 @@ export default function RecruiterDocumentVerificationPage() {
   };
 
   useEffect(() => {
-    loadApplications();
-    loadActivePeriod();
+    Promise.resolve().then(() => {
+      loadApplications();
+      loadActivePeriod();
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [divisionFilter, statusFilter]);
 
@@ -110,8 +105,10 @@ export default function RecruiterDocumentVerificationPage() {
       if (preview?.url) URL.revokeObjectURL(preview.url);
     });
     previewsRef.current = {};
-    setPreviews({});
-    loadDocuments(selectedApplication);
+    Promise.resolve().then(() => {
+      setPreviews({});
+      loadDocuments(selectedApplication);
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedApplication?.id]);
 
@@ -205,14 +202,6 @@ export default function RecruiterDocumentVerificationPage() {
 
   const handleFinalize = async () => {
     if (!selectedApplication) return;
-    const rejectedCount = documents.filter(
-      (document) => document.verification_status === "rejected"
-    ).length;
-    const message = rejectedCount
-      ? "Finalize review and request document correction from this candidate?"
-      : "Finalize review and approve all documents for this candidate?";
-    if (!window.confirm(message)) return;
-
     setFinalizing(true);
     try {
       const updated = await finalizeDocumentReview(selectedApplication.id);
@@ -234,45 +223,46 @@ export default function RecruiterDocumentVerificationPage() {
   const reviewableSelected =
     selectedApplication &&
     ["document_review", "submitted"].includes(selectedApplication.status);
-
   const canFinalize =
     reviewableSelected &&
     documents.length > 0 &&
     documents.every((document) =>
       ["verified", "rejected"].includes(document.verification_status)
     );
+  const rejectedCount = documents.filter(
+    (document) => document.verification_status === "rejected"
+  ).length;
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
-          <ShieldCheck className="w-6 h-6 text-primary" />
-          Document Verification
-        </h1>
-        <p className="text-muted-foreground mt-1">
-          Verify or reject each required document, then finalize one candidate at a time.
-        </p>
-      </div>
+      <PageHeader
+        eyebrow="Recruiter / Documents"
+        title="Document Verification"
+        description="Queue-first workspace for reviewing candidate documents and finalizing document review decisions."
+      />
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
         <MetricCard icon={FileText} label="In review" value={loading ? "..." : summary.pending} />
-        <MetricCard icon={XCircle} label="Correction requested" value={loading ? "..." : summary.correction} tone="yellow" />
-        <MetricCard icon={CheckCircle2} label="All verified" value={loading ? "..." : summary.allVerified} tone="green" />
+        <MetricCard icon={XCircle} label="Correction requested" value={loading ? "..." : summary.correction} tone="warning" />
+        <MetricCard icon={CheckCircle2} label="All verified" value={loading ? "..." : summary.allVerified} tone="success" />
       </div>
 
       {activePeriod?.current_phase === "EVALUATION" &&
         (summary.pending > 0 || summary.correction > 0) && (
-          <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-4 flex items-start gap-3">
-            <AlertTriangle className="w-5 h-5 text-amber-600 mt-0.5 shrink-0" />
-            <div>
-              <p className="text-sm font-medium text-amber-900 dark:text-amber-200">
-                Evaluation phase is active.
-              </p>
-              <p className="text-sm text-amber-800/80 dark:text-amber-200/80 mt-1">
-                Candidates still in document review or correction remain in this queue and will be skipped by evaluation.
-              </p>
-            </div>
-          </div>
+          <Card className="brand-card bg-warning/10">
+            <CardContent className="flex items-start gap-3 p-5">
+              <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-warning" />
+              <div>
+                <p className="font-medium text-foreground">
+                  Evaluation phase is active
+                </p>
+                <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                  Candidates still in document review or correction remain in
+                  this queue and will be skipped by evaluation.
+                </p>
+              </div>
+            </CardContent>
+          </Card>
         )}
 
       <ApplicationFilters
@@ -282,119 +272,75 @@ export default function RecruiterDocumentVerificationPage() {
         onStatusChange={setStatusFilter}
       />
 
-      <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.35fr)] gap-4">
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-lg">Applications</CardTitle>
-            <CardDescription>Select a candidate to review documents.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {loading ? (
-              <div className="py-10 flex items-center justify-center gap-2 text-sm text-muted-foreground">
-                <Loader2 className="w-4 h-4 animate-spin" />
-                Loading applications...
-              </div>
-            ) : applications.length ? (
-              applications.map((application) => (
-                <button
-                  key={application.id}
-                  type="button"
-                  onClick={() => setSelectedApplication(application)}
-                  className={`w-full text-left rounded-lg border px-3 py-3 hover:bg-muted/50 ${
-                    selectedApplication?.id === application.id
-                      ? "border-primary bg-primary/5"
-                      : ""
-                  }`}
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="text-sm font-medium">
-                        {application.candidate?.full_name || "Candidate"}
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        {application.candidate?.nim || "-"} - {formatDivision(application.division)}
-                      </p>
-                    </div>
-                    <Badge variant="outline" className="text-[10px] uppercase">
-                      {formatStatus(application.status)}
-                    </Badge>
-                  </div>
-                  <p className="text-xs text-muted-foreground mt-2">
-                    {progressText(application.document_review_progress)}
-                  </p>
-                </button>
-              ))
-            ) : (
-              <p className="text-sm text-muted-foreground py-8 text-center">
-                No applications match the current filters.
-              </p>
-            )}
-          </CardContent>
-        </Card>
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.35fr)]">
+        <VerificationQueuePanel
+          applications={applications}
+          selectedApplication={selectedApplication}
+          loading={loading}
+          onSelect={setSelectedApplication}
+        />
 
-        <Card>
+        <Card className="brand-card">
           <CardHeader className="pb-3">
-            <div className="flex items-start justify-between gap-3 flex-wrap">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div>
-                <CardTitle className="text-lg">Document Review</CardTitle>
-                <CardDescription>
+                <CardTitle className="font-heading text-xl tracking-normal">
+                  Document Review
+                </CardTitle>
+                <p className="mt-1 text-sm leading-6 text-muted-foreground">
                   {selectedApplication
-                    ? selectedApplication.candidate?.full_name || "Selected candidate"
+                    ? `${selectedApplication.candidate?.full_name || "Selected candidate"} - ${formatDivision(selectedApplication.division)}`
                     : "Select an application from the queue."}
-                </CardDescription>
+                </p>
               </div>
               {selectedApplication && (
                 <Button
-                  onClick={handleFinalize}
+                  type="button"
+                  onClick={() => setConfirmFinalizeOpen(true)}
                   disabled={!canFinalize || finalizing || documentsLoading}
                   className="gap-2"
                 >
                   {finalizing ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <Loader2 className="h-4 w-4 animate-spin" />
                   ) : (
-                    <ShieldCheck className="w-4 h-4" />
+                    <ShieldCheck className="h-4 w-4" />
                   )}
-                  Finalize
+                  Finalize Review
                 </Button>
               )}
             </div>
           </CardHeader>
-          <CardContent className="space-y-3">
+          <CardContent className="space-y-4">
             {!selectedApplication ? (
-              <p className="text-sm text-muted-foreground py-12 text-center">
+              <p className="py-12 text-center text-sm text-muted-foreground">
                 Pick a candidate to inspect their uploaded documents.
               </p>
             ) : documentsLoading ? (
-              <div className="py-12 flex items-center justify-center gap-2 text-sm text-muted-foreground">
-                <Loader2 className="w-4 h-4 animate-spin" />
+              <div className="flex items-center justify-center gap-2 py-12 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
                 Loading documents...
               </div>
-            ) : (
+            ) : documents.length ? (
               documents.map((document) => {
                 const rejected = document.verification_status === "rejected";
                 const verified = document.verification_status === "verified";
                 const preview = previews[document.id];
                 return (
-                  <div key={document.id} className="rounded-lg border px-3 py-3">
-                    <div className="flex items-start justify-between gap-3 flex-wrap">
+                  <div key={document.id} className="rounded-xl bg-surface-container-low p-4">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                       <div>
-                        <p className="text-sm font-medium">
+                        <p className="font-semibold text-foreground">
                           {formatStatus(document.doc_type)}
                         </p>
-                        <p className="text-xs text-muted-foreground">
+                        <p className="mt-1 text-xs text-muted-foreground">
                           {document.file_name} - {(document.file_size / 1024).toFixed(1)} KB
                         </p>
                       </div>
-                      <Badge
-                        variant={statusVariant(document.verification_status)}
-                        className="text-[10px] uppercase"
-                      >
-                        {formatStatus(document.verification_status)}
-                      </Badge>
+                      <StatusBadge status={document.verification_status || "pending"} entityType="document" />
                     </div>
 
                     {rejected && document.rejection_reason && (
-                      <p className="text-xs text-destructive mt-2">
+                      <p className="mt-3 rounded-xl bg-destructive/10 px-4 py-3 text-sm text-destructive">
                         {document.rejection_reason}
                       </p>
                     )}
@@ -409,18 +355,18 @@ export default function RecruiterDocumentVerificationPage() {
                         className="gap-2"
                       >
                         {previewLoadingDocId === document.id ? (
-                          <Loader2 className="w-4 h-4 animate-spin" />
+                          <Loader2 className="h-4 w-4 animate-spin" />
                         ) : preview ? (
-                          <EyeOff className="w-4 h-4" />
+                          <EyeOff className="h-4 w-4" />
                         ) : (
-                          <Eye className="w-4 h-4" />
+                          <Eye className="h-4 w-4" />
                         )}
                         {preview ? "Hide Preview" : "Preview"}
                       </Button>
                     </div>
 
                     {preview && (
-                      <div className="mt-3 rounded-lg border bg-muted/30 overflow-hidden">
+                      <div className="mt-3 overflow-hidden rounded-xl border bg-background">
                         {preview.mime.includes("pdf") ? (
                           <iframe
                             title={`Preview ${document.file_name}`}
@@ -431,13 +377,13 @@ export default function RecruiterDocumentVerificationPage() {
                           <img
                             src={preview.url}
                             alt={document.file_name}
-                            className="max-h-[420px] w-full object-contain bg-background"
+                            className="max-h-[420px] w-full bg-background object-contain"
                           />
                         ) : (
                           <div className="p-4">
                             <Button asChild variant="outline" className="gap-2">
                               <a href={preview.url} target="_blank" rel="noreferrer">
-                                <ExternalLink className="w-4 h-4" />
+                                <ExternalLink className="h-4 w-4" />
                                 Open downloaded preview
                               </a>
                             </Button>
@@ -446,7 +392,7 @@ export default function RecruiterDocumentVerificationPage() {
                       </div>
                     )}
 
-                    <div className="mt-3 grid grid-cols-1 md:grid-cols-[1fr_auto_auto] gap-2 items-start">
+                    <div className="mt-4 grid grid-cols-1 items-start gap-2 md:grid-cols-[1fr_auto_auto]">
                       <Textarea
                         value={rejectionReasons[document.id] ?? document.rejection_reason ?? ""}
                         onChange={(event) =>
@@ -466,9 +412,9 @@ export default function RecruiterDocumentVerificationPage() {
                         className="gap-2"
                       >
                         {workingDocId === document.id ? (
-                          <Loader2 className="w-4 h-4 animate-spin" />
+                          <Loader2 className="h-4 w-4 animate-spin" />
                         ) : (
-                          <CheckCircle2 className="w-4 h-4" />
+                          <CheckCircle2 className="h-4 w-4" />
                         )}
                         Verify
                       </Button>
@@ -478,17 +424,42 @@ export default function RecruiterDocumentVerificationPage() {
                         disabled={workingDocId === document.id || rejected || !reviewableSelected}
                         className="gap-2"
                       >
-                        <XCircle className="w-4 h-4" />
+                        <XCircle className="h-4 w-4" />
                         Reject
                       </Button>
                     </div>
                   </div>
                 );
               })
+            ) : (
+              <p className="py-12 text-center text-sm text-muted-foreground">
+                No documents found for this application.
+              </p>
+            )}
+
+            {selectedApplication && !canFinalize && (
+              <p className="text-xs leading-5 text-muted-foreground">
+                Finalize is enabled only after every document is verified or rejected.
+              </p>
             )}
           </CardContent>
         </Card>
       </div>
+
+      <ConfirmActionDialog
+        open={confirmFinalizeOpen}
+        onOpenChange={setConfirmFinalizeOpen}
+        title={rejectedCount ? "Request document correction?" : "Approve all documents?"}
+        description={
+          rejectedCount
+            ? "This will finalize review and request document correction from this candidate."
+            : "This will finalize review and approve all documents for this candidate."
+        }
+        confirmLabel="Finalize Review"
+        cancelLabel="Cancel"
+        loading={finalizing}
+        onConfirm={handleFinalize}
+      />
     </div>
   );
 }

@@ -16,18 +16,19 @@ export default function ApplicationFilters({
   statusFilter,
   onDivisionChange,
   onStatusChange,
+  disabled = false,
   children,
 }) {
   const filtered = divisionFilter !== "all" || statusFilter !== "all";
 
   return (
-    <Card>
+    <Card className="brand-card">
       <CardContent className="py-4 flex flex-wrap items-center gap-3">
         <span className="text-sm text-muted-foreground inline-flex items-center gap-1.5">
           <Filter className="w-3.5 h-3.5" />
           Filter:
         </span>
-        <Select value={divisionFilter} onValueChange={onDivisionChange}>
+        <Select value={divisionFilter} onValueChange={onDivisionChange} disabled={disabled}>
           <SelectTrigger className="w-48">
             <SelectValue />
           </SelectTrigger>
@@ -39,7 +40,7 @@ export default function ApplicationFilters({
             ))}
           </SelectContent>
         </Select>
-        <Select value={statusFilter} onValueChange={onStatusChange}>
+        <Select value={statusFilter} onValueChange={onStatusChange} disabled={disabled}>
           <SelectTrigger className="w-56">
             <SelectValue />
           </SelectTrigger>
@@ -55,6 +56,7 @@ export default function ApplicationFilters({
           <Button
             variant="ghost"
             size="sm"
+            disabled={disabled}
             onClick={() => {
               onDivisionChange("all");
               onStatusChange("all");

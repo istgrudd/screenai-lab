@@ -2,17 +2,13 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Loader2, Save, ShieldCheck } from "lucide-react";
 
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Badge } from "@/components/ui/badge";
+import LoadingState from "@/components/common/LoadingState";
+import PageHeader from "@/components/layout/PageHeader";
+import StatusBadge from "@/components/common/StatusBadge";
 
 import { getMyProfile, updateMyProfile } from "@/lib/api";
 
@@ -96,35 +92,28 @@ export default function StaffProfileForm({ title, description }) {
   };
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center py-24">
-        <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
-      </div>
-    );
+    return <LoadingState label="Loading profile form..." />;
   }
   if (!profile) return null;
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
-          <ShieldCheck className="w-6 h-6 text-primary" />
-          {title}
-        </h1>
-        <p className="text-muted-foreground mt-1">{description}</p>
-      </div>
+      <PageHeader
+        eyebrow="Account"
+        title={title}
+        description={description}
+        status={<StatusBadge label={ROLE_LABEL[profile.role] || profile.role} tone="brand" size="md" />}
+      />
 
-      <Card>
+      <Card className="brand-card">
         <CardHeader className="pb-3">
-          <CardTitle className="text-lg flex items-center gap-3">
+          <CardTitle className="flex items-center gap-3 font-heading text-xl tracking-normal">
+            <ShieldCheck className="h-5 w-5 text-primary" />
             Akun Saya
-            <Badge variant="secondary" className="text-[10px] uppercase">
-              {ROLE_LABEL[profile.role] || profile.role}
-            </Badge>
           </CardTitle>
-          <CardDescription>
+          <p className="text-sm leading-6 text-muted-foreground">
             Update nama, email, atau password akun kamu.
-          </CardDescription>
+          </p>
         </CardHeader>
         <CardContent>
           <form

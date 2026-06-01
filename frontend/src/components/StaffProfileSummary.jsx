@@ -1,17 +1,13 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
-import { GraduationCap, Loader2, Pencil, ShieldCheck } from "lucide-react";
+import { Pencil, ShieldCheck } from "lucide-react";
 
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import LoadingState from "@/components/common/LoadingState";
+import PageHeader from "@/components/layout/PageHeader";
+import StatusBadge from "@/components/common/StatusBadge";
 import { getMyProfile } from "@/lib/api";
 
 const ROLE_LABEL = {
@@ -23,10 +19,12 @@ const ROLE_LABEL = {
 function Field({ label, value }) {
   return (
     <div>
-      <p className="text-xs uppercase tracking-wide text-muted-foreground mb-1">
+      <p className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
         {label}
       </p>
-      <p>{value || <span className="text-muted-foreground italic">-</span>}</p>
+      <p className="mt-1 text-sm">
+        {value || <span className="text-muted-foreground">-</span>}
+      </p>
     </div>
   );
 }
@@ -57,61 +55,59 @@ export default function StaffProfileSummary({ title, description, editPath }) {
   }, []);
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center py-24">
-        <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
-      </div>
-    );
+    return <LoadingState label="Loading profile..." />;
   }
 
   if (!profile) return null;
 
   return (
     <div className="space-y-6">
-      <div className="flex items-start justify-between gap-3 flex-wrap">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
-            <GraduationCap className="w-6 h-6 text-primary" />
-            {title}
-          </h1>
-          <p className="text-muted-foreground mt-1">{description}</p>
-        </div>
-        <Button asChild className="gap-2">
-          <Link to={editPath}>
-            <Pencil className="w-4 h-4" />
-            Edit Profile
-          </Link>
-        </Button>
-      </div>
+      <PageHeader
+        eyebrow="Account"
+        title={title}
+        description={description}
+        status={<StatusBadge label={ROLE_LABEL[profile.role] || profile.role} tone="brand" size="md" />}
+        action={
+          <Button asChild className="gap-2">
+            <Link to={editPath}>
+              <Pencil className="h-4 w-4" />
+              Edit Profile
+            </Link>
+          </Button>
+        }
+      />
 
-      <Card>
+      <Card className="brand-card">
         <CardHeader className="pb-3">
-          <CardTitle className="text-lg flex items-center gap-2">
-            <ShieldCheck className="w-5 h-5 text-primary" />
+          <CardTitle className="flex items-center gap-2 font-heading text-xl tracking-normal">
+            <ShieldCheck className="h-5 w-5 text-primary" />
             Account Summary
           </CardTitle>
-          <CardDescription>
+          <p className="text-sm leading-6 text-muted-foreground">
             Review your account identity and role assignment.
-          </CardDescription>
+          </p>
         </CardHeader>
-        <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+        <CardContent className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <Field label="Full name" value={profile.full_name} />
           <Field label="Email" value={profile.email} />
           <div>
-            <p className="text-xs uppercase tracking-wide text-muted-foreground mb-1">
+            <p className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
               Role
             </p>
-            <Badge variant="secondary" className="text-[10px] uppercase">
-              {ROLE_LABEL[profile.role] || profile.role}
-            </Badge>
+            <div className="mt-1">
+              <StatusBadge label={ROLE_LABEL[profile.role] || profile.role} tone="brand" />
+            </div>
           </div>
           <div>
-            <p className="text-xs uppercase tracking-wide text-muted-foreground mb-1">
+            <p className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
               Account status
             </p>
-            <Badge variant={profile.is_active ? "secondary" : "destructive"}>
-              {profile.is_active ? "Active" : "Inactive"}
-            </Badge>
+            <div className="mt-1">
+              <StatusBadge
+                label={profile.is_active ? "Active" : "Inactive"}
+                tone={profile.is_active ? "success" : "destructive"}
+              />
+            </div>
           </div>
         </CardContent>
       </Card>

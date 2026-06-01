@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import { createElement } from "react";
 import { ArrowRight } from "lucide-react";
 
 import { Card, CardContent } from "@/components/ui/card";
@@ -18,7 +19,7 @@ export function MetricCard({ icon: Icon, label, value, tone = "primary" }) {
     <Card>
       <CardContent className="py-4 flex items-center gap-4">
         <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${toneClass}`}>
-          <Icon className="w-5 h-5" />
+          {Icon ? createElement(Icon, { className: "w-5 h-5" }) : null}
         </div>
         <div>
           <p className="text-2xl font-bold tabular-nums">{value}</p>
@@ -35,7 +36,7 @@ export function ShortcutCard({ icon: Icon, title, description, to, action = "Ope
       <CardContent className="py-5 flex flex-col h-full gap-4">
         <div className="flex items-start gap-3">
           <div className="w-10 h-10 rounded-lg bg-primary/10 text-primary flex items-center justify-center shrink-0">
-            <Icon className="w-5 h-5" />
+            {Icon ? createElement(Icon, { className: "w-5 h-5" }) : null}
           </div>
           <div className="min-w-0">
             <h3 className="font-semibold text-foreground">{title}</h3>

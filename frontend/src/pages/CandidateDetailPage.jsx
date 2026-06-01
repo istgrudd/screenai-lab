@@ -1,8 +1,7 @@
 import { useState, useEffect } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams } from "react-router-dom";
 import { toast } from "sonner";
 import {
-  ArrowLeft,
   Loader2,
   User,
   FileText,
@@ -35,6 +34,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
+import ContextBackButton from "@/components/recruiter/ContextBackButton";
 import {
   getCandidate,
   listApplicationDocuments,
@@ -45,6 +45,7 @@ import OverrideDialog from "@/components/OverrideDialog";
 import JustificationCard from "@/components/JustificationCard";
 import DocumentPreviewDialog from "@/components/DocumentPreviewDialog";
 import SwotHighlightPanel from "@/components/SwotHighlightPanel";
+import { defaultPathForRole, getCurrentUser } from "@/lib/auth";
 
 const CHART_COLORS = [
   "hsl(210, 80%, 55%)",
@@ -122,7 +123,11 @@ function LanguageCertificateCard({ candidate }) {
 
 export default function CandidateDetailPage() {
   const { id } = useParams();
-  const navigate = useNavigate();
+  const currentUser = getCurrentUser();
+  const fallbackPath =
+    currentUser?.role === "recruiter" || currentUser?.role === "super_admin"
+      ? "/recruiter/candidates"
+      : defaultPathForRole(currentUser?.role);
   const [candidate, setCandidate] = useState(null);
   const [loading, setLoading] = useState(true);
   const [overrideTarget, setOverrideTarget] = useState(null);
@@ -172,7 +177,7 @@ export default function CandidateDetailPage() {
   };
 
   useEffect(() => {
-    fetchCandidate();
+    Promise.resolve().then(fetchCandidate);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
@@ -206,9 +211,7 @@ export default function CandidateDetailPage() {
       <div className="text-center py-24">
         <AlertTriangle className="w-12 h-12 mx-auto text-muted-foreground/40 mb-4" />
         <p className="text-sm text-muted-foreground">Candidate not found.</p>
-        <Button variant="outline" className="mt-4" onClick={() => navigate("/")}>
-          <ArrowLeft className="w-4 h-4 mr-2" /> Back to Dashboard
-        </Button>
+        <ContextBackButton fallback={fallbackPath} fallbackLabel="Kembali" className="mt-4 gap-2" />
       </div>
     );
   }
@@ -233,9 +236,7 @@ export default function CandidateDetailPage() {
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center gap-4">
-        <Button variant="ghost" size="sm" onClick={() => navigate("/")}>
-          <ArrowLeft className="w-4 h-4 mr-2" /> Back
-        </Button>
+        <ContextBackButton fallback={fallbackPath} fallbackLabel="Kembali" className="gap-2" />
         <Separator orientation="vertical" className="h-6" />
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
@@ -351,7 +352,7 @@ export default function CandidateDetailPage() {
                       borderRadius: "8px",
                       fontSize: "12px",
                     }}
-                    formatter={(value, name) => [`${value.toFixed(1)}`, "Score"]}
+                    formatter={(value) => [`${value.toFixed(1)}`, "Score"]}
                   />
                   <Bar dataKey="score" radius={[0, 4, 4, 0]} barSize={20}>
                     {barData.map((entry, idx) => (

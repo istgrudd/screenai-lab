@@ -11,54 +11,56 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
-import RecruitmentPhaseCard from "@/components/RecruitmentPhaseCard";
-import { MetricCard, ShortcutCard } from "@/components/recruiter/WorkspaceCards";
-import { Card, CardContent } from "@/components/ui/card";
+import ActionCard from "@/components/common/ActionCard";
+import MetricCard from "@/components/common/MetricCard";
+import LoadingState from "@/components/common/LoadingState";
+import PageHeader from "@/components/layout/PageHeader";
+import DivisionBreakdownCard from "@/components/recruiter/DivisionBreakdownCard";
+import RecruiterCommandHero from "@/components/recruiter/RecruiterCommandHero";
+import WorkQueueCard from "@/components/recruiter/WorkQueueCard";
 import { getActivePeriod, listRecruiterApplications } from "@/lib/api";
 import { summarizeApplications } from "@/lib/recruiterWorkspace";
 
 const SHORTCUTS = [
   {
     title: "Applications",
-    description: "Review submitted applications and document completeness.",
+    description: "Review submitted applications and open evaluated candidate detail.",
     to: "/recruiter/applications",
     icon: ClipboardList,
   },
   {
+    title: "Document Verification",
+    description: "Verify or reject required documents before evaluation.",
+    to: "/recruiter/documents",
+    icon: ShieldCheck,
+    tone: "warning",
+  },
+  {
     title: "Evaluation",
-    description: "Run or re-run AI evaluation per division.",
+    description: "Run AI evaluation per division with safety controls.",
     to: "/recruiter/evaluation",
     icon: Sparkles,
   },
   {
     title: "Candidates",
-    description: "Open ranked and scored candidate review.",
+    description: "Inspect ranked scores, evidence, and recommendations.",
     to: "/recruiter/candidates",
     icon: Users,
+    tone: "success",
   },
   {
     title: "Announcements",
-    description: "Select pass candidates and publish results.",
+    description: "Prepare pass/fail selections and publish results safely.",
     to: "/recruiter/announcements",
     icon: Bell,
-  },
-  {
-    title: "Analytics",
-    description: "Prepare for recruitment metrics once the API is available.",
-    to: "/recruiter/analytics",
-    icon: BarChart3,
-  },
-  {
-    title: "Documents",
-    description: "Inspect current document verification support.",
-    to: "/recruiter/documents",
-    icon: ShieldCheck,
+    tone: "warning",
   },
   {
     title: "Rubrics",
     description: "Maintain scoring rubrics used by evaluation.",
     to: "/rubrics",
     icon: FileText,
+    tone: "neutral",
   },
 ];
 
@@ -103,85 +105,90 @@ export default function RecruiterOverviewPage() {
     () => summarizeApplications(applications),
     [applications]
   );
+  const correctionCount = applications.filter(
+    (application) => application.status === "correction_requested"
+  ).length;
+  const pendingDocs = applications.filter((application) =>
+    ["submitted", "document_review"].includes(application.status)
+  ).length;
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">
-          Recruiter Dashboard
-        </h1>
-        <p className="text-muted-foreground mt-1">
-          High-level recruitment overview and shortcuts to focused workspaces.
-        </p>
-      </div>
-
-      <RecruitmentPhaseCard
-        role="recruiter"
-        period={activePeriod}
-        loading={periodLoading}
-        submittedCount={applications.length}
+      <PageHeader
+        eyebrow="Recruiter Workspace"
+        title="Recruiter Dashboard"
+        description="Operational work queue for application review, document verification, evaluation, ranking, and announcements."
       />
 
-      {activePeriod?.evaluation_prompt && (
-        <Card className="border-yellow-500/40 bg-yellow-500/10">
-          <CardContent className="py-4 flex items-start gap-3">
-            <div className="w-9 h-9 rounded-md bg-yellow-500/20 text-yellow-700 dark:text-yellow-400 flex items-center justify-center shrink-0">
-              <Bell className="w-4 h-4" />
-            </div>
-            <div>
-              <p className="text-sm font-medium text-yellow-800 dark:text-yellow-200">
-                Registration has ended.
-              </p>
-              <p className="text-xs text-yellow-700/80 dark:text-yellow-200/80 mt-0.5">
-                Open the Evaluation workspace to process candidates per division.
-              </p>
-            </div>
-          </CardContent>
-        </Card>
+      <RecruiterCommandHero
+        activePeriod={activePeriod}
+        loading={periodLoading}
+        applications={applications}
+        summary={summary}
+      />
+
+      {loading ? (
+        <LoadingState variant="metrics" rows={4} />
+      ) : (
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <MetricCard
+            icon={Users}
+            label="Applications"
+            value={summary.applicationCount}
+            helper="Total applications in the recruiter workspace."
+          />
+          <MetricCard
+            icon={ShieldCheck}
+            label="Pending document review"
+            value={pendingDocs}
+            tone="warning"
+            helper="Submitted or document-review applications."
+          />
+          <MetricCard
+            icon={Sparkles}
+            label="Pending evaluation"
+            value={summary.pendingEvaluationCount}
+            tone="info"
+            helper="Verified candidates waiting for evaluation."
+          />
+          <MetricCard
+            icon={Trophy}
+            label="Top score"
+            value={summary.topScore != null ? summary.topScore.toFixed(1) : "-"}
+            tone="success"
+            helper={`${correctionCount} candidates are in correction.`}
+          />
+        </div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <MetricCard
-          icon={Users}
-          label={loading ? "Applications" : "Applications"}
-          value={loading ? "..." : summary.applicationCount}
-        />
-        <MetricCard
-          icon={BarChart3}
-          label="Evaluated"
-          value={loading ? "..." : summary.scoredCount}
-          tone="green"
-        />
-        <MetricCard
-          icon={Sparkles}
-          label="Pending Evaluation"
-          value={loading ? "..." : summary.pendingEvaluationCount}
-          tone="yellow"
-        />
-        <MetricCard
-          icon={Trophy}
-          label="Top Score"
-          value={
-            loading
-              ? "..."
-              : summary.topScore != null
-              ? summary.topScore.toFixed(1)
-              : "-"
-          }
-          tone="yellow"
-        />
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1.1fr_0.9fr]">
+        <WorkQueueCard applications={applications} />
+        <DivisionBreakdownCard applications={applications} />
       </div>
 
-      <div>
-        <h2 className="text-lg font-semibold tracking-tight mb-3">
-          Workspaces
-        </h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {SHORTCUTS.map((shortcut) => (
-            <ShortcutCard key={shortcut.to} {...shortcut} />
-          ))}
+      <section className="space-y-3">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.08em] text-primary">
+            Secondary Workspaces
+          </p>
+          <h2 className="mt-1 font-heading text-xl font-bold tracking-normal">
+            Focused recruiter tools
+          </h2>
         </div>
-      </div>
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {SHORTCUTS.map((shortcut) => (
+            <ActionCard key={shortcut.to} {...shortcut} actionLabel="Open" />
+          ))}
+          <ActionCard
+            icon={BarChart3}
+            title="Analytics"
+            description="Monitor active-period recruitment metrics and score distribution."
+            to="/recruiter/analytics"
+            actionLabel="Open"
+            tone="info"
+          />
+        </div>
+      </section>
     </div>
   );
 }

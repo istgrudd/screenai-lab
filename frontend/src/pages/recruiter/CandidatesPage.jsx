@@ -2,9 +2,11 @@ import { useEffect, useMemo, useState } from "react";
 import { BarChart3, Sparkles, Trophy, Users } from "lucide-react";
 import { toast } from "sonner";
 
+import MetricCard from "@/components/common/MetricCard";
+import PageHeader from "@/components/layout/PageHeader";
 import ApplicationFilters from "@/components/recruiter/ApplicationFilters";
 import ApplicationsTable from "@/components/recruiter/ApplicationsTable";
-import { MetricCard } from "@/components/recruiter/WorkspaceCards";
+import CandidateReviewCard from "@/components/recruiter/CandidateReviewCard";
 import { listRecruiterApplications } from "@/lib/api";
 import {
   candidateEvaluationId,
@@ -56,20 +58,17 @@ export default function RecruiterCandidatesPage() {
   const recommendedCount = rankedApplications.filter(
     (application) => application.is_recommended
   ).length;
+  const topThree = rankedApplications.slice(0, 3);
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
-          <Users className="w-6 h-6 text-primary" />
-          Candidates
-        </h1>
-        <p className="text-muted-foreground mt-1">
-          Ranked and scored candidate review list. Open rows to inspect detailed evidence and scores.
-        </p>
-      </div>
+      <PageHeader
+        eyebrow="Recruiter / Candidates"
+        title="Candidates"
+        description="Ranked candidate review list with recommendation, score, and evidence detail."
+      />
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
         <MetricCard
           icon={Users}
           label="Scored candidates"
@@ -79,13 +78,13 @@ export default function RecruiterCandidatesPage() {
           icon={Sparkles}
           label="Recommended"
           value={loading ? "..." : recommendedCount}
-          tone="green"
+          tone="success"
         />
         <MetricCard
           icon={BarChart3}
           label="Evaluated in view"
           value={loading ? "..." : summary.scoredCount}
-          tone="green"
+          tone="success"
         />
         <MetricCard
           icon={Trophy}
@@ -97,9 +96,33 @@ export default function RecruiterCandidatesPage() {
               ? summary.topScore.toFixed(1)
               : "-"
           }
-          tone="yellow"
+          tone="warning"
         />
       </div>
+
+      {topThree.length > 0 && (
+        <section className="space-y-3">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.08em] text-primary">
+              Ranking Preview
+            </p>
+            <h2 className="mt-1 font-heading text-xl font-bold tracking-normal">
+              Top candidates in current view
+            </h2>
+          </div>
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+            {topThree.map((application) => (
+              <CandidateReviewCard
+                key={application.id}
+                application={application}
+                from="/recruiter/candidates"
+                fromLabel="Candidates"
+                returnLabel="Kembali ke Candidates"
+              />
+            ))}
+          </div>
+        </section>
+      )}
 
       <ApplicationFilters
         divisionFilter={divisionFilter}
@@ -113,6 +136,9 @@ export default function RecruiterCandidatesPage() {
         loading={loading}
         emptyTitle="No scored candidates"
         emptyDescription="Run evaluation before opening the ranked candidate review list."
+        detailFrom="/recruiter/candidates"
+        detailFromLabel="Candidates"
+        detailReturnLabel="Kembali ke Candidates"
       />
     </div>
   );
