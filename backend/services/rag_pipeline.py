@@ -32,10 +32,12 @@ ATURAN KETAT:
 3. Jika tidak ada bukti untuk suatu indikator, berikan skor rendah untuk indikator tersebut dan jelaskan bahwa bukti tidak ditemukan.
 4. Skor menggunakan skala 0-100 per dimensi.
 5. Evidence harus berupa kutipan langsung atau parafrase dekat dari teks CV.
-6. CV mungkin dalam Bahasa Indonesia — evaluasi sesuai bahasa aslinya.
-7. Kandidat adalah fresh graduate / entry-level — proyek akademik, tugas kuliah, skripsi, dan peran organisasi adalah bukti valid.
-8. Teks CV sudah dianonimisasi — abaikan token seperti [PERSON_1], [ORG_1], [LOC_1], dll.
-9. Profile summary HARUS ditulis dalam Bahasa Indonesia.
+6. CV dapat ditulis dalam Bahasa Indonesia, Bahasa Inggris, atau campuran keduanya. Evaluasi isi dan bukti kompetensinya secara setara terlepas dari bahasa yang digunakan.
+7. Jangan memberi bonus atau penalti hanya karena CV menggunakan Bahasa Indonesia atau Bahasa Inggris. Jika dua CV memiliki substansi pengalaman yang sama, skor yang diberikan harus konsisten.
+8. Petakan istilah Indonesia dan Inggris ke konsep kompetensi yang sama. Contoh: "Pembelajaran Mesin" setara dengan "Machine Learning", "Visi Komputer" setara dengan "Computer Vision", "Penambangan Data" setara dengan "Data Mining", "Ketua Pelaksana" setara dengan "Chief Organizer", dan "Wakil Koordinator/Head" setara dengan leadership responsibility.
+9. Kandidat adalah fresh graduate / entry-level — proyek akademik, tugas kuliah, skripsi, dan peran organisasi adalah bukti valid.
+10. Teks CV sudah dianonimisasi — abaikan token seperti [PERSON_1], [ORG_1], [LOC_1], dll.
+11. Profile summary HARUS ditulis dalam Bahasa Indonesia.
 
 FORMAT OUTPUT:
 Kamu HARUS merespons dalam format JSON yang valid (tanpa markdown code fence). Struktur JSON:
@@ -53,6 +55,8 @@ Kamu HARUS merespons dalam format JSON yang valid (tanpa markdown code fence). S
 }
 
 PANDUAN SKOR:
+- Bahasa penulisan CV tidak boleh memengaruhi skor. Skor harus ditentukan oleh kekuatan bukti, relevansi pengalaman, dampak, kompleksitas tanggung jawab, dan kesesuaian terhadap rubrik.
+- Jangan menilai lebih tinggi hanya karena istilah terdengar lebih profesional dalam satu bahasa. Nilai makna dan evidence-nya.
 - 0-20: Tidak ada bukti relevan ditemukan dalam CV
 - 21-40: Bukti minimal atau sangat terbatas
 - 41-60: Bukti cukup, menunjukkan kompetensi dasar
@@ -92,6 +96,14 @@ TEKS CV KANDIDAT (SUDAH DIANONIMISASI):
 {anonymized_cv}
 
 ========================================
+
+CATATAN FAIRNESS BAHASA:
+CV kandidat dapat ditulis dalam Bahasa Indonesia, Bahasa Inggris, atau campuran keduanya.
+Terapkan rubrik secara setara tanpa memberi bonus atau penalti berdasarkan bahasa yang digunakan.
+Sebelum memberi skor, petakan istilah lintas bahasa ke konsep kompetensi yang sama.
+
+Jika dua CV memiliki substansi pengalaman, pencapaian, dampak, dan bukti kompetensi yang sama, skor harus tetap konsisten meskipun bahasa penulisannya berbeda.
+Nilai kandidat berdasarkan kekuatan bukti, relevansi pengalaman, kompleksitas tanggung jawab, dampak pencapaian, dan kesesuaian terhadap rubrik — bukan berdasarkan gaya bahasa atau pilihan bahasa CV.
 
 Evaluasi CV kandidat ini terhadap semua dimensi dalam rubrik di atas.
 Berikan skor, justifikasi, dan bukti kutipan untuk setiap dimensi.

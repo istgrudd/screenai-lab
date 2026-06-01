@@ -1980,6 +1980,32 @@ Regression/docs.
 
 Ensure all feature phases work together and documentation reflects the final implemented behavior.
 
+This phase also validates final evaluation consistency, including multilingual CV fairness, so semantically equivalent Indonesian and English CVs are not scored differently only because of language choice.
+
+## Scope
+
+Phase 12 is not intended for large new feature development.
+
+Allowed changes:
+
+- regression fixes;
+- documentation updates;
+- UI copy consistency improvements;
+- minor prompt hardening;
+- minor frontend consistency fixes;
+- test hardening;
+- bug fixes found during full regression.
+
+Out of scope:
+
+- new major feature flows;
+- email resend workflow;
+- editable email templates;
+- analytics historical period selector;
+- export CSV/PDF features;
+- major frontend redesign beyond consistency/readability fixes;
+- changing core recruitment workflow semantics.
+
 ## Required Commands
 
 Backend smoke tests:
@@ -1998,6 +2024,13 @@ python -m scripts.smoke_test_audit_logs
 python -m scripts.smoke_test_email_notifications
 python -m scripts.smoke_test_evaluation
 python -m scripts.smoke_test_bulk_announce
+````
+
+Evaluation and prompt-related regression:
+
+```bash
+python -m scripts.smoke_test_evaluation
+python -m scripts.smoke_test_ner_evaluation_flow
 ```
 
 Frontend:
@@ -2012,6 +2045,118 @@ Optional backend compile check:
 ```bash
 python -m compileall backend scripts
 ```
+
+## Manual Regression Checklist
+
+Check the full recruitment lifecycle manually:
+
+1. Candidate registration and email verification.
+2. Candidate login after email verification.
+3. Candidate profile completion requirement.
+4. Candidate application creation.
+5. Candidate document upload.
+6. Candidate final submit.
+7. Application submitted email notification/log.
+8. Recruiter/super admin document verification.
+9. Document rejection and correction flow.
+10. Document rejected email notification/log after finalize.
+11. Candidate document replacement after correction request.
+12. Finalized accepted document review triggers NER/evaluation readiness.
+13. Evaluation batch flow.
+14. Evaluation result display.
+15. Score override and audit log.
+16. Announcement pass/fail.
+17. Announcement email notification/log.
+18. Candidate announcement visibility.
+19. Analytics dashboard.
+20. Audit log page.
+21. Admin Emails monitoring page.
+22. Role protection for candidate, recruiter, and super admin routes.
+
+## Evaluation Fairness / Multilingual CV Consistency
+
+Phase 12 must include a final check for language-related evaluation consistency.
+
+Background:
+
+A manual test found that semantically equivalent Indonesian and English CV variants could produce different evaluation scores, even when the underlying content was the same. This may be caused by prompt sensitivity, rubric-language alignment, terminology mapping, extraction differences, or LLM scoring bias.
+
+Required adjustment:
+
+* Ensure `SYSTEM_PROMPT` in `backend/services/rag_pipeline.py` contains multilingual fairness guardrails.
+* Ensure `_build_user_prompt()` includes a fairness note explaining that Indonesian and English CVs should be evaluated equivalently when the evidence is semantically the same.
+* The evaluator must not reward or penalize candidates based only on whether the CV is written in Bahasa Indonesia, English, or mixed language.
+* The evaluator should map equivalent terms across languages before scoring, for example:
+
+  * “Pembelajaran Mesin” = “Machine Learning”
+  * “Visi Komputer” = “Computer Vision”
+  * “Penambangan Data” = “Data Mining”
+  * “Ketua Pelaksana” = “Chief Organizer”
+  * “Asisten Riset” = “Research Assistant”
+  * “Magang Data Engineer” = “Data Engineer Intern”
+
+Manual validation recommendation:
+
+Evaluate two CVs with equivalent content but different languages using the same rubric.
+
+Compare:
+
+```text
+composite_score
+dimension_scores
+justification
+evidence
+profile_summary
+```
+
+Expected behavior:
+
+* Scores should be broadly consistent when evidence is equivalent.
+* Minor variation is acceptable.
+* Large differences should be explainable by missing evidence, extraction differences, or actual content differences.
+* A practical tolerance target is around 0–3 composite-score points for semantically equivalent CVs.
+* Differences around 5–7% should be treated as a finding and documented unless clearly justified by evidence.
+
+If the score gap remains large:
+
+* Document it in `docs/ISSUES_AND_NOTES.md`.
+* Mention it in the Phase 12 report as a known limitation.
+* Recommend future structured evidence extraction before scoring.
+
+## Frontend Consistency Review
+
+Phase 12 should also check UI consistency, especially because several pages were added across multiple phases.
+
+Review:
+
+* language consistency between Bahasa Indonesia and English;
+* empty states;
+* loading states;
+* error messages;
+* button labels;
+* page titles;
+* role-specific navigation labels;
+* admin/recruiter/candidate dashboard wording;
+* table/card spacing consistency;
+* whether pages feel too plain or insufficiently informative.
+
+Recommended language policy:
+
+* Candidate-facing recruitment flow should primarily use Bahasa Indonesia.
+* Internal technical/admin labels may use English where already established.
+* Avoid mixing English and Bahasa Indonesia in the same component unless intentional.
+* Use consistent terms:
+
+  * “Kandidat”
+  * “Recruiter”
+  * “Super Admin”
+  * “Dokumen”
+  * “Evaluasi”
+  * “Pengumuman”
+  * “Audit Log”
+  * “Email Notifications” or “Notifikasi Email”, but choose one per page context.
+
+If frontend design issues are large, record them as follow-up rather than expanding Phase 12 too far.
 
 ## Documentation Updates
 
@@ -2029,14 +2174,65 @@ docs/features/BACKEND_IMPLEMENTATION_PLAN.md
 docs/features/EXECUTION_PLAN.md
 ```
 
+Documentation must reflect the final implemented behavior for:
+
+* email verification;
+* forgot password;
+* admin-assisted password reset link;
+* candidate profile completion;
+* application submission;
+* document verification;
+* document rejection/correction;
+* NER/evaluation timing;
+* analytics;
+* audit logs;
+* email notification lifecycle;
+* admin emails monitoring page;
+* evaluation fairness guardrails.
+
+## Phase 12 Report
+
+Create:
+
+```text
+docs/reports/phase_12_final_regression_documentation.md
+```
+
+Report must include:
+
+1. Implementation Date
+2. Branch
+3. Phase Name
+
+   * Phase 12 — Final Regression and Documentation Update
+4. Summary
+5. Regression Scope
+6. Commands Run
+7. Smoke Test Results
+8. Frontend Build Result
+9. Manual End-to-End Test Result
+10. Evaluation Fairness / Multilingual CV Consistency Check
+11. Frontend Consistency Findings
+12. Bugs Found and Fixes Applied
+13. Documentation Updated
+14. Known Limitations
+15. Final Readiness Notes
+
 ## Done Criteria
 
-* All smoke tests pass.
+* All required smoke tests pass.
 * Frontend build passes.
+* Optional backend compile check passes, or any compile issue is documented.
 * Docs match implemented behavior.
-* Old route redirects work.
+* Old route redirects work if applicable.
 * Backend role protection is confirmed.
 * Candidate, recruiter, and super admin workflows are manually checked.
+* Application submitted, document rejected, and announcement email notifications are verified.
+* Audit logs and email notification logs are verified.
+* Evaluation prompt includes multilingual fairness guardrails.
+* Indonesian and English CV evaluation consistency is manually checked or documented as a known limitation.
+* Frontend language/design consistency issues are either fixed or documented as follow-up.
+* Phase 12 report is created.
 
 ---
 
