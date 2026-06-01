@@ -5,25 +5,19 @@ import {
   AlertTriangle,
   ArrowLeft,
   ArrowRight,
-  CheckCircle2,
-  ClipboardList,
   FileText,
-  Loader2,
   ShieldCheck,
 } from "lucide-react";
 
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Progress } from "@/components/ui/progress";
-
+import LoadingState from "@/components/common/LoadingState";
+import PageHeader from "@/components/layout/PageHeader";
+import ApplicationProgressCard from "@/components/candidate/ApplicationProgressCard";
+import CandidateApplicationStepTrack from "@/components/candidate/CandidateApplicationStepTrack";
+import DocumentRequirementCard from "@/components/candidate/DocumentRequirementCard";
+import DocumentPreviewDialog from "@/components/DocumentPreviewDialog";
 import DocumentUploadStep from "@/components/DocumentUploadStep";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   getActivePeriod,
   getMyApplication,
@@ -31,107 +25,11 @@ import {
   uploadApplicationDocument,
 } from "@/lib/api";
 import {
-  formatStatus,
-  isSubmissionPhase,
   REQUIRED_DOCUMENTS,
+  documentCompleteness,
+  isSubmissionPhase,
   submissionPhaseMessage,
 } from "@/lib/candidateApplication";
-
-function StepTracker({ steps, activeIndex, uploadedTypes }) {
-  const completed = steps.filter((step) => uploadedTypes.has(step.doc_type)).length;
-  const pct = Math.round((completed / steps.length) * 100);
-
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="text-sm font-medium">
-            Step {activeIndex + 1} of {steps.length}
-          </p>
-          <p className="text-xs text-muted-foreground">
-            {completed}/{steps.length} documents uploaded
-          </p>
-        </div>
-        <Badge variant="secondary" className="gap-1">
-          <FileText className="w-3 h-3" />
-          {pct}%
-        </Badge>
-      </div>
-      <Progress value={pct} />
-      <div className="hidden md:grid grid-cols-6 gap-2">
-        {steps.map((step, index) => {
-          const done = uploadedTypes.has(step.doc_type);
-          const active = index === activeIndex;
-          return (
-            <div
-              key={step.doc_type}
-              className={`rounded-lg border px-2 py-2 text-xs text-center ${
-                active
-                  ? "bg-primary text-primary-foreground border-primary"
-                  : done
-                  ? "bg-emerald-500/10 text-emerald-700 border-emerald-500/30"
-                  : "bg-muted/40 text-muted-foreground"
-              }`}
-            >
-              <div className="flex items-center justify-center gap-1 font-medium">
-                {done && !active && <CheckCircle2 className="w-3 h-3" />}
-                {index + 1}. {step.short}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-function ReviewStatusPanel({ documents }) {
-  const docsByType = new Map(documents.map((document) => [document.doc_type, document]));
-  const hasReviewState = documents.some((document) => document.verification_status);
-  if (!hasReviewState) return null;
-
-  return (
-    <Card>
-      <CardHeader className="pb-3">
-        <CardTitle className="text-lg">Document Review Status</CardTitle>
-        <CardDescription>
-          Rejected documents show the reason from the recruitment team.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        {REQUIRED_DOCUMENTS.map((item) => {
-          const doc = docsByType.get(item.doc_type);
-          const status = doc?.verification_status || "pending";
-          const rejected = status === "rejected";
-          const verified = status === "verified";
-          return (
-            <div
-              key={item.doc_type}
-              className={`rounded-lg border px-3 py-3 ${
-                rejected ? "border-destructive/40 bg-destructive/5" : ""
-              }`}
-            >
-              <div className="flex items-center justify-between gap-2">
-                <p className="text-sm font-medium">{item.label}</p>
-                <Badge
-                  variant={rejected ? "destructive" : verified ? "secondary" : "outline"}
-                  className="text-[10px] uppercase"
-                >
-                  {formatStatus(status)}
-                </Badge>
-              </div>
-              {rejected && doc?.rejection_reason && (
-                <p className="text-xs text-destructive mt-2">
-                  {doc.rejection_reason}
-                </p>
-              )}
-            </div>
-          );
-        })}
-      </CardContent>
-    </Card>
-  );
-}
 
 export default function DocumentsPage() {
   const navigate = useNavigate();
@@ -140,6 +38,7 @@ export default function DocumentsPage() {
   const [limits, setLimits] = useState({});
   const [activePeriod, setActivePeriod] = useState(null);
   const [activeIndex, setActiveIndex] = useState(0);
+  const [previewDoc, setPreviewDoc] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -151,25 +50,27 @@ export default function DocumentsPage() {
         const app = await getMyApplication();
         if (cancelled) return;
         setApplication(app);
+
         try {
           const period = await getActivePeriod();
           if (!cancelled) setActivePeriod(period);
         } catch {
           if (!cancelled) setActivePeriod(null);
         }
+
         const { documents: docs, limits: lim } = await listApplicationDocuments(
           app.id
         );
         if (cancelled) return;
-        setDocuments(docs);
-        setLimits(lim);
+        setDocuments(docs || []);
+        setLimits(lim || {});
       } catch (error) {
         if (error.message?.toLowerCase().includes("not found")) {
-          toast.error("Please start an application first.");
+          toast.error("Mulai pendaftaran terlebih dahulu.");
           navigate("/application/start", { replace: true });
           return;
         }
-        toast.error(error.message || "Failed to load documents");
+        toast.error(error.message || "Gagal memuat dokumen.");
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -181,21 +82,25 @@ export default function DocumentsPage() {
     };
   }, [navigate]);
 
+  const docsByType = useMemo(
+    () => new Map(documents.map((document) => [document.doc_type, document])),
+    [documents]
+  );
   const uploadedTypes = useMemo(
     () => new Set(documents.map((document) => document.doc_type)),
     [documents]
   );
+  const completeness = documentCompleteness(documents);
   const allComplete = REQUIRED_DOCUMENTS.every((step) =>
     uploadedTypes.has(step.doc_type)
   );
   const isDraft = application?.status === "draft";
   const isCorrection = application?.status === "correction_requested";
   const submissionOpen = isSubmissionPhase(activePeriod);
+  const canManageDocuments = (isDraft && submissionOpen) || isCorrection;
 
   const currentStep = REQUIRED_DOCUMENTS[activeIndex];
-  const currentDoc = documents.find(
-    (document) => document.doc_type === currentStep?.doc_type
-  );
+  const currentDoc = docsByType.get(currentStep?.doc_type);
   const currentRejected = currentDoc?.verification_status === "rejected";
   const canEditCurrent = (isDraft && submissionOpen) || (isCorrection && currentRejected);
   const locked = !canEditCurrent;
@@ -214,60 +119,89 @@ export default function DocumentsPage() {
     });
   };
 
+  const focusFirstMissing = () => {
+    const index = REQUIRED_DOCUMENTS.findIndex(
+      (item) => !uploadedTypes.has(item.doc_type)
+    );
+    if (index >= 0) setActiveIndex(index);
+  };
+
   const lockedMessage = isCorrection
     ? currentRejected
-      ? "Upload a replacement for this rejected document."
-      : "Only rejected documents can be replaced during correction."
+      ? "Unggah file pengganti untuk dokumen yang ditolak."
+      : "Hanya dokumen yang ditolak yang bisa diganti pada mode revisi."
     : isDraft && !submissionOpen
     ? submissionPhaseMessage(activePeriod)
-    : "Documents are locked after final submit.";
+    : "Dokumen terkunci setelah pendaftaran dikirim.";
+
+  const cardLockedFor = (item) => {
+    const doc = docsByType.get(item.doc_type);
+    if (doc?.verification_status === "verified") return true;
+    if (isCorrection) return doc?.verification_status !== "rejected";
+    if (isDraft) return !submissionOpen;
+    return true;
+  };
+
+  const handleProgressAction = () => {
+    if (isDraft && allComplete) {
+      navigate("/application/review");
+      return;
+    }
+    if (isCorrection) {
+      const index = REQUIRED_DOCUMENTS.findIndex(
+        (item) => docsByType.get(item.doc_type)?.verification_status === "rejected"
+      );
+      if (index >= 0) setActiveIndex(index);
+      return;
+    }
+    focusFirstMissing();
+  };
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center py-24">
-        <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
-      </div>
-    );
+    return <LoadingState label="Memuat dokumen pendaftaran..." />;
   }
 
   if (!application) return null;
 
   return (
     <div className="space-y-6">
-      <div className="flex items-start justify-between flex-wrap gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
-            <ClipboardList className="w-6 h-6 text-primary" />
-            Upload Documents
-          </h1>
-          <p className="text-muted-foreground mt-1">
-            Submit all six required documents. You can save progress and come
-            back later. Nothing is final until you review and submit.
-          </p>
-        </div>
-        <Badge variant="outline" className="uppercase">
-          Division: {application.division.replace("_", " ")}
-        </Badge>
-      </div>
+      <PageHeader
+        eyebrow="Pendaftaran / Dokumen"
+        title="Lengkapi Dokumen Pendaftaran"
+        description="Unggah seluruh dokumen wajib. Validasi tipe dan ukuran file tetap mengikuti aturan server."
+      />
 
-      <Card>
-        <CardContent className="py-5">
-          <StepTracker
-            steps={REQUIRED_DOCUMENTS}
-            activeIndex={activeIndex}
-            uploadedTypes={uploadedTypes}
-          />
-        </CardContent>
-      </Card>
+      <CandidateApplicationStepTrack
+        currentStep="documents"
+        application={application}
+        documents={documents}
+        title="Alur Pendaftaran"
+      />
+
+      <ApplicationProgressCard
+        application={application}
+        documents={documents}
+        activePeriod={activePeriod}
+        canManageDocuments={canManageDocuments}
+        actionLabel={
+          isDraft && allComplete
+            ? "Tinjau & Kirim Pendaftaran"
+            : isCorrection
+            ? "Fokus Dokumen Revisi"
+            : "Lengkapi Dokumen"
+        }
+        onAction={handleProgressAction}
+      />
 
       {isCorrection && (
-        <Card className="border-destructive/40 bg-destructive/5">
-          <CardContent className="py-4 flex items-start gap-3">
-            <AlertTriangle className="w-5 h-5 text-destructive mt-0.5 shrink-0" />
+        <Card className="brand-card bg-warning/10">
+          <CardContent className="flex items-start gap-3 p-5">
+            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-warning" />
             <div>
-              <p className="text-sm font-medium">Correction requested</p>
-              <p className="text-sm text-muted-foreground mt-1">
-                Replace only the rejected document(s). Verified documents remain locked.
+              <p className="font-medium text-foreground">Dokumen perlu revisi</p>
+              <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                Ganti hanya dokumen yang ditolak. Dokumen yang sudah
+                terverifikasi tetap terkunci.
               </p>
             </div>
           </CardContent>
@@ -275,12 +209,12 @@ export default function DocumentsPage() {
       )}
 
       {isDraft && !submissionOpen && (
-        <Card className="border-amber-500/40 bg-amber-500/10">
-          <CardContent className="py-4 flex items-start gap-3">
-            <AlertTriangle className="w-5 h-5 text-amber-600 mt-0.5 shrink-0" />
+        <Card className="brand-card bg-warning/10">
+          <CardContent className="flex items-start gap-3 p-5">
+            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-warning" />
             <div>
-              <p className="text-sm font-medium">Upload dokumen belum tersedia</p>
-              <p className="text-sm text-muted-foreground mt-1">
+              <p className="font-medium text-foreground">Upload belum tersedia</p>
+              <p className="mt-1 text-sm leading-6 text-muted-foreground">
                 {submissionPhaseMessage(activePeriod)}
               </p>
             </div>
@@ -288,20 +222,46 @@ export default function DocumentsPage() {
         </Card>
       )}
 
-      {application.status !== "draft" && (
-        <ReviewStatusPanel documents={documents} />
-      )}
+      <section className="space-y-3">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.08em] text-primary">
+            Requirement Dokumen
+          </p>
+          <h2 className="mt-1 font-heading text-xl font-bold tracking-normal">
+            {completeness.completed}/{completeness.total} dokumen tercatat
+          </h2>
+        </div>
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+          {REQUIRED_DOCUMENTS.map((item, index) => {
+            const doc = docsByType.get(item.doc_type);
+            return (
+              <DocumentRequirementCard
+                key={item.doc_type}
+                documentType={item.doc_type}
+                label={item.label}
+                document={doc}
+                locked={cardLockedFor(item)}
+                correctionMode={isCorrection}
+                active={index === activeIndex}
+                onUpload={() => setActiveIndex(index)}
+                onPreview={doc ? setPreviewDoc : undefined}
+              />
+            );
+          })}
+        </div>
+      </section>
 
-      <Card>
+      <Card className="brand-card">
         <CardHeader className="pb-3">
-          <CardTitle className="text-xl">
+          <CardTitle className="flex items-center gap-2 font-heading text-xl tracking-normal">
+            <FileText className="h-5 w-5 text-primary" />
             {activeIndex + 1}. {currentStep.label}
           </CardTitle>
-          <CardDescription>
+          <p className="text-sm leading-6 text-muted-foreground">
             {canEditCurrent
-              ? "Drop the file here or click to browse. We re-validate on the server."
-              : "This document is locked in the current review state."}
-          </CardDescription>
+              ? "Gunakan area unggah di bawah. Validasi file tetap dilakukan sebelum request dikirim."
+              : "Dokumen ini tidak bisa diganti pada status atau fase saat ini."}
+          </p>
         </CardHeader>
         <CardContent>
           <DocumentUploadStep
@@ -320,21 +280,23 @@ export default function DocumentsPage() {
         </CardContent>
       </Card>
 
-      <Card>
-        <CardContent className="py-4 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+      <Card className="brand-card">
+        <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
           <Button
+            type="button"
             variant="outline"
             onClick={() => setActiveIndex((index) => Math.max(0, index - 1))}
             disabled={activeIndex === 0}
             className="gap-2"
           >
-            <ArrowLeft className="w-4 h-4" />
-            Back
+            <ArrowLeft className="h-4 w-4" />
+            Sebelumnya
           </Button>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-col gap-2 sm:flex-row">
             {activeIndex < REQUIRED_DOCUMENTS.length - 1 ? (
               <Button
+                type="button"
                 onClick={() =>
                   setActiveIndex((index) =>
                     Math.min(REQUIRED_DOCUMENTS.length - 1, index + 1)
@@ -342,36 +304,46 @@ export default function DocumentsPage() {
                 }
                 className="gap-2"
               >
-                Next Step
-                <ArrowRight className="w-4 h-4" />
+                Langkah Berikutnya
+                <ArrowRight className="h-4 w-4" />
               </Button>
-            ) : locked ? (
+            ) : isDraft ? (
               <Button
-                onClick={() => navigate("/application/status")}
+                type="button"
+                onClick={() => navigate("/application/review")}
+                disabled={!allComplete || !submissionOpen}
                 className="gap-2"
               >
-                <ShieldCheck className="w-4 h-4" />
-                View Status
+                <ShieldCheck className="h-4 w-4" />
+                Tinjau & Kirim
               </Button>
             ) : (
               <Button
-                onClick={() => navigate("/application/review")}
-                disabled={!allComplete}
+                type="button"
+                onClick={() => navigate("/application/status")}
                 className="gap-2"
               >
-                <ShieldCheck className="w-4 h-4" />
-                Review & Submit
+                <ShieldCheck className="h-4 w-4" />
+                Lihat Status
               </Button>
             )}
           </div>
         </CardContent>
       </Card>
 
-      {!allComplete && activeIndex === REQUIRED_DOCUMENTS.length - 1 && (
-        <p className="text-xs text-muted-foreground text-center">
-          Upload every document before moving to the review page.
+      {isDraft && (!allComplete || !submissionOpen) && (
+        <p className="text-center text-xs leading-5 text-muted-foreground">
+          {!allComplete
+            ? "Tombol review aktif setelah semua dokumen wajib diunggah."
+            : submissionPhaseMessage(activePeriod)}
         </p>
       )}
+
+      <DocumentPreviewDialog
+        open={Boolean(previewDoc)}
+        onClose={() => setPreviewDoc(null)}
+        document={previewDoc}
+      />
     </div>
   );
 }

@@ -8,18 +8,16 @@ import {
   FileText,
   Loader2,
   ShieldCheck,
+  UserCircle2,
 } from "lucide-react";
 
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import ConfirmActionDialog from "@/components/common/ConfirmActionDialog";
+import LoadingState from "@/components/common/LoadingState";
+import StatusBadge from "@/components/common/StatusBadge";
+import PageHeader from "@/components/layout/PageHeader";
+import CandidateApplicationStepTrack from "@/components/candidate/CandidateApplicationStepTrack";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   getActivePeriod,
   getMyApplication,
@@ -28,34 +26,72 @@ import {
   submitApplication,
 } from "@/lib/api";
 import {
+  REQUIRED_DOCUMENTS,
   isSubmissionPhase,
   missingRequiredProfileFields,
   PROFILE_FIELD_LABELS,
   submissionPhaseMessage,
 } from "@/lib/candidateApplication";
+import { formatFileSize } from "@/lib/candidateUx";
 
-const DOC_LABELS = {
-  cv: "Curriculum Vitae",
-  motivation_letter: "Motivation Letter",
-  khs: "KHS / Transcript",
-  ktm: "KTM / Student ID",
-  swot: "SWOT Analysis",
-  supporting_docs: "Dokumen Pendukung",
-};
-const REQUIRED_TYPES = [
-  "cv",
-  "motivation_letter",
-  "khs",
-  "ktm",
-  "swot",
-  "supporting_docs",
-];
+function Field({ label, value, mono, emphasize }) {
+  return (
+    <div>
+      <p className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+        {label}
+      </p>
+      <p
+        className={`${mono ? "font-mono" : ""} ${
+          emphasize ? "font-semibold capitalize" : ""
+        } mt-1 text-sm`}
+      >
+        {value || <span className="text-muted-foreground">-</span>}
+      </p>
+    </div>
+  );
+}
 
-function formatSize(bytes) {
-  if (bytes == null) return "—";
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+function ReadinessItem({ ready, title, description }) {
+  return (
+    <div className="flex items-start gap-3 rounded-xl bg-surface-container-low px-4 py-3">
+      <div
+        className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full ${
+          ready ? "bg-success text-success-foreground" : "bg-warning/15 text-warning"
+        }`}
+      >
+        {ready ? (
+          <CheckCircle2 className="h-4 w-4" />
+        ) : (
+          <AlertTriangle className="h-4 w-4" />
+        )}
+      </div>
+      <div>
+        <p className="text-sm font-medium text-foreground">{title}</p>
+        <p className="mt-1 text-xs leading-5 text-muted-foreground">
+          {description}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function ConfirmRow({ checked, onChange, label, hint }) {
+  return (
+    <label className="flex cursor-pointer items-start gap-3 rounded-xl bg-surface-container-low px-4 py-3 transition-colors hover:bg-surface-container-high">
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(event) => onChange(event.target.checked)}
+        className="mt-1 h-4 w-4 rounded border-input accent-primary"
+      />
+      <span>
+        <span className="block text-sm font-medium">{label}</span>
+        <span className="mt-1 block text-xs leading-5 text-muted-foreground">
+          {hint}
+        </span>
+      </span>
+    </label>
+  );
 }
 
 export default function ReviewPage() {
@@ -73,35 +109,39 @@ export default function ReviewPage() {
 
   useEffect(() => {
     let cancelled = false;
+
     async function load() {
       try {
         const [me, app] = await Promise.all([getMyProfile(), getMyApplication()]);
         if (cancelled) return;
         setUser(me);
         setApplication(app);
+
         if (app.status !== "draft") {
-          // Already submitted — bounce to the confirmation page.
           navigate("/application/status", { replace: true });
           return;
         }
+
         try {
           const period = await getActivePeriod();
           if (!cancelled) setActivePeriod(period);
         } catch {
           if (!cancelled) setActivePeriod(null);
         }
+
         const { documents: docs } = await listApplicationDocuments(app.id);
-        if (!cancelled) setDocuments(docs);
-      } catch (err) {
-        if (err.message?.toLowerCase().includes("not found")) {
+        if (!cancelled) setDocuments(docs || []);
+      } catch (error) {
+        if (error.message?.toLowerCase().includes("not found")) {
           navigate("/application/start", { replace: true });
           return;
         }
-        toast.error(err.message || "Failed to load review data");
+        toast.error(error.message || "Gagal memuat data review.");
       } finally {
         if (!cancelled) setLoading(false);
       }
     }
+
     load();
     return () => {
       cancelled = true;
@@ -109,278 +149,265 @@ export default function ReviewPage() {
   }, [navigate]);
 
   const allAcked = ackAccurate && ackIrreversible && ackAuthentic;
-  const docsByType = new Map(documents.map((d) => [d.doc_type, d]));
-  const allDocsPresent = REQUIRED_TYPES.every((t) => docsByType.has(t));
+  const docsByType = new Map(documents.map((document) => [document.doc_type, document]));
+  const allDocsPresent = REQUIRED_DOCUMENTS.every((item) =>
+    docsByType.has(item.doc_type)
+  );
   const missingProfile = missingRequiredProfileFields(user);
   const profileComplete = missingProfile.length === 0;
   const submissionOpen = isSubmissionPhase(activePeriod);
+  const canSubmit =
+    allAcked && allDocsPresent && profileComplete && submissionOpen && !submitting;
 
   const handleSubmit = async () => {
     if (!allAcked || !allDocsPresent || !profileComplete || !submissionOpen) return;
     setSubmitting(true);
     try {
       await submitApplication(application.id);
-      toast.success("Application submitted!");
+      toast.success("Pendaftaran berhasil dikirim.");
       navigate("/application/status", { replace: true });
-    } catch (err) {
-      toast.error(err.message || "Submit failed");
+    } catch (error) {
+      toast.error(error.message || "Gagal mengirim pendaftaran.");
     } finally {
       setSubmitting(false);
     }
   };
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center py-24">
-        <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
-      </div>
-    );
+    return <LoadingState label="Memuat review pendaftaran..." />;
   }
+
   if (!user || !application) return null;
+
+  const disabledReasons = [
+    !profileComplete && "Profil belum lengkap.",
+    !allDocsPresent && "Masih ada dokumen wajib yang belum diunggah.",
+    !submissionOpen && submissionPhaseMessage(activePeriod),
+    !allAcked && "Semua pernyataan konfirmasi harus dicentang.",
+  ].filter(Boolean);
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
-          <ShieldCheck className="w-6 h-6 text-primary" />
-          Review & Submit
-        </h1>
-        <p className="text-muted-foreground mt-1">
-          Confirm everything looks right. Submission is final.
-        </p>
-      </div>
+      <PageHeader
+        eyebrow="Pendaftaran / Review"
+        title="Tinjau & Kirim Pendaftaran"
+        description="Pastikan profil, divisi, dan dokumen sudah benar sebelum pendaftaran dikirim final."
+      />
 
-      {/* Irreversible warning banner */}
-      <div className="rounded-xl border border-amber-500/40 bg-amber-50 dark:bg-amber-500/10 px-5 py-4 flex gap-3">
-        <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
-        <div className="space-y-1">
-          <p className="font-medium text-amber-900 dark:text-amber-200">
-            This action is irreversible.
-          </p>
-          <p className="text-sm text-amber-800 dark:text-amber-300/80">
-            Once submitted, you cannot replace documents or change your chosen
-            division. Your application will move into the recruitment review
-            pipeline.
-          </p>
-        </div>
-      </div>
+      <CandidateApplicationStepTrack
+        currentStep="review"
+        application={application}
+        documents={documents}
+        profile={user}
+        title="Alur Pendaftaran"
+      />
 
-      {/* Profile summary */}
-      <Card>
+      <Card className="brand-card bg-warning/10">
+        <CardContent className="flex items-start gap-3 p-5">
+          <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-warning" />
+          <div>
+            <p className="font-medium text-foreground">
+              Submit pendaftaran bersifat final
+            </p>
+            <p className="mt-1 text-sm leading-6 text-muted-foreground">
+              Setelah dikirim, divisi dan dokumen tidak bisa diubah kecuali
+              recruiter meminta revisi dokumen.
+            </p>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="brand-card">
         <CardHeader className="pb-3">
-          <CardTitle className="text-lg">Profile Summary</CardTitle>
-          <CardDescription>These details go into your application.</CardDescription>
+          <CardTitle className="flex items-center gap-2 font-heading text-xl tracking-normal">
+            <ShieldCheck className="h-5 w-5 text-primary" />
+            Checklist Kesiapan
+          </CardTitle>
         </CardHeader>
-        <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-          <Field label="Full name" value={user.full_name} />
-          <Field label="NIM" value={user.nim} mono />
-          <Field label="Email" value={user.email} />
-          <Field label="WhatsApp" value={user.whatsapp} />
-          <Field label="Angkatan" value={user.year} />
-          <Field label="Fakultas" value={user.faculty} />
-          <Field label="Jurusan" value={user.major} />
-          <Field
-            label="Division applied to"
-            value={(application.division || "").replace("_", " ")}
-            emphasize
+        <CardContent className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+          <ReadinessItem
+            ready={profileComplete}
+            title="Profil lengkap"
+            description={
+              profileComplete
+                ? "Seluruh field wajib kandidat sudah terisi."
+                : `Wajib diisi: ${missingProfile
+                    .map((field) => PROFILE_FIELD_LABELS[field] || field)
+                    .join(", ")}.`
+            }
           />
-          <Field label="Status" value={application.status} />
+          <ReadinessItem
+            ready={allDocsPresent}
+            title="Dokumen wajib lengkap"
+            description={
+              allDocsPresent
+                ? "Semua dokumen wajib sudah tercatat."
+                : "Lengkapi semua dokumen dari halaman Dokumen."
+            }
+          />
+          <ReadinessItem
+            ready={submissionOpen}
+            title="Fase pendaftaran aktif"
+            description={
+              submissionOpen
+                ? "Submit final tersedia pada fase ini."
+                : submissionPhaseMessage(activePeriod)
+            }
+          />
+          <ReadinessItem
+            ready={allAcked}
+            title="Konfirmasi kandidat"
+            description={
+              allAcked
+                ? "Semua pernyataan sudah disetujui."
+                : "Centang seluruh pernyataan sebelum submit."
+            }
+          />
         </CardContent>
       </Card>
 
       {!profileComplete && (
-        <Card className="border-amber-500/40 bg-amber-500/10">
-          <CardContent className="py-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-            <div className="flex items-start gap-3">
-              <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
-              <div>
-                <p className="text-sm font-medium">Profil belum lengkap</p>
-                <p className="text-sm text-muted-foreground mt-1">
-                  Wajib diisi:{" "}
-                  {missingProfile.map((field) => PROFILE_FIELD_LABELS[field] || field).join(", ")}.
-                </p>
-              </div>
+        <Card className="brand-card bg-warning/10">
+          <CardContent className="flex flex-col gap-3 p-5 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="font-medium text-foreground">Profil belum lengkap</p>
+              <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                Lengkapi profil sebelum mengirim pendaftaran final.
+              </p>
             </div>
             <Button asChild variant="outline">
-              <Link to="/profile/edit">Edit Profile</Link>
+              <Link to="/profile/edit">Edit Profil</Link>
             </Button>
           </CardContent>
         </Card>
       )}
 
-      {!submissionOpen && (
-        <Card className="border-amber-500/40 bg-amber-500/10">
-          <CardContent className="py-4 flex items-start gap-3">
-            <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
-            <div>
-              <p className="text-sm font-medium">Submit belum tersedia</p>
-              <p className="text-sm text-muted-foreground mt-1">
-                {submissionPhaseMessage(activePeriod)}
-              </p>
-            </div>
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1fr_1fr]">
+        <Card className="brand-card">
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 font-heading text-xl tracking-normal">
+              <UserCircle2 className="h-5 w-5 text-primary" />
+              Ringkasan Profil
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <Field label="Nama lengkap" value={user.full_name} />
+            <Field label="NIM" value={user.nim} mono />
+            <Field label="Email" value={user.email} />
+            <Field label="WhatsApp" value={user.whatsapp} />
+            <Field label="Angkatan" value={user.year} />
+            <Field label="Fakultas" value={user.faculty} />
+            <Field label="Jurusan" value={user.major} />
+            <Field
+              label="Divisi pilihan"
+              value={(application.division || "").replace("_", " ")}
+              emphasize
+            />
           </CardContent>
         </Card>
-      )}
 
-      {/* Documents list */}
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-lg">Uploaded Documents</CardTitle>
-          <CardDescription>
-            Every required document must be present before submitting.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="divide-y">
-          {REQUIRED_TYPES.map((type) => {
-            const d = docsByType.get(type);
-            return (
-              <div
-                key={type}
-                className="py-3 flex items-center justify-between gap-4"
-              >
-                <div className="flex items-center gap-3 min-w-0">
-                  <div
-                    className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${
-                      d
-                        ? "bg-emerald-500/15 text-emerald-700"
-                        : "bg-destructive/15 text-destructive"
-                    }`}
-                  >
-                    {d ? (
-                      <CheckCircle2 className="w-4 h-4" />
-                    ) : (
-                      <AlertTriangle className="w-4 h-4" />
-                    )}
-                  </div>
+        <Card className="brand-card">
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 font-heading text-xl tracking-normal">
+              <FileText className="h-5 w-5 text-primary" />
+              Ringkasan Dokumen
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {REQUIRED_DOCUMENTS.map((item) => {
+              const document = docsByType.get(item.doc_type);
+              return (
+                <div
+                  key={item.doc_type}
+                  className="flex items-center justify-between gap-3 rounded-xl bg-surface-container-low px-4 py-3"
+                >
                   <div className="min-w-0">
-                    <p className="text-sm font-medium">{DOC_LABELS[type]}</p>
-                    <p className="text-xs text-muted-foreground truncate">
-                      {d ? (
-                        <>
-                          {d.file_name} · {formatSize(d.file_size)}
-                        </>
-                      ) : (
-                        "Missing — please upload on the Documents page"
-                      )}
+                    <p className="text-sm font-medium">{item.label}</p>
+                    <p className="truncate text-xs text-muted-foreground">
+                      {document
+                        ? `${document.file_name || "Dokumen"} - ${formatFileSize(
+                            document.file_size
+                          )}`
+                        : "Belum diunggah"}
                     </p>
                   </div>
+                  <StatusBadge
+                    status={document ? "uploaded" : "missing"}
+                    entityType="document"
+                  />
                 </div>
-                {d ? (
-                  <Badge variant="secondary" className="gap-1 text-[10px] uppercase">
-                    <FileText className="w-3 h-3" />
-                    Uploaded
-                  </Badge>
-                ) : (
-                  <Badge variant="destructive" className="text-[10px] uppercase">
-                    Missing
-                  </Badge>
-                )}
-              </div>
-            );
-          })}
-        </CardContent>
-      </Card>
+              );
+            })}
+          </CardContent>
+        </Card>
+      </div>
 
-      {/* Confirmation checkboxes */}
-      <Card>
+      <Card className="brand-card">
         <CardHeader className="pb-3">
-          <CardTitle className="text-lg">Confirm & Submit</CardTitle>
-          <CardDescription>
-            Tick all three boxes to enable the submit button.
-          </CardDescription>
+          <CardTitle className="font-heading text-xl tracking-normal">
+            Konfirmasi Final
+          </CardTitle>
+          <p className="text-sm leading-6 text-muted-foreground">
+            Centang semua pernyataan untuk mengaktifkan tombol submit.
+          </p>
         </CardHeader>
         <CardContent className="space-y-3">
           <ConfirmRow
             checked={ackAccurate}
             onChange={setAckAccurate}
-            label="Accurate information"
-            hint="All personal data and documents are current and correct."
+            label="Data sudah akurat"
+            hint="Profil, divisi, dan dokumen yang saya kirim sudah benar."
           />
           <ConfirmRow
             checked={ackAuthentic}
             onChange={setAckAuthentic}
-            label="Authentic documents"
-            hint="Every file belongs to me — no impersonation or fabricated evidence."
+            label="Dokumen asli milik saya"
+            hint="Seluruh file adalah milik saya dan tidak dimanipulasi."
           />
           <ConfirmRow
             checked={ackIrreversible}
             onChange={setAckIrreversible}
-            label="I understand this is final"
-            hint="After submission I can no longer edit profile info or replace files."
+            label="Saya memahami submit bersifat final"
+            hint="Saya tidak bisa mengganti dokumen setelah submit kecuali diminta revisi."
           />
 
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-4 border-t">
+          {disabledReasons.length > 0 && (
+            <div className="rounded-xl bg-warning/10 px-4 py-3 text-sm leading-6 text-warning">
+              {disabledReasons.join(" ")}
+            </div>
+          )}
+
+          <div className="flex flex-col gap-3 border-t border-border/60 pt-5 sm:flex-row sm:items-center sm:justify-between">
             <Button
+              type="button"
               variant="outline"
               onClick={() => navigate("/documents")}
               className="gap-2"
             >
-              <ArrowLeft className="w-4 h-4" />
-              Back to documents
+              <ArrowLeft className="h-4 w-4" />
+              Kembali ke Dokumen
             </Button>
 
-            <Button
-              onClick={handleSubmit}
-              disabled={
-                !allAcked ||
-                !allDocsPresent ||
-                !profileComplete ||
-                !submissionOpen ||
-                submitting
-              }
-              className="gap-2"
+            <ConfirmActionDialog
+              title="Kirim pendaftaran final?"
+              description="Pendaftaran akan masuk ke proses review dan dokumen terkunci setelah dikirim."
+              confirmLabel="Kirim Pendaftaran"
+              cancelLabel="Periksa Lagi"
+              loading={submitting}
+              onConfirm={handleSubmit}
             >
-              {submitting ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  Submitting…
-                </>
-              ) : (
-                <>
-                  <ShieldCheck className="w-4 h-4" />
-                  Submit final application
-                </>
-              )}
-            </Button>
+              <Button type="button" disabled={!canSubmit} className="gap-2">
+                {submitting ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <ShieldCheck className="h-4 w-4" />
+                )}
+                Kirim Pendaftaran
+              </Button>
+            </ConfirmActionDialog>
           </div>
         </CardContent>
       </Card>
     </div>
-  );
-}
-
-function Field({ label, value, mono, emphasize }) {
-  return (
-    <div>
-      <p className="text-xs uppercase tracking-wide text-muted-foreground mb-1">
-        {label}
-      </p>
-      <p
-        className={`${mono ? "font-mono" : ""} ${
-          emphasize ? "font-semibold capitalize" : ""
-        }`}
-      >
-        {value || <span className="text-muted-foreground italic">—</span>}
-      </p>
-    </div>
-  );
-}
-
-function ConfirmRow({ checked, onChange, label, hint }) {
-  return (
-    <label className="flex items-start gap-3 rounded-lg border p-3 cursor-pointer hover:bg-muted/30 transition-colors">
-      <input
-        type="checkbox"
-        checked={checked}
-        onChange={(e) => onChange(e.target.checked)}
-        className="mt-1 h-4 w-4 rounded border-input accent-primary"
-      />
-      <span>
-        <span className="block text-sm font-medium">{label}</span>
-        <span className="block text-xs text-muted-foreground mt-0.5">
-          {hint}
-        </span>
-      </span>
-    </label>
   );
 }

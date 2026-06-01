@@ -1,18 +1,14 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
-import { useLocation } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { toast } from "sonner";
-import { AlertTriangle, ArrowLeft, GraduationCap, Loader2 } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Lock, UserCircle2 } from "lucide-react";
 
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
+import LoadingState from "@/components/common/LoadingState";
+import StatusBadge from "@/components/common/StatusBadge";
+import PageHeader from "@/components/layout/PageHeader";
 import CandidateProfileForm from "@/components/candidate/CandidateProfileForm";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getMyProfile } from "@/lib/api";
 import {
   POST_SUBMIT_STATUSES,
@@ -33,7 +29,7 @@ export default function EditProfilePage() {
         const data = await getMyProfile();
         if (!cancelled) setProfile(data);
       } catch (error) {
-        toast.error(error.message || "Failed to load profile");
+        toast.error(error.message || "Gagal memuat profil.");
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -46,11 +42,7 @@ export default function EditProfilePage() {
   }, []);
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center py-24">
-        <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
-      </div>
-    );
+    return <LoadingState label="Memuat form profil..." />;
   }
 
   if (!profile) return null;
@@ -60,48 +52,77 @@ export default function EditProfilePage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-start justify-between gap-3 flex-wrap">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
-            <GraduationCap className="w-6 h-6 text-primary" />
-            Edit Profile
-          </h1>
-          <p className="text-muted-foreground mt-1">
-            Update account, contact, and student information.
-          </p>
-        </div>
-        <Button asChild variant="outline" className="gap-2">
-          <Link to="/profile">
-            <ArrowLeft className="w-4 h-4" />
-            Back to Profile
-          </Link>
-        </Button>
-      </div>
+      <PageHeader
+        eyebrow="Akun Kandidat"
+        title="Edit Profil"
+        description="Lengkapi data pribadi, kontak, dan akademik agar pendaftaran bisa dikirim."
+        status={
+          locked ? (
+            <StatusBadge label="Field akademik terkunci" tone="warning" size="md" />
+          ) : (
+            <StatusBadge label="Bisa diedit" tone="brand" size="md" />
+          )
+        }
+        action={
+          <Button asChild variant="outline" className="gap-2">
+            <Link to="/profile">
+              <ArrowLeft className="h-4 w-4" />
+              Kembali
+            </Link>
+          </Button>
+        }
+      />
 
-      <Card>
+      {missingFields.length > 0 && (
+        <Card className="brand-card bg-warning/10">
+          <CardContent className="flex items-start gap-3 p-5">
+            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-warning" />
+            <div>
+              <p className="font-medium text-foreground">
+                Lengkapi profil sebelum lanjut
+              </p>
+              <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                Wajib diisi:{" "}
+                {missingFields
+                  .map((field) => PROFILE_FIELD_LABELS[field] || field)
+                  .join(", ")}
+                .
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {locked && (
+        <Card className="brand-card bg-surface-container-low">
+          <CardContent className="flex items-start gap-3 p-5">
+            <Lock className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
+            <div>
+              <p className="font-medium text-foreground">
+                Beberapa field akademik terkunci
+              </p>
+              <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                Setelah pendaftaran dikirim, NIM, fakultas, jurusan, dan
+                angkatan tidak dapat diubah. Nama, email, WhatsApp, dan password
+                tetap dapat diperbarui.
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      <Card className="brand-card">
         <CardHeader className="pb-3">
-          <CardTitle className="text-lg">Personal Information</CardTitle>
-          <CardDescription>
-            {locked
-              ? "Academic identity fields are locked because your application has been submitted. Name, email, contact, and password remain editable."
-              : "Complete your profile before final submission."}
-          </CardDescription>
+          <CardTitle className="flex items-center gap-2 font-heading text-xl tracking-normal">
+            <UserCircle2 className="h-5 w-5 text-primary" />
+            Informasi Kandidat
+          </CardTitle>
+          <p className="text-sm leading-6 text-muted-foreground">
+            Nomor WhatsApp wajib diisi dan divalidasi oleh form sebelum data
+            disimpan.
+          </p>
         </CardHeader>
         <CardContent>
-          {missingFields.length > 0 && (
-            <div className="mb-4 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm">
-              <div className="flex items-start gap-2">
-                <AlertTriangle className="mt-0.5 w-4 h-4 text-amber-600" />
-                <div>
-                  <p className="font-medium">Lengkapi profil sebelum lanjut.</p>
-                  <p className="text-muted-foreground mt-1">
-                    Wajib diisi:{" "}
-                    {missingFields.map((field) => PROFILE_FIELD_LABELS[field] || field).join(", ")}.
-                  </p>
-                </div>
-              </div>
-            </div>
-          )}
           <CandidateProfileForm
             profile={profile}
             locked={locked}

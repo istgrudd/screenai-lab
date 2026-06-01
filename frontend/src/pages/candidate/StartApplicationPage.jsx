@@ -9,16 +9,14 @@ import {
   Lock,
 } from "lucide-react";
 
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
+import LoadingState from "@/components/common/LoadingState";
+import PhaseBadge from "@/components/common/PhaseBadge";
+import StatusBadge from "@/components/common/StatusBadge";
+import PageHeader from "@/components/layout/PageHeader";
+import CandidateApplicationStepTrack from "@/components/candidate/CandidateApplicationStepTrack";
 import DivisionSelection from "@/components/candidate/DivisionSelection";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   createApplication,
   getActivePeriod,
@@ -27,12 +25,12 @@ import {
 } from "@/lib/api";
 import {
   formatDivision,
-  formatStatus,
   isNotFoundError,
   isSubmissionPhase,
   isSubmittedOrLater,
   submissionPhaseMessage,
 } from "@/lib/candidateApplication";
+import { periodDeadlineContext } from "@/lib/candidateUx";
 
 export default function StartApplicationPage() {
   const navigate = useNavigate();
@@ -68,11 +66,11 @@ export default function StartApplicationPage() {
           setSelectedDivision(app.division || profileData.division || null);
         } catch (error) {
           if (!isNotFoundError(error)) {
-            toast.error(error.message || "Failed to load application");
+            toast.error(error.message || "Gagal memuat pendaftaran.");
           }
         }
       } catch (error) {
-        toast.error(error.message || "Failed to load profile");
+        toast.error(error.message || "Gagal memuat profil.");
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -87,6 +85,7 @@ export default function StartApplicationPage() {
   const submittedOrLater = isSubmittedOrLater(application);
   const divisionLocked = Boolean(application);
   const submissionOpen = isSubmissionPhase(activePeriod);
+  const periodContext = periodDeadlineContext(activePeriod);
 
   const handleSelect = (division) => {
     if (divisionLocked) return;
@@ -95,55 +94,86 @@ export default function StartApplicationPage() {
 
   const handleStart = async () => {
     if (!selectedDivision) {
-      toast.error("Pick a division first.");
+      toast.error("Pilih divisi terlebih dahulu.");
       return;
     }
 
     setSaving(true);
     try {
       await createApplication(selectedDivision);
-      toast.success("Application started. Next: upload your documents.");
+      toast.success("Pendaftaran dimulai. Lanjutkan dengan unggah dokumen.");
       navigate("/documents");
     } catch (error) {
-      toast.error(error.message || "Could not start application");
+      toast.error(error.message || "Gagal memulai pendaftaran.");
     } finally {
       setSaving(false);
     }
   };
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center py-24">
-        <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
-      </div>
-    );
+    return <LoadingState label="Memuat halaman pendaftaran..." />;
   }
 
   if (!profile) return null;
 
+  const currentStep = !application
+    ? "division"
+    : submittedOrLater
+    ? "status"
+    : "documents";
+
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
-          <ClipboardList className="w-6 h-6 text-primary" />
-          Start Application
-        </h1>
-        <p className="text-muted-foreground mt-1">
-          Choose one MBC Laboratory division for this recruitment period.
-        </p>
-      </div>
+      <PageHeader
+        eyebrow="Pendaftaran"
+        title="Mulai Pendaftaran"
+        description="Pilih satu divisi MBC Laboratory. Divisi akan terkunci setelah draft pendaftaran dibuat."
+      />
 
-      <Card>
+      <CandidateApplicationStepTrack
+        currentStep={currentStep}
+        application={application}
+        profile={profile}
+        title="Alur Pendaftaran"
+      />
+
+      <Card className="brand-card">
+        <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.08em] text-primary">
+              Konteks Periode
+            </p>
+            <h2 className="mt-1 font-heading text-xl font-bold tracking-normal">
+              {activePeriod?.name || "Tidak ada periode aktif"}
+            </h2>
+            <p className="mt-2 text-sm leading-6 text-muted-foreground">
+              {periodContext.deadlineText}
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {activePeriod?.current_phase ? (
+              <PhaseBadge phase={activePeriod.current_phase} size="md" />
+            ) : (
+              <PhaseBadge label="Tidak Aktif" tone="neutral" size="md" />
+            )}
+            {!submissionOpen && !application && (
+              <StatusBadge label="Belum bisa daftar" tone="warning" size="md" />
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="brand-card">
         <CardHeader className="pb-3">
-          <CardTitle className="text-lg flex items-center gap-2">
-            Division Selection
-            {divisionLocked && <Lock className="w-4 h-4 text-muted-foreground" />}
+          <CardTitle className="flex items-center gap-2 font-heading text-xl tracking-normal">
+            Pilih Divisi
+            {divisionLocked && <Lock className="h-4 w-4 text-muted-foreground" />}
           </CardTitle>
-          <CardDescription>
+          <p className="text-sm leading-6 text-muted-foreground">
             {divisionLocked
-              ? "Division is locked after an application is created so uploaded documents stay attached to the same application."
-              : "Pick one division. You can continue to document upload after the application draft is created."}
-          </CardDescription>
+              ? "Divisi sudah terkunci agar dokumen dan pendaftaran tetap konsisten."
+              : "Pilih divisi yang paling sesuai dengan minat riset dan kemampuanmu."}
+          </p>
         </CardHeader>
         <CardContent className="space-y-6">
           <DivisionSelection
@@ -153,66 +183,65 @@ export default function StartApplicationPage() {
           />
 
           {!submissionOpen && !application && (
-            <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-800 dark:text-amber-200">
+            <div className="rounded-xl bg-warning/10 px-4 py-3 text-sm leading-6 text-warning">
               {submissionPhaseMessage(activePeriod)}
             </div>
           )}
 
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-2 border-t">
+          <div className="flex flex-col gap-3 border-t border-border/60 pt-5 sm:flex-row sm:items-center sm:justify-between">
             <div className="text-sm text-muted-foreground">
               {application ? (
-                <span className="inline-flex items-center gap-2 text-foreground">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                  Current division:{" "}
+                <span className="inline-flex flex-wrap items-center gap-2 text-foreground">
+                  <CheckCircle2 className="h-4 w-4 text-success" />
+                  Divisi saat ini:{" "}
                   <span className="font-medium">
                     {formatDivision(application.division)}
                   </span>
-                  <Badge variant="secondary" className="uppercase">
-                    {formatStatus(application.status)}
-                  </Badge>
+                  <StatusBadge status={application.status} />
                 </span>
               ) : (
-                "Ready when you are."
+                "Draft akan dibuat setelah kamu menekan tombol mulai."
               )}
             </div>
 
             {!application ? (
               <Button
+                type="button"
                 onClick={handleStart}
                 disabled={!selectedDivision || saving || !submissionOpen}
                 className="gap-2"
               >
                 {saving ? (
                   <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    Starting...
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Memulai...
                   </>
                 ) : (
                   <>
-                    Start application
-                    <ArrowRight className="w-4 h-4" />
+                    <ClipboardList className="h-4 w-4" />
+                    Mulai Pendaftaran
                   </>
                 )}
               </Button>
             ) : submittedOrLater ? (
               <Button asChild className="gap-2">
                 <Link to="/application/status">
-                  View application status
-                  <ArrowRight className="w-4 h-4" />
+                  Lihat Status Pendaftaran
+                  <ArrowRight className="h-4 w-4" />
                 </Link>
               </Button>
             ) : (
-              <div className="flex flex-col sm:flex-row gap-2">
+              <div className="flex flex-col gap-2 sm:flex-row">
                 <Button asChild variant="outline" className="gap-2">
                   <Link to="/application">
-                    Application overview
-                    <ArrowRight className="w-4 h-4" />
+                    Ringkasan
+                    <ArrowRight className="h-4 w-4" />
                   </Link>
                 </Button>
                 <Button asChild className="gap-2">
                   <Link to="/documents">
-                    Continue documents
-                    <ArrowRight className="w-4 h-4" />
+                    Lanjut Unggah Dokumen
+                    <ArrowRight className="h-4 w-4" />
                   </Link>
                 </Button>
               </div>

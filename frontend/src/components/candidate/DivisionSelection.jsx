@@ -6,34 +6,34 @@ import {
   Map as MapIcon,
 } from "lucide-react";
 
-export const DIVISIONS = [
+const DIVISIONS = [
   {
     id: "big_data",
     name: "Big Data",
-    blurb: "Data pipelines, analytics, and large-scale data engineering.",
+    blurb: "Riset data, analitik, pipeline, dan rekayasa data skala besar.",
     icon: BarChart3,
-    accent: "from-sky-500/10 to-sky-500/5",
+    accent: "from-primary/10 to-info/5",
   },
   {
     id: "cyber_security",
     name: "Cyber Security",
-    blurb: "Offensive and defensive security research, CTFs, and audits.",
+    blurb: "Keamanan ofensif dan defensif, CTF, audit, dan riset proteksi sistem.",
     icon: ShieldCheck,
-    accent: "from-emerald-500/10 to-emerald-500/5",
+    accent: "from-success/10 to-primary/5",
   },
   {
     id: "game_tech",
     name: "Game Technology",
-    blurb: "Game engines, interactive experiences, and graphics programming.",
+    blurb: "Game engine, pengalaman interaktif, grafis, dan teknologi permainan.",
     icon: Swords,
-    accent: "from-rose-500/10 to-rose-500/5",
+    accent: "from-destructive/10 to-primary/5",
   },
   {
     id: "gis",
     name: "Geographic Information Systems",
-    blurb: "Spatial data, mapping, and geospatial analysis.",
+    blurb: "Data spasial, pemetaan, visualisasi wilayah, dan analisis geospasial.",
     icon: MapIcon,
-    accent: "from-amber-500/10 to-amber-500/5",
+    accent: "from-warning/10 to-primary/5",
   },
 ];
 
@@ -46,8 +46,8 @@ function DivisionCard({ division, selected, disabled, onSelect }) {
       disabled={disabled}
       className={`group text-left rounded-xl border p-5 transition-all disabled:cursor-not-allowed disabled:opacity-60 ${
         selected
-          ? "border-primary ring-2 ring-primary/30 bg-primary/5"
-          : "border-border hover:border-primary/60 hover:shadow-sm"
+          ? "border-primary ring-2 ring-primary/30 bg-primary/5 shadow-[var(--shadow-navy)]"
+          : "border-border bg-card hover:border-primary/60 hover:shadow-sm"
       } bg-gradient-to-br ${division.accent}`}
     >
       <div className="flex items-start gap-3">
@@ -63,7 +63,7 @@ function DivisionCard({ division, selected, disabled, onSelect }) {
             <p className="font-semibold text-foreground">{division.name}</p>
             {selected && (
               <Badge variant="default" className="text-[10px]">
-                Selected
+                Dipilih
               </Badge>
             )}
           </div>

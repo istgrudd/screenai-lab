@@ -1,128 +1,63 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import {
-  AlertCircle,
-  ArrowRight,
-  CheckCircle2,
-  ClipboardList,
-  GraduationCap,
-  Loader2,
-  Sparkles,
-  XCircle,
-} from "lucide-react";
+import { Megaphone, Sparkles } from "lucide-react";
 
+import EmptyState from "@/components/common/EmptyState";
+import LoadingState from "@/components/common/LoadingState";
+import PageHeader from "@/components/layout/PageHeader";
+import ApplicationProgressCard from "@/components/candidate/ApplicationProgressCard";
+import CandidateApplicationStepTrack from "@/components/candidate/CandidateApplicationStepTrack";
+import CandidateStatusHero from "@/components/candidate/CandidateStatusHero";
+import DocumentRequirementCard from "@/components/candidate/DocumentRequirementCard";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Progress } from "@/components/ui/progress";
-
-import RecruitmentJourney from "@/components/RecruitmentJourney";
-import RecruitmentPhaseCard from "@/components/RecruitmentPhaseCard";
-import {
+  getActivePeriod,
   getMe,
+  getMyAnnouncement,
   getMyApplication,
   listApplicationDocuments,
-  getMyAnnouncement,
-  getActivePeriod,
 } from "@/lib/api";
+import {
+  REQUIRED_DOCUMENTS,
+  isAnnouncedStatus,
+  isNotFoundError,
+} from "@/lib/candidateApplication";
+import { candidateNextAction, cx, formatDateTimeId } from "@/lib/candidateUx";
 
-const DOC_CHECKLIST = [
-  { doc_type: "cv", label: "Curriculum Vitae" },
-  { doc_type: "motivation_letter", label: "Motivation Letter" },
-  { doc_type: "khs", label: "KHS / Transcript" },
-  { doc_type: "ktm", label: "KTM / Student ID" },
-  { doc_type: "swot", label: "SWOT Analysis" },
-  { doc_type: "supporting_docs", label: "Dokumen Pendukung" },
-];
+function AnnouncementCard({ application, announcement }) {
+  if (!application || !isAnnouncedStatus(application.status)) return null;
 
-function ChecklistCard({ documents, applicationId, locked }) {
-  const navigate = useNavigate();
-  const docsByType = new Map(documents.map((d) => [d.doc_type, d]));
+  const passed = application.status === "announced_pass";
   return (
-    <Card>
+    <Card
+      className={cx(
+        "brand-card",
+        passed ? "bg-success/10" : "bg-destructive/10"
+      )}
+    >
       <CardHeader className="pb-3">
-        <CardTitle className="text-lg">Document Checklist</CardTitle>
-        <CardDescription>
-          All six documents are required before you can submit.
-        </CardDescription>
+        <CardTitle className="flex items-center gap-2 font-heading text-xl tracking-normal">
+          <Megaphone className={cx("h-5 w-5", passed ? "text-success" : "text-destructive")} />
+          {passed ? "Pengumuman: Lolos" : "Pengumuman: Tidak Lolos"}
+        </CardTitle>
       </CardHeader>
-      <CardContent className="divide-y">
-        {DOC_CHECKLIST.map((item) => {
-          const d = docsByType.get(item.doc_type);
-          return (
-            <div
-              key={item.doc_type}
-              className="py-2.5 flex items-center justify-between gap-3"
-            >
-              <div className="flex items-center gap-2 min-w-0">
-                <div
-                  className={`w-7 h-7 rounded-md flex items-center justify-center shrink-0 ${
-                    d
-                      ? "bg-emerald-500/15 text-emerald-700"
-                      : "bg-muted text-muted-foreground"
-                  }`}
-                >
-                  {d ? <CheckCircle2 className="w-3.5 h-3.5" /> : <AlertCircle className="w-3.5 h-3.5" />}
-                </div>
-                <div className="min-w-0">
-                  <p className="text-sm font-medium">{item.label}</p>
-                  {d && (
-                    <p className="text-xs text-muted-foreground truncate" title={d.file_name}>
-                      {d.file_name}
-                    </p>
-                  )}
-                </div>
-              </div>
-              <Badge variant={d ? "secondary" : "outline"} className="text-[10px] uppercase">
-                {d ? "Uploaded" : "Missing"}
-              </Badge>
-            </div>
-          );
-        })}
-        {!locked && applicationId && (
-          <div className="pt-3">
-            <Button
-              variant="outline"
-              size="sm"
-              className="gap-2"
-              onClick={() => navigate("/documents")}
-            >
-              Manage documents
-              <ArrowRight className="w-3.5 h-3.5" />
-            </Button>
-          </div>
-        )}
-      </CardContent>
-    </Card>
-  );
-}
-
-function NoApplicationCard() {
-  const navigate = useNavigate();
-  return (
-    <Card className="border-dashed">
-      <CardContent className="py-12 flex flex-col items-center text-center gap-4">
-        <div className="w-14 h-14 rounded-2xl bg-primary/10 flex items-center justify-center">
-          <Sparkles className="w-7 h-7 text-primary" />
-        </div>
-        <div>
-          <h3 className="text-lg font-semibold">You haven't started an application yet</h3>
-          <p className="text-sm text-muted-foreground mt-1 max-w-md">
-            Choose the MBC Laboratory division you want to apply to and create
-            your application draft.
+      <CardContent className="space-y-2 text-sm leading-6 text-muted-foreground">
+        <p>
+          {passed
+            ? "Selamat, hasil seleksi kamu sudah dipublikasikan. Pantau instruksi lanjutan dari tim MBC Laboratory."
+            : "Terima kasih sudah mengikuti proses seleksi MBC Laboratory pada periode ini."}
+        </p>
+        {announcement?.notes && (
+          <p className="rounded-xl bg-card px-4 py-3 text-foreground">
+            {announcement.notes}
           </p>
-        </div>
-        <Button onClick={() => navigate("/application/start")} className="gap-2">
-          Start application
-          <ArrowRight className="w-4 h-4" />
-        </Button>
+        )}
+        {announcement?.announced_at && (
+          <p className="text-xs">
+            Diumumkan pada {formatDateTimeId(announcement.announced_at)}
+          </p>
+        )}
       </CardContent>
     </Card>
   );
@@ -140,19 +75,18 @@ export default function DashboardPage() {
 
   useEffect(() => {
     let cancelled = false;
-    (async () => {
-      // Active period — independent of application; 404 is expected when
-      // no period is active and should not raise a toast.
-      try {
-        const p = await getActivePeriod();
-        if (!cancelled) setActivePeriod(p);
-      } catch {
-        if (!cancelled) setActivePeriod(null);
-      } finally {
-        if (!cancelled) setPeriodLoading(false);
-      }
 
+    async function load() {
       try {
+        try {
+          const period = await getActivePeriod();
+          if (!cancelled) setActivePeriod(period);
+        } catch {
+          if (!cancelled) setActivePeriod(null);
+        } finally {
+          if (!cancelled) setPeriodLoading(false);
+        }
+
         const me = await getMe();
         if (!cancelled) setUser(me);
 
@@ -160,196 +94,125 @@ export default function DashboardPage() {
           const app = await getMyApplication();
           if (cancelled) return;
           setApplication(app);
-          const { documents: docs } = await listApplicationDocuments(app.id);
-          if (!cancelled) setDocuments(docs);
 
-          // Load announcement if submitted
+          const { documents: docs } = await listApplicationDocuments(app.id);
+          if (!cancelled) setDocuments(docs || []);
+
           if (app.status !== "draft") {
             try {
               const ann = await getMyAnnouncement();
               if (!cancelled) setAnnouncement(ann);
-            } catch { /* no announcement yet */ }
+            } catch {
+              if (!cancelled) setAnnouncement(null);
+            }
           }
-        } catch (err) {
-          // 404 is fine — user hasn't started yet.
-          if (!err.message?.toLowerCase().includes("not found")) {
-            toast.error(err.message || "Failed to load application");
+        } catch (error) {
+          if (!isNotFoundError(error)) {
+            toast.error(error.message || "Gagal memuat pendaftaran.");
           }
         }
-      } catch (err) {
-        toast.error(err.message || "Failed to load dashboard");
+      } catch (error) {
+        toast.error(error.message || "Gagal memuat dashboard.");
       } finally {
         if (!cancelled) setLoading(false);
       }
-    })();
+    }
+
+    load();
     return () => {
       cancelled = true;
     };
   }, []);
 
-  const uploadedCount = documents.length;
-  const progressPct = Math.round((uploadedCount / DOC_CHECKLIST.length) * 100);
-  const locked = application && application.status !== "draft";
   const canManageDocuments =
     application &&
     (application.status === "draft" ||
       application.status === "correction_requested");
+  const action = useMemo(
+    () => candidateNextAction(application, documents),
+    [application, documents]
+  );
+  const docsByType = useMemo(
+    () => new Map(documents.map((document) => [document.doc_type, document])),
+    [documents]
+  );
+  const stepMode =
+    application && application.status !== "draft" ? "status" : "application";
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center py-24">
-        <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
-      </div>
-    );
+    return <LoadingState label="Memuat dashboard kandidat..." />;
   }
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-start justify-between gap-3 flex-wrap">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
-            <GraduationCap className="w-6 h-6 text-primary" />
-            Welcome{user ? `, ${user.full_name.split(" ")[0]}` : ""}
-          </h1>
-          <p className="text-muted-foreground mt-1">
-            Track your MBC Laboratory application progress here.
-          </p>
-        </div>
-        {application && (
-          <Badge variant="outline" className="uppercase">
-            Division: {application.division.replace("_", " ")}
-          </Badge>
-        )}
-      </div>
+      <PageHeader
+        eyebrow="Beranda Kandidat"
+        title="Dashboard Pendaftaran"
+        description="Pantau status, deadline, dan langkah paling penting untuk pendaftaran MBC Laboratory."
+      />
 
-      <RecruitmentPhaseCard
-        role="candidate"
-        period={activePeriod}
-        loading={periodLoading}
+      <CandidateStatusHero
+        user={user}
+        application={application}
+        documents={documents}
+        activePeriod={activePeriod}
+        announcement={announcement}
+        loading={periodLoading && !activePeriod}
+        onPrimaryAction={() => navigate(action.to)}
+        primaryActionLabel={action.label}
+      />
+
+      <CandidateApplicationStepTrack
+        mode={stepMode}
+        currentStep={!application ? "division" : undefined}
+        application={application}
+        documents={documents}
+        title={stepMode === "status" ? "Tahapan Seleksi" : "Alur Pendaftaran"}
       />
 
       {!application ? (
-        <NoApplicationCard />
+        <EmptyState
+          icon={Sparkles}
+          title="Belum ada draft pendaftaran"
+          description="Kamu belum memilih divisi dan membuat pendaftaran. Gunakan tombol utama di atas untuk memulai perjalanan kandidat."
+        />
       ) : (
         <>
-          {/* Announcement banner */}
-          {application.status === "announced_pass" && (
-            <div className="rounded-xl border-2 bg-emerald-500/10 border-emerald-500/30 p-6">
-              <div className="flex items-center gap-4">
-                <div className="w-14 h-14 rounded-2xl bg-emerald-500/20 text-emerald-600 flex items-center justify-center">
-                  <CheckCircle2 className="w-8 h-8" />
-                </div>
-                <div>
-                  <h2 className="text-2xl font-bold text-emerald-700 dark:text-emerald-400">LOLOS</h2>
-                  <p className="text-sm text-muted-foreground mt-1">
-                    Selamat! Kamu lolos seleksi administrasi. Pantau informasi tahap selanjutnya.
-                  </p>
-                </div>
-              </div>
-            </div>
-          )}
-          {application.status === "announced_fail" && (
-            <div className="rounded-xl border-2 bg-destructive/10 border-destructive/30 p-6">
-              <div className="flex items-center gap-4">
-                <div className="w-14 h-14 rounded-2xl bg-destructive/20 text-destructive flex items-center justify-center">
-                  <XCircle className="w-8 h-8" />
-                </div>
-                <div>
-                  <h2 className="text-2xl font-bold text-destructive">TIDAK LOLOS</h2>
-                  <p className="text-sm text-muted-foreground mt-1">
-                    Terima kasih telah mendaftar. Kamu belum lolos seleksi administrasi.
-                  </p>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Progress overview */}
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-lg flex items-center gap-2">
-                <ClipboardList className="w-5 h-5 text-primary" />
-                Application Progress
-              </CardTitle>
-              <CardDescription>
-                {locked
-                  ? "Your application has been submitted. You can check the status below."
-                  : "Finish uploading all documents, then review and submit."}
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex items-center justify-between">
-                <span className="text-sm font-medium">
-                  {uploadedCount}/{DOC_CHECKLIST.length} documents uploaded
-                </span>
-                <Badge variant="secondary">{progressPct}%</Badge>
-              </div>
-              <Progress value={progressPct} />
-              <div className="flex flex-wrap items-center gap-3 pt-1">
-                <Badge variant={locked ? "default" : "outline"} className="uppercase">
-                  Status: {application.status}
-                </Badge>
-                {!locked && (
-                  <Button
-                    size="sm"
-                    onClick={() =>
-                      navigate(
-                        progressPct === 100
-                          ? "/application/review"
-                          : "/documents"
-                      )
-                    }
-                    className="gap-2"
-                  >
-                    {progressPct === 100 ? "Review & Submit" : "Continue uploading"}
-                    <ArrowRight className="w-3.5 h-3.5" />
-                  </Button>
-                )}
-                {locked && (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() =>
-                      navigate(
-                        application.status === "correction_requested"
-                          ? "/documents"
-                          : "/application/status"
-                      )
-                    }
-                    className="gap-2"
-                  >
-                    {application.status === "correction_requested"
-                      ? "Fix documents"
-                      : "View submission"}
-                    <ArrowRight className="w-3.5 h-3.5" />
-                  </Button>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Journey tracker — shown once submitted */}
-          {locked && (
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-lg">Tahapan Seleksi</CardTitle>
-              <CardDescription>
-                  Pendaftaran, review dokumen, Evaluasi AI, dan Pengumuman.
-              </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <RecruitmentJourney
-                  status={application.status}
-                />
-              </CardContent>
-            </Card>
-          )}
-
-          <ChecklistCard
+          <ApplicationProgressCard
+            application={application}
             documents={documents}
-            applicationId={application.id}
-            locked={!canManageDocuments}
+            activePeriod={activePeriod}
+            canManageDocuments={Boolean(canManageDocuments)}
+            actionLabel={action.label}
+            onAction={() => navigate(action.to)}
+          />
+
+          <section className="space-y-3">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.08em] text-primary">
+                Checklist Dokumen
+              </p>
+              <h2 className="mt-1 font-heading text-xl font-bold tracking-normal">
+                Kebutuhan Pendaftaran
+              </h2>
+            </div>
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+              {REQUIRED_DOCUMENTS.map((item) => (
+                <DocumentRequirementCard
+                  key={item.doc_type}
+                  documentType={item.doc_type}
+                  label={item.label}
+                  document={docsByType.get(item.doc_type)}
+                  locked={!canManageDocuments}
+                  correctionMode={application.status === "correction_requested"}
+                />
+              ))}
+            </div>
+          </section>
+
+          <AnnouncementCard
+            application={application}
+            announcement={announcement}
           />
         </>
       )}

@@ -1,40 +1,28 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
-import {
-  ArrowRight,
-  CheckCircle2,
-  GraduationCap,
-  Loader2,
-  Pencil,
-  UserCircle2,
-} from "lucide-react";
+import { ArrowRight, CheckCircle2, Pencil, UserCircle2 } from "lucide-react";
 
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import LoadingState from "@/components/common/LoadingState";
+import StatusBadge from "@/components/common/StatusBadge";
+import PageHeader from "@/components/layout/PageHeader";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getMyApplication, getMyProfile } from "@/lib/api";
 import {
   applicationReferenceId,
   formatDivision,
-  formatStatus,
   isNotFoundError,
 } from "@/lib/candidateApplication";
 
 function Field({ label, value, mono }) {
   return (
     <div>
-      <p className="text-xs uppercase tracking-wide text-muted-foreground mb-1">
+      <p className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
         {label}
       </p>
-      <p className={mono ? "font-mono" : ""}>
-        {value || <span className="text-muted-foreground italic">-</span>}
+      <p className={mono ? "mt-1 font-mono text-sm" : "mt-1 text-sm"}>
+        {value || <span className="text-muted-foreground">-</span>}
       </p>
     </div>
   );
@@ -60,11 +48,11 @@ export default function ProfilePage() {
           if (!cancelled) setApplication(app);
         } catch (error) {
           if (!isNotFoundError(error)) {
-            toast.error(error.message || "Failed to load application status");
+            toast.error(error.message || "Gagal memuat status pendaftaran.");
           }
         }
       } catch (error) {
-        toast.error(error.message || "Failed to load profile");
+        toast.error(error.message || "Gagal memuat profil.");
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -77,11 +65,7 @@ export default function ProfilePage() {
   }, []);
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center py-24">
-        <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
-      </div>
-    );
+    return <LoadingState label="Memuat profil kandidat..." />;
   }
 
   if (!profile) return null;
@@ -90,105 +74,105 @@ export default function ProfilePage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-start justify-between gap-3 flex-wrap">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
-            <GraduationCap className="w-6 h-6 text-primary" />
-            Profile
-          </h1>
-          <p className="text-muted-foreground mt-1">
-            Account and student information used for your application.
-          </p>
-        </div>
-        <Button asChild className="gap-2">
-          <Link to="/profile/edit">
-            <Pencil className="w-4 h-4" />
-            Edit Profile
-          </Link>
-        </Button>
-      </div>
+      <PageHeader
+        eyebrow="Akun Kandidat"
+        title="Profil"
+        description="Data profil digunakan untuk pendaftaran, dokumen, dan komunikasi seleksi MBC Laboratory."
+        status={
+          appStatus ? (
+            <StatusBadge status={appStatus} size="md" />
+          ) : (
+            <StatusBadge label="Belum Ada Pendaftaran" tone="brand" size="md" />
+          )
+        }
+        action={
+          <Button asChild className="gap-2">
+            <Link to="/profile/edit">
+              <Pencil className="h-4 w-4" />
+              Edit Profil
+            </Link>
+          </Button>
+        }
+      />
 
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-lg flex items-center gap-2">
-            <UserCircle2 className="w-5 h-5 text-primary" />
-            Profile Summary
-          </CardTitle>
-          <CardDescription>
-            Review your personal, contact, and academic details.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-          <Field label="Full name" value={profile.full_name} />
-          <Field label="Email" value={profile.email} />
-          <Field label="WhatsApp" value={profile.whatsapp} />
-          <Field label="NIM" value={profile.nim} mono />
-          <Field label="Faculty" value={profile.faculty} />
-          <Field label="Major" value={profile.major} />
-          <Field label="Year" value={profile.year} />
-          <div>
-            <p className="text-xs uppercase tracking-wide text-muted-foreground mb-1">
-              Role / Account status
-            </p>
-            <div className="flex flex-wrap items-center gap-2">
-              <Badge variant="outline" className="capitalize">
-                {profile.role || "candidate"}
-              </Badge>
-              <Badge variant={profile.is_active ? "secondary" : "destructive"}>
-                {profile.is_active ? "Active" : "Inactive"}
-              </Badge>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-lg flex items-center gap-2">
-            <CheckCircle2 className="w-5 h-5 text-primary" />
-            Current Application
-          </CardTitle>
-          <CardDescription>
-            Application details are managed in the application workspace.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-            <Field
-              label="Division"
-              value={formatDivision(application?.division || profile.division)}
-            />
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1.1fr_0.9fr]">
+        <Card className="brand-card">
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 font-heading text-xl tracking-normal">
+              <UserCircle2 className="h-5 w-5 text-primary" />
+              Identitas Kandidat
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <Field label="Nama lengkap" value={profile.full_name} />
+            <Field label="Email" value={profile.email} />
+            <Field label="Nomor WhatsApp" value={profile.whatsapp} />
+            <Field label="NIM" value={profile.nim} mono />
+            <Field label="Fakultas" value={profile.faculty} />
+            <Field label="Jurusan" value={profile.major} />
+            <Field label="Angkatan" value={profile.year} />
             <div>
-              <p className="text-xs uppercase tracking-wide text-muted-foreground mb-1">
-                Application status
+              <p className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                Akun
               </p>
-              {appStatus ? (
-                <Badge variant={appStatus === "draft" ? "secondary" : "default"}>
-                  {formatStatus(appStatus)}
-                </Badge>
-              ) : (
-                <span className="text-muted-foreground italic">No application</span>
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <StatusBadge label={profile.role || "Candidate"} tone="neutral" />
+                <StatusBadge
+                  label={profile.is_active ? "Aktif" : "Tidak Aktif"}
+                  tone={profile.is_active ? "success" : "destructive"}
+                />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="brand-card">
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 font-heading text-xl tracking-normal">
+              <CheckCircle2 className="h-5 w-5 text-primary" />
+              Pendaftaran Saat Ini
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-5">
+            <div className="grid grid-cols-1 gap-4 text-sm">
+              <Field
+                label="Divisi"
+                value={formatDivision(application?.division || profile.division)}
+              />
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                  Status aplikasi
+                </p>
+                <div className="mt-1">
+                  {appStatus ? (
+                    <StatusBadge status={appStatus} />
+                  ) : (
+                    <span className="text-sm text-muted-foreground">
+                      Belum ada pendaftaran
+                    </span>
+                  )}
+                </div>
+              </div>
+              {application && (
+                <Field
+                  label="Reference ID"
+                  value={applicationReferenceId(application)}
+                  mono
+                />
               )}
             </div>
-            {application && (
-              <Field
-                label="Reference ID"
-                value={applicationReferenceId(application)}
-                mono
-              />
-            )}
-          </div>
 
-          <div className="pt-2 border-t flex justify-end">
-            <Button asChild variant="outline" className="gap-2">
-              <Link to="/application">
-                Open Application Overview
-                <ArrowRight className="w-4 h-4" />
-              </Link>
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
+            <div className="flex justify-end border-t border-border/60 pt-4">
+              <Button asChild variant="outline" className="gap-2">
+                <Link to="/application">
+                  Buka Ringkasan Pendaftaran
+                  <ArrowRight className="h-4 w-4" />
+                </Link>
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 }
