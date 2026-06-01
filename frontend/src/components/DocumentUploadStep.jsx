@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
   CheckCircle2,
@@ -42,15 +42,38 @@ export default function DocumentUploadStep({
   const [dragOver, setDragOver] = useState(false);
   const [working, setWorking] = useState(false);
 
-  const allowedMime = new Set(doc.allowed_mime);
-  const accept = doc.allowed_mime
-    .map((m) => {
-      if (m === "application/pdf") return ".pdf";
-      if (m === "image/jpeg") return ".jpg,.jpeg";
-      if (m === "image/png") return ".png";
-      return "";
-    })
-    .join(",");
+  const allowedMime = useMemo(
+    () => new Set(doc.allowed_mime),
+    [doc.allowed_mime]
+  );
+  const accept = useMemo(
+    () =>
+      doc.allowed_mime
+        .map((m) => {
+          if (m === "application/pdf") return ".pdf";
+          if (m === "image/jpeg") return ".jpg,.jpeg";
+          if (m === "image/png") return ".png";
+          return "";
+        })
+        .join(","),
+    [doc.allowed_mime]
+  );
+
+  const handleFile = useCallback(
+    async (file) => {
+      if (locked || working) return;
+      setWorking(true);
+      try {
+        await onUpload(file);
+        toast.success(`${doc.label} uploaded.`);
+      } catch (err) {
+        toast.error(err.message || `Failed to upload ${doc.label}`);
+      } finally {
+        setWorking(false);
+      }
+    },
+    [doc.label, locked, onUpload, working]
+  );
 
   const pickFile = useCallback(
     (fileList) => {
@@ -70,22 +93,8 @@ export default function DocumentUploadStep({
       }
       handleFile(file);
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [doc]
+    [allowedMime, doc.allowed_mime, doc.label, doc.max_bytes, handleFile]
   );
-
-  const handleFile = async (file) => {
-    if (locked || working) return;
-    setWorking(true);
-    try {
-      await onUpload(file);
-      toast.success(`${doc.label} uploaded.`);
-    } catch (err) {
-      toast.error(err.message || `Failed to upload ${doc.label}`);
-    } finally {
-      setWorking(false);
-    }
-  };
 
   const onDrop = (e) => {
     e.preventDefault();

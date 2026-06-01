@@ -1,6 +1,6 @@
 import { CheckCircle2, FileCheck2, FileSearch, Sparkles, Trophy } from "lucide-react";
 
-export const JOURNEY_STEPS = [
+const JOURNEY_STEPS = [
   {
     id: "pendaftaran",
     label: "Pendaftaran",
@@ -34,7 +34,7 @@ export const JOURNEY_STEPS = [
   },
 ];
 
-export const STATUS_TO_JOURNEY_STEP = {
+const STATUS_TO_JOURNEY_STEP = {
   draft: null,
   submitted: "pendaftaran",
   document_review: "review_dokumen",
@@ -45,7 +45,7 @@ export const STATUS_TO_JOURNEY_STEP = {
   announced_fail: "pengumuman",
 };
 
-export const PHASE_TO_JOURNEY_STEP = {
+const PHASE_TO_JOURNEY_STEP = {
   UPCOMING: null,
   SUBMISSION: "pendaftaran",
   EVALUATION: "evaluasi_ai",

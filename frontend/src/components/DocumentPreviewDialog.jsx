@@ -29,9 +29,8 @@ export default function DocumentPreviewDialog({ open, onClose, document: doc }) 
 
     let revoked = false;
     let activeUrl = null;
-    setState({ status: "loading", url: null, mime: null, error: null });
-
-    (async () => {
+    Promise.resolve().then(async () => {
+      setState({ status: "loading", url: null, mime: null, error: null });
       try {
         const { url, mime } = await fetchDocumentBlob(doc.id);
         if (revoked) {
@@ -45,7 +44,7 @@ export default function DocumentPreviewDialog({ open, onClose, document: doc }) 
           setState({ status: "error", url: null, mime: null, error: err.message || "Failed to load" });
         }
       }
-    })();
+    });
 
     return () => {
       revoked = true;

@@ -92,7 +92,7 @@ export default function RubricConfigPage() {
   };
 
   useEffect(() => {
-    fetchRubrics();
+    Promise.resolve().then(fetchRubrics);
   }, []);
 
   const totalWeight = form.dimensions.reduce((s, d) => s + (Number(d.weight) || 0), 0);
@@ -389,6 +389,7 @@ export default function RubricConfigPage() {
                       size="sm"
                       className="text-muted-foreground hover:text-destructive mt-5"
                       onClick={() => removeDimension(dimIdx)}
+                      aria-label={`Remove dimension ${dimIdx + 1}`}
                     >
                       <Trash2 className="w-4 h-4" />
                     </Button>
@@ -424,6 +425,7 @@ export default function RubricConfigPage() {
                           size="sm"
                           className="text-muted-foreground hover:text-destructive px-2"
                           onClick={() => removeIndicator(dimIdx, indIdx)}
+                          aria-label={`Remove indicator ${indIdx + 1}`}
                         >
                           <X className="w-3 h-3" />
                         </Button>
@@ -545,6 +547,7 @@ export default function RubricConfigPage() {
                   <Button
                     variant="ghost"
                     size="sm"
+                    aria-label={`Edit rubric ${r.name}`}
                     onClick={(e) => {
                       e.stopPropagation();
                       openEdit(r.id);
@@ -556,6 +559,7 @@ export default function RubricConfigPage() {
                     variant="ghost"
                     size="sm"
                     className="text-destructive hover:text-destructive"
+                    aria-label={`Delete rubric ${r.name}`}
                     onClick={(e) => {
                       e.stopPropagation();
                       setDeleteDialog(r.id);

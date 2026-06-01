@@ -23,9 +23,27 @@ export function formatFileSize(bytes) {
   return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
 }
 
+function parseDateTimeWithUtcFallback(value) {
+  if (value instanceof Date) return value;
+  if (typeof value !== "string") return new Date(value);
+
+  const text = value.trim();
+  if (!text) return null;
+
+  const normalized = text.includes("T") ? text : text.replace(" ", "T");
+  const hasTimezone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(normalized);
+  const hasTime = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(normalized);
+
+  if (hasTime && !hasTimezone) {
+    return new Date(`${normalized}Z`);
+  }
+
+  return new Date(text);
+}
+
 export function formatDateTimeId(value, empty = "-") {
   if (!value) return empty;
-  const date = new Date(value);
+  const date = parseDateTimeWithUtcFallback(value);
   if (Number.isNaN(date.getTime())) return empty;
   return date.toLocaleString("id-ID", {
     day: "2-digit",

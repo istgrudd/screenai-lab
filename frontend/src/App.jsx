@@ -94,8 +94,11 @@ function CandidateProfileGuard({ children }) {
       }
     }
 
-    setState({ loading: true, missing: [] });
-    loadProfile();
+    Promise.resolve().then(() => {
+      if (cancelled) return;
+      setState({ loading: true, missing: [] });
+      loadProfile();
+    });
     return () => {
       cancelled = true;
     };
@@ -165,7 +168,7 @@ function LegacyReviewRedirect() {
       }
     }
 
-    resolveTarget();
+    Promise.resolve().then(resolveTarget);
     return () => {
       cancelled = true;
     };

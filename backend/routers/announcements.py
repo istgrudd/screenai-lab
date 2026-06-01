@@ -40,11 +40,13 @@ _EVALUATED_STATUSES = (
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
-def _as_utc_iso(dt):
+def _as_utc_iso(dt: datetime | None) -> str | None:
     if not dt:
         return None
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
+    else:
+        dt = dt.astimezone(timezone.utc)
     return dt.isoformat()
 
 

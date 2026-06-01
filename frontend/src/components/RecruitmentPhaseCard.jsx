@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { createElement, useEffect, useMemo, useState } from "react";
 import {
   Calendar,
   CalendarClock,
@@ -79,7 +79,7 @@ function countdownText(targetIso, now) {
   return `${minutes}m tersisa`;
 }
 
-function PhaseRow({ icon: Icon, title, range, status, countdown }) {
+function PhaseRow({ icon, title, range, status, countdown }) {
   // status: "done" | "active" | "upcoming"
   const isActive = status === "active";
   const isDone = status === "done";
@@ -105,7 +105,7 @@ function PhaseRow({ icon: Icon, title, range, status, countdown }) {
       <div
         className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${iconClass}`}
       >
-        <Icon className="w-4 h-4" />
+        {createElement(icon, { className: "w-4 h-4" })}
       </div>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">

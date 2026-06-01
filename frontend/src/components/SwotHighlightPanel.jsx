@@ -30,7 +30,7 @@ export default function SwotHighlightPanel({ applicationId }) {
   }
 
   useEffect(() => {
-    if (applicationId) fetchText();
+    if (applicationId) Promise.resolve().then(fetchText);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [applicationId]);
 
