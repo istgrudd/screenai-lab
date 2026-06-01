@@ -200,6 +200,13 @@ Notes:
 
 - Smoke tests used disabled/captured mode and did not send real emails.
 - TensorFlow/oneDNN informational logs appeared during some smoke scripts.
+- 2026-06-01 hardening: `application_submitted` was verified/fixed to run
+  after final submit commit/refresh, not during draft application creation.
+- `scripts/smoke_test_email_notifications.py` now asserts clean test state, no
+  draft-create notification/outbox email, exactly one captured
+  `application_submitted` row and disabled outbox email for the submitting
+  candidate after final submit, and no duplicate after repeat submit returns
+  `409`.
 
 ## Frontend Validation Results
 

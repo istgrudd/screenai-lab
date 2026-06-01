@@ -64,13 +64,13 @@ def _check(condition: bool, message: str) -> int:
 def _cleanup() -> None:
     db = SessionLocal()
     try:
+        db.query(EmailNotification).filter(
+            EmailNotification.to_email.like(f"{EMAIL_PREFIX}%")
+        ).delete(synchronize_session=False)
+
         users = db.query(User).filter(User.email.like(f"{EMAIL_PREFIX}%")).all()
         user_ids = [user.id for user in users]
         if user_ids:
-            db.query(EmailNotification).filter(
-                EmailNotification.to_email.like(f"{EMAIL_PREFIX}%")
-            ).delete(synchronize_session=False)
-
             for candidate in db.query(Candidate).filter(Candidate.user_id.in_(user_ids)).all():
                 db.query(DimensionScore).filter(
                     DimensionScore.candidate_id == candidate.id
@@ -394,6 +394,19 @@ def main() -> int:
     )
     failures += _check(response.status_code == 201, "candidate creates application")
     app_id = response.json()["data"]["id"] if response.status_code == 201 else None
+    failures += _check(
+        app_id is not None
+        and _notification_count(
+            "application_submitted",
+            related_application_id=app_id,
+        )
+        == 0,
+        "draft application creation does not log application_submitted",
+    )
+    failures += _check(
+        len(get_disabled_email_outbox()) == 0,
+        "draft application creation does not capture submit email",
+    )
 
     _upload_all_documents(client, candidate_auth)
     response = client.post(f"/api/applications/{app_id}/submit", headers=candidate_auth)
@@ -407,12 +420,47 @@ def main() -> int:
         related_application_id=app_id,
     )
     failures += _check(
+        _notification_count(
+            "application_submitted",
+            related_application_id=app_id,
+        )
+        == 1,
+        "exactly one application_submitted notification logged after final submit",
+    )
+    failures += _check(
         submitted_notification is not None,
-        "application_submitted notification logged",
+        "application_submitted notification logged after final submit",
+    )
+    failures += _check(
+        submitted_notification
+        and submitted_notification.to_email == _email("candidate_submit"),
+        "application_submitted notification targets submitting candidate",
     )
     failures += _check(
         submitted_notification and submitted_notification.status == "captured",
         "application_submitted status is captured in disabled dev mode",
+    )
+    submit_outbox = get_disabled_email_outbox()
+    failures += _check(
+        len(submit_outbox) == 1,
+        "disabled dev outbox captured one application_submitted email",
+    )
+    failures += _check(
+        bool(submit_outbox)
+        and submit_outbox[0].get("to") == _email("candidate_submit")
+        and submit_outbox[0].get("subject") == "Aplikasi ScreenAI Lab berhasil dikirim",
+        "disabled dev outbox captured application_submitted email for candidate",
+    )
+
+    response = client.post(f"/api/applications/{app_id}/submit", headers=candidate_auth)
+    failures += _check(response.status_code == 409, "resubmitting submitted application -> 409")
+    failures += _check(
+        _notification_count(
+            "application_submitted",
+            related_application_id=app_id,
+        )
+        == 1,
+        "resubmitting submitted application does not duplicate notification",
     )
 
     response = client.get(f"/api/documents/{app_id}", headers=recruiter_auth)

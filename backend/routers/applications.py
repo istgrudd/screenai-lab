@@ -217,12 +217,6 @@ def create_application(
     db.commit()
     db.refresh(app)
 
-    send_application_submitted_notification(
-        db,
-        application=app,
-        user=current_user,
-    )
-
     return {
         "success": True,
         "data": ApplicationOut.from_application(
@@ -416,6 +410,12 @@ def submit_application(
         reset_document_review_state(doc)
     db.commit()
     db.refresh(app)
+
+    send_application_submitted_notification(
+        db,
+        application=app,
+        user=current_user,
+    )
 
     return {
         "success": True,
