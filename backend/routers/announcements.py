@@ -40,6 +40,13 @@ _EVALUATED_STATUSES = (
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
+def _as_utc_iso(dt):
+    if not dt:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.isoformat()
+
 
 # ---------------------------------------------------------------------------
 # Schemas
@@ -335,7 +342,7 @@ def get_my_announcement(
                 "status": app_status,
                 "result": result,
                 "notes": audit.reason if audit else None,
-                "announced_at": audit.timestamp.isoformat() if audit else None,
+                "announced_at": _as_utc_iso(audit.timestamp) if audit else None,
             },
             "error": None,
         }
