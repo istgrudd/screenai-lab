@@ -109,10 +109,10 @@ export function periodDeadlineContext(period) {
     deadlineLabel = "Batas submit";
   } else if (phase === "EVALUATION") {
     target = dates.evaluationEnd;
-    deadlineLabel = "Fase evaluasi";
+    deadlineLabel = "Batas evaluasi";
   } else if (phase === "ANNOUNCEMENT") {
     target = dates.announcementEnd;
-    deadlineLabel = "Fase pengumuman";
+    deadlineLabel = "Jadwal pengumuman";
   } else if (phase === "CLOSED") {
     target = dates.announcementEnd;
     deadlineLabel = "Ditutup";

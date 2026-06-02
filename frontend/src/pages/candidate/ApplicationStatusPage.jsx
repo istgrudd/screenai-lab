@@ -21,6 +21,8 @@ import DocumentRequirementCard from "@/components/candidate/DocumentRequirementC
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
+  getActivePeriod,
+  getMe,
   getMyAnnouncement,
   getMyApplication,
   listApplicationDocuments,
@@ -198,9 +200,12 @@ function AnnouncementResultCard({ application, announcement }) {
 
 export default function ApplicationStatusPage() {
   const navigate = useNavigate();
+  const [user, setUser] = useState(null);
   const [application, setApplication] = useState(null);
   const [documents, setDocuments] = useState([]);
   const [announcement, setAnnouncement] = useState(null);
+  const [activePeriod, setActivePeriod] = useState(null);
+  const [periodLoading, setPeriodLoading] = useState(true);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -209,6 +214,22 @@ export default function ApplicationStatusPage() {
     async function load() {
       setLoading(true);
       try {
+        try {
+          const period = await getActivePeriod();
+          if (!cancelled) setActivePeriod(period);
+        } catch {
+          if (!cancelled) setActivePeriod(null);
+        } finally {
+          if (!cancelled) setPeriodLoading(false);
+        }
+
+        try {
+          const me = await getMe();
+          if (!cancelled) setUser(me);
+        } catch {
+          if (!cancelled) setUser(null);
+        }
+
         const app = await getMyApplication();
         if (cancelled) return;
         setApplication(app);
@@ -274,8 +295,11 @@ export default function ApplicationStatusPage() {
       ) : isDraft ? (
         <>
           <CandidateStatusHero
+            user={user}
             application={application}
             documents={documents}
+            activePeriod={activePeriod}
+            loading={periodLoading && !activePeriod}
             onPrimaryAction={() => navigate(target)}
             primaryActionLabel={
               completeness.complete
@@ -292,6 +316,7 @@ export default function ApplicationStatusPage() {
           <ApplicationProgressCard
             application={application}
             documents={documents}
+            activePeriod={activePeriod}
             canManageDocuments
             actionLabel={
               completeness.complete
@@ -304,9 +329,12 @@ export default function ApplicationStatusPage() {
       ) : (
         <>
           <CandidateStatusHero
+            user={user}
             application={application}
             documents={documents}
+            activePeriod={activePeriod}
             announcement={announcement}
+            loading={periodLoading && !activePeriod}
             onPrimaryAction={() => navigate(action.to)}
             primaryActionLabel={action.label}
           />
