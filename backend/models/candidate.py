@@ -69,6 +69,33 @@ class Candidate(Base):
     )
     composite_score = Column(Float, nullable=True, doc="Weighted total score (0-100) incl. language bonus")
     profile_summary = Column(Text, nullable=True, doc="LLM-generated narrative summary")
+
+    # --- Recruiter validation of the AI evaluation (informative marker) ---
+    # Checkpoint that a recruiter has reviewed the AI result. This is NOT a
+    # re-scoring flow and NOT an announcement gate; it only records
+    # accountability. Status: pending | validated | needs_discussion.
+    # Resets to "pending" whenever a fresh AI evaluation overwrites the score.
+    ai_validation_status = Column(
+        String(20),
+        nullable=False,
+        default="pending",
+        server_default="pending",
+        doc="Recruiter AI-evaluation validation marker: pending | validated | needs_discussion",
+    )
+    ai_validated_by_id = Column(
+        Integer,
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        doc="Recruiter/super_admin who last set the validation marker",
+    )
+    ai_validated_at = Column(
+        DateTime, nullable=True, doc="When the validation marker was last set"
+    )
+    ai_validation_note = Column(
+        Text,
+        nullable=True,
+        doc="Optional note for validated; required note for needs_discussion",
+    )
     language_score = Column(
         Integer,
         nullable=True,

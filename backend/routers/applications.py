@@ -586,7 +586,11 @@ def list_submitted_applications(
                 "language_score": cand.language_score,
                 "language_bonus": cand.language_bonus,
                 "status": cand.status,
+                "ai_validation_status": cand.ai_validation_status or "pending",
             } if cand else None,
+            "ai_validation_status": (
+                cand.ai_validation_status or "pending"
+            ) if cand else None,
             "rank": rank,
             "is_recommended": is_recommended,
         })

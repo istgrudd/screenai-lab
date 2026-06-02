@@ -1,10 +1,14 @@
 """Candidates router — list, detail, and score override.
 
 Endpoints:
-    GET  /api/candidates                      — List all candidates with scores
-    GET  /api/candidates/{id}                  — Candidate detail with scores + justifications
-    PUT  /api/candidates/{id}/scores/{dim_id}  — Override a dimension score
+    GET  /api/candidates                          — List all candidates with scores
+    GET  /api/candidates/{id}                      — Candidate detail with scores + justifications
+    PUT  /api/candidates/{id}/scores/{dim_id}      — Override a dimension score
+    PUT  /api/candidates/{id}/ai-validation        — Mark recruiter validation of the AI evaluation
 """
+
+from datetime import datetime, timezone
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
@@ -18,6 +22,10 @@ from backend.models.candidate import Candidate, CandidateDocument, DimensionScor
 from backend.models.rubric import Dimension, Rubric
 from backend.models.user import User, UserRole
 from backend.services.scoring import cefr_from_score, validate_rubric_weights
+
+# Recruiter "Validasi Evaluasi AI" marker values. Informative checkpoint only —
+# never an announcement gate and never alters scores or application status.
+AI_VALIDATION_STATUSES = ("pending", "validated", "needs_discussion")
 
 _recruiter_or_admin = require_role(UserRole.RECRUITER, UserRole.SUPER_ADMIN)
 _candidate_only = require_role(UserRole.CANDIDATE)
@@ -37,6 +45,48 @@ my_applications_router = APIRouter(
 class ScoreOverride(BaseModel):
     score: float
     reason: str
+
+
+class AiValidationUpdate(BaseModel):
+    status: Literal["pending", "validated", "needs_discussion"]
+    note: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _ai_validation_payload(candidate: Candidate, db: Session) -> dict:
+    """Build the ai_validation block for candidate detail responses."""
+    validator_name = None
+    if candidate.ai_validated_by_id:
+        validator = (
+            db.query(User).filter(User.id == candidate.ai_validated_by_id).first()
+        )
+        validator_name = validator.full_name if validator else None
+    return {
+        "status": candidate.ai_validation_status or "pending",
+        "validated_by": validator_name,
+        "validated_by_id": candidate.ai_validated_by_id,
+        "validated_at": (
+            candidate.ai_validated_at.isoformat()
+            if candidate.ai_validated_at
+            else None
+        ),
+        "note": candidate.ai_validation_note,
+    }
+
+
+def _candidate_has_ai_evaluation(candidate: Candidate, db: Session) -> bool:
+    """True when the candidate carries a stored AI result worth validating."""
+    if candidate.composite_score is not None:
+        return True
+    return (
+        db.query(DimensionScore.id)
+        .filter(DimensionScore.candidate_id == candidate.id)
+        .first()
+        is not None
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -102,6 +152,7 @@ def list_candidates(
             "language_score": cand.language_score,
             "language_bonus": cand.language_bonus,
             "cefr_level": cefr_level,
+            "ai_validation_status": cand.ai_validation_status or "pending",
             "document": {
                 "filename": doc.filename if doc else None,
                 "document_type": doc.document_type if doc else None,
@@ -231,6 +282,7 @@ def get_candidate(candidate_id: int, db: Session = Depends(get_db)):
                 for d in documents
             ],
             "dimension_scores": dimension_scores,
+            "ai_validation": _ai_validation_payload(candidate, db),
         },
         "error": None,
     }
@@ -331,6 +383,91 @@ def override_score(
             "new_weighted_score": score_record.weighted_score,
             "new_composite_score": candidate.composite_score,
             "reason": payload.reason,
+        },
+        "error": None,
+    }
+
+
+@router.put(
+    "/{candidate_id}/ai-validation",
+    dependencies=[Depends(_recruiter_or_admin)],
+)
+def update_ai_validation(
+    candidate_id: int,
+    payload: AiValidationUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Set the recruiter "Validasi Evaluasi AI" marker for a candidate.
+
+    This is an informative accountability checkpoint that a recruiter has
+    reviewed the AI evaluation. It does NOT change the score, the candidate's
+    evaluation status, or the application status, and it is NOT a prerequisite
+    for announcement.
+
+    Rules:
+        * Only recruiter / super_admin (enforced by the route dependency).
+        * Candidate must already carry an AI result (composite_score set or
+          at least one dimension score) — otherwise 400.
+        * status ``needs_discussion`` requires a non-empty ``note``.
+        * status ``validated`` may include an optional ``note``.
+        * status ``pending`` clears the validator, timestamp, and note
+          (manual reset).
+    """
+    candidate = db.query(Candidate).filter(Candidate.id == candidate_id).first()
+    if not candidate:
+        raise HTTPException(
+            status_code=404, detail=f"Candidate {candidate_id} not found"
+        )
+
+    if not _candidate_has_ai_evaluation(candidate, db):
+        raise HTTPException(
+            status_code=400,
+            detail="Candidate has no AI evaluation result to validate yet.",
+        )
+
+    note = (payload.note or "").strip()
+    if payload.status == "needs_discussion" and not note:
+        raise HTTPException(
+            status_code=400,
+            detail="A note is required when marking the AI evaluation as 'needs_discussion'.",
+        )
+
+    old_status = candidate.ai_validation_status or "pending"
+
+    if payload.status == "pending":
+        candidate.ai_validation_status = "pending"
+        candidate.ai_validated_by_id = None
+        candidate.ai_validated_at = None
+        candidate.ai_validation_note = None
+    else:
+        candidate.ai_validation_status = payload.status
+        candidate.ai_validated_by_id = current_user.id
+        candidate.ai_validated_at = datetime.now(timezone.utc)
+        candidate.ai_validation_note = note or None
+
+    # Lightweight accountability audit. AuditLog.candidate_id is a FK to
+    # users.id (the human), so we record the candidate's user_id. Written in
+    # the same transaction as the marker update.
+    db.add(
+        AuditLog(
+            recruiter_id=current_user.id,
+            candidate_id=candidate.user_id,
+            action_type="ai_validation_updated",
+            old_value=old_status,
+            new_value=candidate.ai_validation_status,
+            reason=candidate.ai_validation_note or payload.status,
+        )
+    )
+
+    db.commit()
+    db.refresh(candidate)
+
+    return {
+        "success": True,
+        "data": {
+            "candidate_id": candidate.id,
+            "ai_validation": _ai_validation_payload(candidate, db),
         },
         "error": None,
     }

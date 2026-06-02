@@ -514,18 +514,22 @@ Fitur utama:
 - Menampilkan score breakdown.
 - Menampilkan justification dan evidence.
 - Override score per dimensi.
+- Menampilkan card "Validasi Evaluasi AI" (hanya jika kandidat sudah dievaluasi AI): status badge (Menunggu Validasi / Tervalidasi / Perlu Diskusi), nama validator, waktu validasi, dan catatan validasi. Ini hanya checkpoint internal — tidak mengubah skor dan bukan syarat pengumuman.
 
 Tombol utama:
 
 - `Back`: kembali ke halaman sebelumnya.
 - `Preview`: membuka preview dokumen.
 - Checkbox `Verified`: toggle verifikasi dokumen pendukung legacy.
-- `Refresh`: memuat ulang SWOT text.
 - Tombol pencil pada score card: membuka dialog override.
 - `Save Override`: menyimpan override score.
 - `Cancel`: membatalkan override.
+- `Tandai Tervalidasi`: menandai hasil evaluasi AI sebagai tervalidasi (catatan opsional).
+- `Perlu Diskusi`: menandai hasil evaluasi AI perlu dibahas (catatan wajib).
 - `Open in new tab`: membuka dokumen di tab baru.
 - `Download`: mengunduh dokumen.
+
+Catatan: catatan validasi terpisah dari alasan override skor. Override skor tidak otomatis menandai hasil sebagai tervalidasi; recruiter perlu memvalidasi ulang secara eksplisit. Status validasi juga muncul sebagai badge "Validasi AI" pada tabel Candidates dan Evaluation.
 
 ### Announcements
 

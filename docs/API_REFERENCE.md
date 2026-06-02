@@ -630,6 +630,7 @@ Array of application rows with extra fields:
   "doc_completeness_pct": 100,
   "rank": 3,
   "is_recommended": true,
+  "ai_validation_status": "pending",
   "candidate": {
     "user_id": 10,
     "full_name": "Budi Santoso",
@@ -647,7 +648,8 @@ Array of application rows with extra fields:
     "composite_score": 82.5,
     "language_score": null,
     "language_bonus": 0,
-    "status": "scored"
+    "status": "scored",
+    "ai_validation_status": "pending"
   }
 }
 ```
@@ -657,6 +659,7 @@ Array of application rows with extra fields:
 - Draft applications are omitted by default.
 - Rank is computed within the filtered result set.
 - `is_recommended` is visual only: `rank <= active_period.threshold_n`.
+- `ai_validation_status` (`pending` | `validated` | `needs_discussion`) is the recruiter "Validasi Evaluasi AI" marker; it is `null` for applications with no Candidate row yet. It is informative only and does not gate announcement.
 
 ### 👤 `GET /api/my-applications`
 
@@ -996,7 +999,7 @@ Recruiter+ unless noted otherwise.
 
 Optional query: `rubric_id`.
 
-Returns ranked candidates. When `rubric_id` is provided, includes dimension score summary.
+Returns ranked candidates. When `rubric_id` is provided, includes dimension score summary. Each item also carries `ai_validation_status` (`pending` | `validated` | `needs_discussion`) — the recruiter "Validasi Evaluasi AI" marker.
 
 ### 👀 `GET /api/candidates/{candidate_id}`
 
@@ -1007,7 +1010,22 @@ Returns candidate detail:
 - cross-linked `application`;
 - `user_profile` for recruiter review (`full_name`, `email`, `whatsapp`, `nim`, `faculty`, `major`, `year`, `ipk`) — candidate identity is always visible to recruiters; only the AI-facing document text is anonymized;
 - processed `documents`;
-- `dimension_scores` with evidence, justification, override status, and override reason.
+- `dimension_scores` with evidence, justification, override status, and override reason;
+- `ai_validation` — the recruiter AI-evaluation validation marker:
+
+```json
+{
+  "ai_validation": {
+    "status": "validated",
+    "validated_by": "Nama Recruiter",
+    "validated_by_id": 3,
+    "validated_at": "2026-06-02T08:15:00+00:00",
+    "note": "Hasil AI sudah dicek dan sesuai."
+  }
+}
+```
+
+For an unvalidated candidate `status` is `pending` and the other fields are `null`.
 
 ### 👀 `PUT /api/candidates/{candidate_id}/scores/{dim_score_id}`
 
@@ -1040,6 +1058,60 @@ Overrides one dimension score.
 - Recomputes weighted score and composite score.
 - Sets `is_override=true` and `override_reason`.
 - Writes `AuditLog(action_type="score_override")` in the same transaction.
+- Does **not** change the candidate's `ai_validation` marker. Override and AI validation are independent: after overriding, the recruiter should re-validate explicitly.
+
+### 👀 `PUT /api/candidates/{candidate_id}/ai-validation`
+
+Recruiter / super_admin only. Sets the **"Validasi Evaluasi AI"** marker — an informative accountability checkpoint that a recruiter has reviewed the AI evaluation. It does **not** change the score, the candidate evaluation status, or the application status, and is **not** a prerequisite for announcement (at least for now).
+
+**Body**
+
+```json
+{ "status": "validated", "note": "Hasil AI sudah dicek dan sesuai." }
+```
+
+```json
+{ "status": "needs_discussion", "note": "Skor AI terlihat terlalu rendah dibanding isi CV." }
+```
+
+`status` is one of `validated` | `needs_discussion` | `pending`.
+
+- `note` is **optional** for `validated`.
+- `note` is **required** for `needs_discussion`.
+- `pending` is a manual reset: it clears the validator, timestamp, and note.
+
+**Response 200**
+
+```json
+{
+  "success": true,
+  "data": {
+    "candidate_id": 5,
+    "ai_validation": {
+      "status": "validated",
+      "validated_by": "Nama Recruiter",
+      "validated_by_id": 3,
+      "validated_at": "2026-06-02T08:15:00+00:00",
+      "note": "Hasil AI sudah dicek dan sesuai."
+    }
+  },
+  "error": null
+}
+```
+
+**Error cases**
+
+- `404` — candidate not found.
+- `400` — candidate has no AI result yet (`composite_score` null and no dimension scores), or `needs_discussion` without a note.
+- `422` — `status` is not one of the three allowed values.
+- `403` — caller is not a recruiter / super_admin.
+
+**Side effects**
+
+- For `validated` / `needs_discussion`: sets `ai_validated_by_id = current user`, `ai_validated_at = now`, and stores the note (required for `needs_discussion`).
+- For `pending`: clears validator, timestamp, and note.
+- Writes `AuditLog(action_type="ai_validation_updated")` in the same transaction.
+- A subsequent AI (re-)evaluation that stores a fresh score resets this marker back to `pending`.
 
 ---
 

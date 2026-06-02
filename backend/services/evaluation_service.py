@@ -447,6 +447,16 @@ async def _evaluate_one(
         db=db,
     )
 
+    # A fresh AI result was just stored (initial or force re-evaluation), so
+    # any prior recruiter validation no longer applies to the new score —
+    # reset the marker to pending. This only runs when results are persisted,
+    # never when an evaluation is skipped.
+    candidate.ai_validation_status = "pending"
+    candidate.ai_validated_by_id = None
+    candidate.ai_validated_at = None
+    candidate.ai_validation_note = None
+    db.flush()
+
     # --- SWOT text extraction (highlight only, not scored) ---
     swot_text = _extract_swot(app, db)
     result["swot_text"] = swot_text

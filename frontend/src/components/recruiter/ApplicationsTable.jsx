@@ -12,6 +12,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Progress } from "@/components/ui/progress";
 import CommonStatusBadge from "@/components/common/StatusBadge";
+import AiValidationBadge from "@/components/AiValidationBadge";
 import {
   Table,
   TableBody,
@@ -131,6 +132,7 @@ export default function ApplicationsTable({
               <TableHead>IPK</TableHead>
               <TableHead>Division</TableHead>
               <TableHead>Status</TableHead>
+              <TableHead>Validasi AI</TableHead>
               <TableHead className="min-w-[160px]">Docs</TableHead>
               <TableHead className="text-right">Composite Score</TableHead>
               <TableHead>Submitted</TableHead>
@@ -226,6 +228,19 @@ export default function ApplicationsTable({
                   </TableCell>
                   <TableCell>
                     <StatusBadge status={application.status} />
+                  </TableCell>
+                  <TableCell>
+                    {evaluated ? (
+                      <AiValidationBadge
+                        status={
+                          application.ai_validation_status ||
+                          application.evaluation?.ai_validation_status ||
+                          "pending"
+                        }
+                      />
+                    ) : (
+                      <span className="text-muted-foreground text-xs">-</span>
+                    )}
                   </TableCell>
                   <TableCell>
                     <CompletenessCell pct={application.doc_completeness_pct} />

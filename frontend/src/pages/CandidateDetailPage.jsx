@@ -12,6 +12,7 @@ import {
   ClipboardList,
   CheckCircle2,
   XCircle,
+  MessageCircleWarning,
 } from "lucide-react";
 import {
   RadarChart,
@@ -37,11 +38,14 @@ import {
   getCandidate,
   listApplicationDocuments,
   overrideScore as apiOverrideScore,
+  updateCandidateAiValidation,
   verifyDocument,
 } from "@/lib/api";
 import OverrideDialog from "@/components/OverrideDialog";
 import JustificationCard from "@/components/JustificationCard";
 import DocumentPreviewDialog from "@/components/DocumentPreviewDialog";
+import AiValidationBadge from "@/components/AiValidationBadge";
+import AiValidationDialog from "@/components/AiValidationDialog";
 import { defaultPathForRole, getCurrentUser } from "@/lib/auth";
 import { formatIpk } from "@/lib/candidateApplication";
 
@@ -180,6 +184,72 @@ function CandidateProfileCard({ candidate }) {
   );
 }
 
+function AiValidationCard({ validation, onValidate, onNeedsDiscussion }) {
+  const status = validation?.status || "pending";
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <div className="flex items-start justify-between gap-3 flex-wrap">
+          <div>
+            <CardTitle className="text-base flex items-center gap-2">
+              <ShieldCheck className="w-4 h-4" /> Validasi Evaluasi AI
+            </CardTitle>
+            <CardDescription>
+              Checkpoint internal bahwa recruiter sudah mengecek hasil evaluasi
+              AI. Tidak mengubah skor dan bukan syarat pengumuman.
+            </CardDescription>
+          </div>
+          <AiValidationBadge status={status} />
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="grid grid-cols-1 gap-x-6 gap-y-3 text-sm sm:grid-cols-3">
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+              Divalidasi Oleh
+            </p>
+            <p className="mt-1">{validation?.validated_by || "-"}</p>
+          </div>
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+              Waktu Validasi
+            </p>
+            <p className="mt-1">{formatDateTime(validation?.validated_at)}</p>
+          </div>
+          <div className="sm:col-span-3">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+              Catatan Validasi
+            </p>
+            <p className="mt-1 whitespace-pre-wrap break-words">
+              {validation?.note || "-"}
+            </p>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          <Button size="sm" onClick={onValidate} className="gap-2">
+            <CheckCircle2 className="w-4 h-4" />
+            Tandai Tervalidasi
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={onNeedsDiscussion}
+            className="gap-2"
+          >
+            <MessageCircleWarning className="w-4 h-4" />
+            Perlu Diskusi
+          </Button>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Catatan validasi terpisah dari alasan override skor. Override skor
+          tidak otomatis menandai hasil sebagai tervalidasi.
+        </p>
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function CandidateDetailPage() {
   const { id } = useParams();
   const currentUser = getCurrentUser();
@@ -193,6 +263,7 @@ export default function CandidateDetailPage() {
   const [appDocuments, setAppDocuments] = useState([]);
   const [previewDoc, setPreviewDoc] = useState(null);
   const [verifyingDocId, setVerifyingDocId] = useState(null);
+  const [validationDialogMode, setValidationDialogMode] = useState(null);
 
   const fetchCandidate = async () => {
     setLoading(true);
@@ -253,6 +324,25 @@ export default function CandidateDetailPage() {
       fetchCandidate();
     } catch (err) {
       toast.error(`Override failed: ${err.message}`);
+    }
+  };
+
+  const handleAiValidation = async (note) => {
+    if (!validationDialogMode) return;
+    try {
+      await updateCandidateAiValidation(candidate.candidate_id, {
+        status: validationDialogMode,
+        note: note || null,
+      });
+      toast.success(
+        validationDialogMode === "needs_discussion"
+          ? "Ditandai perlu diskusi."
+          : "Validasi evaluasi AI tersimpan."
+      );
+      setValidationDialogMode(null);
+      fetchCandidate();
+    } catch (err) {
+      toast.error(`Gagal menyimpan validasi: ${err.message}`);
     }
   };
 
@@ -441,6 +531,15 @@ export default function CandidateDetailPage() {
         </div>
       )}
 
+      {/* Recruiter validation of the AI evaluation (informative marker) */}
+      {hasScores && (
+        <AiValidationCard
+          validation={candidate.ai_validation}
+          onValidate={() => setValidationDialogMode("validated")}
+          onNeedsDiscussion={() => setValidationDialogMode("needs_discussion")}
+        />
+      )}
+
       {/* Documents info */}
       {candidate.documents && candidate.documents.length > 0 && (
         <Card>
@@ -495,6 +594,14 @@ export default function CandidateDetailPage() {
         open={!!previewDoc}
         onClose={() => setPreviewDoc(null)}
         document={previewDoc}
+      />
+
+      {/* AI evaluation validation dialog */}
+      <AiValidationDialog
+        open={!!validationDialogMode}
+        mode={validationDialogMode}
+        onOpenChange={(open) => !open && setValidationDialogMode(null)}
+        onSubmit={handleAiValidation}
       />
     </div>
   );

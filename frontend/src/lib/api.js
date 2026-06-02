@@ -507,6 +507,20 @@ export async function overrideScore(candidateId, dimScoreId, score, reason) {
   });
 }
 
+/**
+ * Update the recruiter "Validasi Evaluasi AI" marker for a candidate.
+ * Informative checkpoint only — does not change the score or status.
+ * @param {number} candidateId
+ * @param {{ status: "validated"|"needs_discussion"|"pending", note?: string }} payload
+ *   note is required when status is "needs_discussion".
+ */
+export async function updateCandidateAiValidation(candidateId, payload) {
+  return request(`/candidates/${candidateId}/ai-validation`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
 // ── Rubrics ─────────────────────────────────────────────────────────────────
 
 export async function listRubrics() {

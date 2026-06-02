@@ -13,8 +13,9 @@
 - A **candidate self-service portal**: registration → profile → multi-document upload → review → submit.
 - A **phase-aware recruitment period**: `UPCOMING → SUBMISSION → EVALUATION → ANNOUNCEMENT → CLOSED`.
 - A **post-document-review anonymization pipeline**: CV + Motivation Letter are anonymized through IndoBERT NER only after recruiter/super_admin finalizes document review as accepted.
-- A **rubric-augmented LLM scoring pipeline**: cached anonymized candidate text, KHS summary, Motivation Letter, and division rubric are sent to the configured DeepSeek model for structured scoring.
-- A **recruiter / super-admin console**: filtering, evaluation, re-evaluation, score override, threshold highlight, manual checklist, and bulk announcement.
+- A **rubric-augmented LLM scoring pipeline**: cached anonymized candidate text, KHS summary, Motivation Letter, and division rubric are sent to the configured DeepSeek model for structured scoring. The AI produces an initial score and justification; recruiters can override individual dimension scores when the AI result is wrong.
+- A **recruiter "Validasi Evaluasi AI" marker**: recruiters can mark an AI evaluation as `validated` or `needs_discussion` (with a note) as an accountability checkpoint. This is informative only — it does not change the score or application status, and it is not currently a gate for announcement. A fresh (re-)evaluation resets the marker to `pending`.
+- A **recruiter / super-admin console**: filtering, evaluation, re-evaluation, score override, AI-evaluation validation, threshold highlight, manual checklist, and bulk announcement.
 
 The repo was forked from the Capstone project [`istgrudd/screenai`](https://github.com/istgrudd/screenai). Legacy Capstone endpoints (`POST /api/upload`, `POST /api/evaluate`) remain mounted for compatibility, but the Lab pipeline is the primary path.
 
