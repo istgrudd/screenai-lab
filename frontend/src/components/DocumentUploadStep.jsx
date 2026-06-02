@@ -2,7 +2,9 @@ import { useCallback, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
   CheckCircle2,
+  ChevronDown,
   CloudUpload,
+  Download,
   FileText,
   Loader2,
   Replace,
@@ -17,6 +19,29 @@ function formatSize(bytes) {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+}
+
+function CvTemplateDownloadPanel() {
+  return (
+    <details className="group rounded-xl border border-border bg-surface-container-low px-4 py-3">
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm font-medium text-foreground">
+        <span>Template CV opsional</span>
+        <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" />
+      </summary>
+      <div className="mt-3 space-y-3 border-t border-border/60 pt-3">
+        <p className="text-sm leading-6 text-muted-foreground">
+          Template ini bersifat opsional, namun direkomendasikan agar format CV
+          lebih standar dan mudah dibaca recruiter.
+        </p>
+        <Button asChild variant="outline" size="sm" className="gap-2">
+          <a href="/templates/mbc-cv-template.docx" download>
+            <Download className="h-4 w-4" />
+            Download Template CV
+          </a>
+        </Button>
+      </div>
+    </details>
+  );
 }
 
 /**
@@ -143,6 +168,8 @@ export default function DocumentUploadStep({
           <span className="font-medium text-foreground">Tip:</span> {doc.tip}
         </div>
       )}
+
+      {doc.doc_type === "cv" && <CvTemplateDownloadPanel />}
 
       {existing ? (
         <div className="flex items-center justify-between gap-3 rounded-xl border bg-muted/30 p-4">
