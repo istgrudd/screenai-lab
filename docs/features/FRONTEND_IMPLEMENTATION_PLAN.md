@@ -235,8 +235,8 @@ Account
 | `/admin/users` | AdminPage | Keep/refine | User management, verification status, reset password. |
 | `/admin/periods` | RecruitmentPeriodPage | Keep/refine | Recruitment period management. |
 | `/admin/audit-logs` | AuditLogPage | New | Browse audit logs. |
-| `/admin/email-templates` | EmailTemplatesPage | New | Manage email templates if templates become configurable. |
-| `/admin/settings` | AdminSettingsPage | New | Global operational settings. |
+| `/admin/email-templates` | EmailTemplatesPage | Implemented | Read-only Admin Emails monitoring for workflow notification logs; editable templates are deferred. |
+| `/admin/settings` | AdminSettingsPage | Placeholder | Global operational settings placeholder until backend settings exist. |
 | `/admin/profile` | AdminProfilePage | Keep/refactor | Admin profile summary. |
 | `/admin/profile/edit` | AdminEditProfilePage | New | Dedicated edit profile route. |
 
@@ -713,15 +713,15 @@ Implementation notes:
 - timestamp
 - filters by action type/date/actor
 
-### 8.5 Admin Email Templates
+### 8.5 Admin Emails Monitoring
 
 **Route:** `/admin/email-templates`
 
 **Role:** Super Admin
 
-**Purpose:** Manage notification copy if templates become database-configurable.
+**Purpose:** Monitor workflow notification delivery logs and provider status.
 
-**Initial version may be read-only** if backend templates are hardcoded first.
+**Current version is read-only.** It lists `application_submitted`, `document_rejected`, and `announcement_published` logs with filters and pagination. Editable templates, resend workflow, and manual compose are deferred.
 
 ### 8.6 Admin Settings
 
@@ -1023,7 +1023,8 @@ Manual route checks:
 Scope:
 
 - add admin audit log viewer
-- add email templates/settings UI if backend supports it
+- add Admin Emails monitoring UI for workflow notification logs
+- keep settings as a placeholder if backend settings are not implemented
 - add filters and empty states
 
 Expected checks:
@@ -1113,7 +1114,7 @@ Run this checklist after each frontend refactor phase.
 - Open users page.
 - Open periods page.
 - Open recruiter workflow pages.
-- Confirm audit/settings/template placeholders or pages are accessible.
+- Confirm audit logs, Admin Emails monitoring, and settings placeholder are accessible to super admins only.
 - Confirm route protection works for admin-only pages.
 
 ---
@@ -1130,7 +1131,7 @@ The decisions below replace the previous open-decision list. The goal is to keep
 | Candidate application overview | Keep `CandidateApplicationOverviewPage` as a separate `/application` route. The dashboard remains a summary/next-action hub, not the full application workspace. |
 | `My Applications` visibility | Keep `/my-applications` accessible for compatibility, but remove it from the main candidate sidebar until true multi-period application support exists. |
 | Profile routes | Candidate uses `/profile` and `/profile/edit`. Recruiter and super admin use role-prefixed routes (`/recruiter/profile`, `/admin/profile`, and edit variants) while sharing reusable profile components internally. |
-| Admin placeholder pages | Add audit logs, settings, and email-template placeholder pages during the admin workspace split if backend endpoints are not ready yet. Placeholders must clearly say which backend support is pending. |
+| Admin monitoring/settings pages | Audit logs and Admin Emails monitoring are implemented as read-only pages. Settings remains a documented placeholder until backend settings support exists. |
 | Candidate documents after submit | Keep `/documents` available after submit as a read-only document list. In `correction_requested`, allow replacement only for rejected document types. Application status should link to documents when review/correction is needed. |
 | Analytics route | Use `/recruiter/analytics` as the shared analytics workspace for recruiter and super admin in the first version. Admin dashboard may show analytics summaries, but a separate `/admin/analytics` route is deferred. |
 
@@ -1140,6 +1141,7 @@ The decisions below replace the previous open-decision list. The goal is to keep
 |---|---|
 | Dedicated admin analytics route | Revisit `/admin/analytics` only after the shared analytics workspace and admin dashboard summary are implemented. |
 | Email template editing UI | Keep templates hardcoded/read-only first. Add editable template UI only if the backend exposes database-backed templates. |
+| Email resend workflow | Do not add resend actions to Admin Emails monitoring until notification retry semantics are designed. |
 | Long-term document UX | After correction flow is used in practice, decide whether read-only documents should remain a separate route or be folded more tightly into application status. |
 
 ---

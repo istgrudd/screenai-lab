@@ -33,7 +33,7 @@ For endpoint-level detail see [API_REFERENCE.md](API_REFERENCE.md). For runtime 
 - Resend verification body: `{ email }`.
 - Forgot password body: `{ email }`.
 - Reset password body: `{ code, new_password }`.
-- Admin password reset body: `{ user_id, new_password }`.
+- Admin password reset-link body: `{ user_id }`.
 - `Authorization: Bearer <token>` on protected endpoints.
 
 **Outputs**
@@ -60,7 +60,7 @@ For endpoint-level detail see [API_REFERENCE.md](API_REFERENCE.md). For runtime 
 - Forgot password always returns a generic response and does not reveal whether an email exists.
 - Password reset links are one-time, expiring, and stored as HMAC-SHA256 hashes rather than raw secrets.
 - Successful self-service password reset updates `users.password_changed_at`.
-- Admin-assisted reset also updates `users.password_changed_at`.
+- Admin-assisted reset sends a reset link. `users.password_changed_at` updates only after the target user completes the reset link flow.
 - Email is normalized to lowercase.
 - NIM must be a numeric string of at least 10 digits.
 - Password length: 8–72 chars; upper bound follows bcrypt's effective input limit.
@@ -169,7 +169,7 @@ For endpoint-level detail see [API_REFERENCE.md](API_REFERENCE.md). For runtime 
 
 ## 4. Application Lifecycle
 
-**Responsibility.** Manage candidate application state from `draft` to `submitted`, then `screening`, then `announced_pass`/`announced_fail`.
+**Responsibility.** Manage candidate application state from `draft` to `document_review`, `correction_requested`/`verified`, then `screening`, then `announced_pass`/`announced_fail`.
 
 **Key files**
 
@@ -186,14 +186,16 @@ For endpoint-level detail see [API_REFERENCE.md](API_REFERENCE.md). For runtime 
 
 **Outputs**
 
-- `ApplicationOut`: `id, user_id, division, status, submitted_at, created_at, documents_count`.
+- `ApplicationOut`: `id, user_id, division, status, submitted_at, created_at, documents_count, document_review_progress`.
 - Recruiter list row extends application with `doc_completeness_pct`, `rank`, `is_recommended`, nested candidate profile, and evaluation summary.
 - SWOT text endpoint returns `{ application_id, document_id, file_name, text, page_count, source }`.
 
 **Dependencies**
 
 - `User`, `Document`, `Candidate`, `CandidateDocument`, `RecruitmentPeriod`.
-- `BackgroundTasks` for submit-time processing.
+- `document_review_service` for progress/finalization/correction state.
+- `notification_service` for non-blocking workflow notification logging.
+- `BackgroundTasks` for post-accepted-review anonymization.
 - `SessionLocal` factory for background DB session.
 - `extract_text_from_pdf` for SWOT live fallback.
 
@@ -205,9 +207,12 @@ For endpoint-level detail see [API_REFERENCE.md](API_REFERENCE.md). For runtime 
   2. current phase is `SUBMISSION`;
   3. application status is `draft`;
   4. current user owns the application;
-  5. all six `DocumentType` values exist.
-- On submit: `status=submitted`, `submitted_at=utcnow`, `period_id=active_period.id`.
-- Submit schedules `run_submit_anonymization(app.id, SessionLocal)`. The background task opens/closes its own session and does not reuse the request-scoped `db`.
+  5. candidate profile has required fields including WhatsApp;
+  6. all six `DocumentType` values exist.
+- On submit: `status=document_review`, `submitted_at=utcnow`, `period_id=active_period.id`.
+- Submit resets document review state to `pending` and logs/sends `application_submitted`.
+- Submit does not schedule NER. Accepted document-review finalization schedules `run_submit_anonymization(app.id, SessionLocal)`.
+- Rejected document-review finalization sets `correction_requested`, exposes rejection reasons to the candidate, and logs/sends `document_rejected`.
 - Document mutation is locked once application status is no longer `draft`.
 - `is_recommended` is visual only: active period must have `threshold_n` and application rank must be `<= threshold_n`.
 
@@ -236,11 +241,12 @@ For endpoint-level detail see [API_REFERENCE.md](API_REFERENCE.md). For runtime 
 - `PUT /api/documents/{doc_id}/replace` multipart file.
 - `GET /api/documents/{application_id}`.
 - `GET /api/documents/{doc_id}/file`.
-- `PUT /api/documents/{doc_id}/verify` with `{ is_verified }`.
+- `PUT /api/documents/{doc_id}/review` with `{ status, reason? }`.
+- Compatibility `PUT /api/documents/{doc_id}/verify` with `{ is_verified: true }`.
 
 **Outputs**
 
-- Document metadata: `id, application_id, doc_type, file_name, file_size, uploaded_at, is_verified`.
+- Document metadata: `id, application_id, doc_type, file_name, file_size, uploaded_at, is_verified, verification_status, rejection_reason, reviewed_at, reviewed_by_id, review_visibility`.
 - Document list includes `required_types` and upload `limits`.
 - File endpoint returns raw `FileResponse`.
 
@@ -265,7 +271,10 @@ For endpoint-level detail see [API_REFERENCE.md](API_REFERENCE.md). For runtime 
 - One file per `(application_id, doc_type)`.
 - Replace deletes any previous file for that doc type across known extensions.
 - Disk filename is deterministic: `{doc_type}.{ext}`.
-- Recruiter verification flag is intended mainly for supporting documents.
+- Candidates can mutate documents only while `draft`, except rejected-document replacement during `correction_requested`.
+- Recruiter/super_admin can mark each document `verified` or `rejected` only while the application is in `document_review` or legacy `submitted`.
+- Rejection requires a reason.
+- Candidate-facing document decisions are masked while review is in flight and become visible only after finalization.
 - Docker production mounts `./uploads:/app/uploads`, matching backend default `settings.upload_dir = "./uploads"`.
 
 **Notable edge cases**
@@ -329,7 +338,7 @@ For endpoint-level detail see [API_REFERENCE.md](API_REFERENCE.md). For runtime 
 **Inputs**
 
 - Extracted and normalized CV / Motivation Letter text.
-- Application ID for submit-time processing.
+- Application ID for post-accepted-document-review processing.
 - `SessionLocal` factory for the background task.
 
 **Outputs**
@@ -348,14 +357,14 @@ For endpoint-level detail see [API_REFERENCE.md](API_REFERENCE.md). For runtime 
 - Detection combines model NER, regex fallback, and context patterns.
 - Identical text+label pairs reuse the same token.
 - Replacement is done in reverse position order so text indices remain stable.
-- Submit-time task runs after the submit transaction commits.
+- Post-review task runs after accepted document-review finalization commits.
 - Background task must never raise to the user-facing submit request; failures are logged.
 - CV and Motivation Letter are anonymized.
 - SWOT is cached as raw text for recruiter highlight, but not anonymized and not scored.
 
 **Notable edge cases**
 
-- If submit-time anonymization has not finished or failed, evaluation falls back to inline NER.
+- If post-review anonymization has not finished or failed, evaluation falls back to inline NER for verified applications.
 - Empty extracted text returns unchanged text with zero entities.
 
 ---
@@ -398,6 +407,8 @@ For endpoint-level detail see [API_REFERENCE.md](API_REFERENCE.md). For runtime 
 - Composite score is `Σ(score × weight)`.
 - `store_evaluation_results` wipes previous `DimensionScore` rows for the candidate/rubric before inserting new scores.
 - `validate_rubric_weights` protects composite-score sanity.
+- The prompt includes multilingual fairness guardrails: Bahasa Indonesia, English, and mixed-language CVs must be evaluated by equivalent evidence, not by language choice.
+- The prompt maps equivalent terms such as Pembelajaran Mesin/Machine Learning, Visi Komputer/Computer Vision, Penambangan Data/Data Mining, Ketua Pelaksana/Chief Organizer, Asisten Riset/Research Assistant, and Magang Data Engineer/Data Engineer Intern.
 
 **Notable edge cases**
 
@@ -436,9 +447,10 @@ For endpoint-level detail see [API_REFERENCE.md](API_REFERENCE.md). For runtime 
 - 404 if no rubric exists for division.
 - 400 if rubric has no dimensions.
 - Rubric weights must sum to 1.0 before evaluation.
-- Batch target always starts from applications with status `submitted` in selected division.
+- Normal batch target starts from applications with status `verified` in selected division.
 - `force=false`: skip already-scored linked candidates.
-- `force=true`: re-score already-scored linked candidates, but still only applications currently in `submitted` status.
+- `force=true`: re-score eligible already-scored linked candidates in `verified` or `screening` status.
+- Draft, legacy `submitted`, `document_review`, `correction_requested`, `cancelled`, and announced statuses are skipped.
 - Evaluation outside `EVALUATION` phase is allowed and returns a soft warning.
 - Successful candidate evaluation sets application status to `screening`.
 - LLM calls use an async client path and are bounded with an internal semaphore to avoid too many concurrent DeepSeek calls.
@@ -574,6 +586,7 @@ For endpoint-level detail see [API_REFERENCE.md](API_REFERENCE.md). For runtime 
 **Dependencies**
 
 - `Application`, `RecruitmentPeriod`, `AuditLog`.
+- `notification_service` for non-blocking `announcement_published` logs/sends.
 - `get_current_phase` for bulk phase gate.
 - slowapi limiter on bulk endpoint.
 
@@ -585,6 +598,7 @@ For endpoint-level detail see [API_REFERENCE.md](API_REFERENCE.md). For runtime 
 - Bulk validates all passed IDs are inside scope.
 - Bulk phase gate requires `ANNOUNCEMENT` unless current user is `super_admin`.
 - Bulk writes one audit row per actual status change.
+- Single and bulk publish log/send `announcement_published` workflow notifications for changed applications.
 - Candidate result endpoint reads the latest `announcement` or `bulk_announcement` audit row for `notes`/`announced_at`.
 
 **Notable edge cases**
@@ -603,6 +617,9 @@ For endpoint-level detail see [API_REFERENCE.md](API_REFERENCE.md). For runtime 
 - [backend/models/audit.py](../backend/models/audit.py)
 - [backend/routers/announcements.py](../backend/routers/announcements.py)
 - [backend/routers/candidates.py](../backend/routers/candidates.py)
+- [backend/routers/documents.py](../backend/routers/documents.py)
+- [backend/routers/applications.py](../backend/routers/applications.py)
+- [backend/routers/audit_logs.py](../backend/routers/audit_logs.py)
 
 **Schema**
 
@@ -619,16 +636,53 @@ For endpoint-level detail see [API_REFERENCE.md](API_REFERENCE.md). For runtime 
 | `announcement` | single announcement endpoint |
 | `bulk_announcement` | bulk announcement endpoint |
 | `score_override` | score override endpoint |
+| `document_verification` | document review/verify endpoint |
+| `document_review_finalized` | application document-review finalization |
+| `document_replacement` | candidate replacement after correction request |
+
+**Listing endpoint**
+
+- `GET /api/admin/audit-logs` is super-admin-only.
+- Supports action type, actor id, affected user id, date range, and pagination filters.
+- Redacts sensitive-looking text markers before returning audit rows.
 
 **Not yet logged**
 
-- Document verification toggles.
 - Period activation/deactivation.
 - Super-admin user management actions.
 
 ---
 
-## 14. Legacy Compatibility Endpoints
+## 14. Email Notification Lifecycle
+
+**Responsibility.** Log and optionally send workflow notifications without rolling back the primary recruitment workflow.
+
+**Key files**
+
+- [backend/services/notification_service.py](../backend/services/notification_service.py)
+- [backend/services/email_service.py](../backend/services/email_service.py)
+- [backend/services/email_templates.py](../backend/services/email_templates.py)
+- [backend/models/email_notification.py](../backend/models/email_notification.py)
+- [backend/routers/email_notifications.py](../backend/routers/email_notifications.py)
+
+**Events**
+
+- `application_submitted`
+- `document_rejected`
+- `announcement_published`
+
+**Business rules**
+
+- Workflow notification failures are non-blocking for application submit, document review finalization, and announcement publish.
+- Disabled local mode records `captured` or `disabled` status depending on configuration.
+- Provider failures are recorded as `failed`.
+- The log stores metadata only: no email bodies, reset links, verification links, JWTs, secrets, or raw provider payloads.
+- `GET /api/admin/email-notifications` is super-admin-only and supports type/status/recipient/date/pagination filters.
+- Admin Emails is monitoring-only; editable templates and resend workflow remain out of scope.
+
+---
+
+## 15. Legacy Compatibility Endpoints
 
 **Responsibility.** Keep old Capstone-style upload/evaluate endpoints available temporarily without making them the Lab pipeline.
 
@@ -659,7 +713,7 @@ For endpoint-level detail see [API_REFERENCE.md](API_REFERENCE.md). For runtime 
 
 ---
 
-## 15. Frontend — Routing & Protected Routes
+## 16. Frontend — Routing & Protected Routes
 
 **Responsibility.** Route tree, role-aware sidebar, and client-side route protection.
 
@@ -687,7 +741,7 @@ See [API_REFERENCE.md](API_REFERENCE.md#frontend-page-routes) for the full route
 
 ---
 
-## 16. Frontend — API Client & Auth
+## 17. Frontend — API Client & Auth
 
 **Responsibility.** Centralized HTTP wrapper with bearer-token attach, envelope unwrap, and 401 handling.
 
@@ -723,7 +777,7 @@ See [API_REFERENCE.md](API_REFERENCE.md#frontend-page-routes) for the full route
 
 ---
 
-## 17. Frontend — Candidate Portal Pages
+## 18. Frontend — Candidate Portal Pages
 
 **Responsibility.** Candidate UX from registration through result.
 
@@ -731,17 +785,21 @@ See [API_REFERENCE.md](API_REFERENCE.md#frontend-page-routes) for the full route
 
 - [frontend/src/pages/candidate/DashboardPage.jsx](../frontend/src/pages/candidate/DashboardPage.jsx)
 - [frontend/src/pages/candidate/ProfilePage.jsx](../frontend/src/pages/candidate/ProfilePage.jsx)
+- [frontend/src/pages/candidate/EditProfilePage.jsx](../frontend/src/pages/candidate/EditProfilePage.jsx)
+- [frontend/src/pages/candidate/ApplicationOverviewPage.jsx](../frontend/src/pages/candidate/ApplicationOverviewPage.jsx)
+- [frontend/src/pages/candidate/StartApplicationPage.jsx](../frontend/src/pages/candidate/StartApplicationPage.jsx)
 - [frontend/src/pages/candidate/DocumentsPage.jsx](../frontend/src/pages/candidate/DocumentsPage.jsx)
 - [frontend/src/pages/candidate/ReviewPage.jsx](../frontend/src/pages/candidate/ReviewPage.jsx)
-- [frontend/src/pages/candidate/SubmittedPage.jsx](../frontend/src/pages/candidate/SubmittedPage.jsx)
-- [frontend/src/pages/candidate/ResultPage.jsx](../frontend/src/pages/candidate/ResultPage.jsx)
+- [frontend/src/pages/candidate/ApplicationStatusPage.jsx](../frontend/src/pages/candidate/ApplicationStatusPage.jsx)
 
 **Business rules**
 
 - Document upload step order is fixed.
 - Review submit requires all six documents and acknowledgments.
+- Profile completion is required before candidate workflow pages outside `/profile/edit`.
+- `document_review` masks in-flight per-document decisions; `correction_requested` exposes rejected document reasons and replacement actions.
 - Candidate profile locks match backend locks.
-- Result page displays pass/fail and score data when available.
+- Application status page displays document review, correction, screening, and pass/fail announcement states.
 
 **Notable edge cases**
 
@@ -749,22 +807,28 @@ See [API_REFERENCE.md](API_REFERENCE.md#frontend-page-routes) for the full route
 
 ---
 
-## 18. Frontend — Recruiter & Admin Pages
+## 19. Frontend — Recruiter & Admin Pages
 
 **Responsibility.** Recruiter daily workflow and super-admin management pages.
 
 **Key files**
 
-- [frontend/src/pages/DashboardPage.jsx](../frontend/src/pages/DashboardPage.jsx)
+- [frontend/src/pages/recruiter/OverviewPage.jsx](../frontend/src/pages/recruiter/OverviewPage.jsx)
+- [frontend/src/pages/recruiter/ApplicationsPage.jsx](../frontend/src/pages/recruiter/ApplicationsPage.jsx)
+- [frontend/src/pages/recruiter/DocumentVerificationPage.jsx](../frontend/src/pages/recruiter/DocumentVerificationPage.jsx)
+- [frontend/src/pages/recruiter/EvaluationPage.jsx](../frontend/src/pages/recruiter/EvaluationPage.jsx)
+- [frontend/src/pages/recruiter/AnalyticsPage.jsx](../frontend/src/pages/recruiter/AnalyticsPage.jsx)
 - [frontend/src/pages/CandidateDetailPage.jsx](../frontend/src/pages/CandidateDetailPage.jsx)
 - [frontend/src/pages/RubricConfigPage.jsx](../frontend/src/pages/RubricConfigPage.jsx)
 - [frontend/src/pages/admin/AdminPage.jsx](../frontend/src/pages/admin/AdminPage.jsx)
 - [frontend/src/pages/admin/RecruitmentPeriodPage.jsx](../frontend/src/pages/admin/RecruitmentPeriodPage.jsx)
-- [frontend/src/components/RecruitmentPhaseCard.jsx](../frontend/src/components/RecruitmentPhaseCard.jsx)
+- [frontend/src/pages/admin/AuditLogsPage.jsx](../frontend/src/pages/admin/AuditLogsPage.jsx)
+- [frontend/src/pages/admin/EmailTemplatesPage.jsx](../frontend/src/pages/admin/EmailTemplatesPage.jsx)
+- [frontend/src/pages/admin/SettingsPage.jsx](../frontend/src/pages/admin/SettingsPage.jsx)
 
 **Business rules**
 
-- Dashboard filters by division and status.
+- Recruiter application/document/evaluation workspaces filter by division and status.
 - Run Evaluation is soft-warned outside `EVALUATION`, not blocked.
 - Re-evaluate all sends `force=true` after confirmation.
 - Publish Hasil requires a single division filter, checked evaluated rows, active period, and `ANNOUNCEMENT` phase unless super_admin.
@@ -772,6 +836,8 @@ See [API_REFERENCE.md](API_REFERENCE.md#frontend-page-routes) for the full route
 - Recommended rows are highlighted when `is_recommended === true`.
 - Admin users page supports pagination/search/role/active controls.
 - Recruitment period page manages four phase boundaries and threshold.
+- Audit Logs and Admin Emails pages are super-admin-only read-only monitoring surfaces with filters and pagination.
+- Settings remains a documented placeholder.
 
 **Notable edge cases**
 

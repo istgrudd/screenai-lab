@@ -12,7 +12,7 @@
 
 - A **candidate self-service portal**: registration → profile → multi-document upload → review → submit.
 - A **phase-aware recruitment period**: `UPCOMING → SUBMISSION → EVALUATION → ANNOUNCEMENT → CLOSED`.
-- A **submit-time anonymization pipeline**: CV + Motivation Letter are anonymized through IndoBERT NER in a FastAPI BackgroundTask.
+- A **post-document-review anonymization pipeline**: CV + Motivation Letter are anonymized through IndoBERT NER only after recruiter/super_admin finalizes document review as accepted.
 - A **rubric-augmented LLM scoring pipeline**: cached anonymized candidate text, KHS summary, Motivation Letter, and division rubric are sent to the configured DeepSeek model for structured scoring.
 - A **recruiter / super-admin console**: filtering, evaluation, re-evaluation, score override, threshold highlight, manual checklist, and bulk announcement.
 
@@ -44,7 +44,7 @@ graph LR
             FE[frontend container<br/>nginx + React build<br/>port 80 published]
             API[backend container<br/>FastAPI + uvicorn<br/>port 8000 internal]
             DB[(db container<br/>PostgreSQL 16<br/>port 5432 internal)]
-            BG[FastAPI BackgroundTasks<br/>submit-time NER]
+            BG[FastAPI BackgroundTasks<br/>post-review NER]
 
             FE -- /api proxy --> API
             API <--> DB
@@ -86,11 +86,12 @@ browser HTTPS -> host Nginx/Caddy -> frontend container :80
 
 Key data paths:
 
-1. **Submit-time NER**: `submit_application` commits the application, then schedules a background task that opens its own `SessionLocal`, extracts CV + Motivation Letter, anonymizes text, and caches it in `candidate_documents.anonymized_text`.
-2. **Evaluation**: recruiter triggers `POST /api/recruiter/evaluate/batch`; the pipeline checks NER cache, falls back to inline NER when needed, parses KHS, validates KTM, builds a rubric-augmented prompt, awaits the async DeepSeek client, persists `DimensionScore`, and updates `Candidate.composite_score`.
-3. **Phase derivation**: `backend/utils/period_utils.py::get_current_phase` derives the active phase from calendar boundaries. No cron/scheduler is required.
-4. **Auth hardening**: password reset, admin reset, and authenticated profile password updates set `users.password_changed_at`; protected requests reject JWTs issued before that timestamp.
-5. **Announcement**: recruiter selects passing applications and calls `POST /api/announcements/bulk`; the backend updates pass/fail statuses atomically and writes `AuditLog` rows.
+1. **Document review gate**: `submit_application` commits the application into `document_review`; recruiter/super_admin reviews every required document and finalizes the application as either `verified` or `correction_requested`.
+2. **Post-review NER**: accepted finalization schedules a background task that opens its own `SessionLocal`, extracts CV + Motivation Letter, anonymizes text, and caches it in `candidate_documents.anonymized_text`. Rejected finalization does not run NER.
+3. **Evaluation**: recruiter triggers `POST /api/recruiter/evaluate/batch`; the pipeline targets `verified` applications, checks NER cache, falls back to inline NER when needed, parses KHS, validates KTM, builds a rubric-augmented prompt, awaits the async DeepSeek client, persists `DimensionScore`, and updates `Candidate.composite_score`.
+4. **Phase derivation**: `backend/utils/period_utils.py::get_current_phase` derives the active phase from calendar boundaries. No cron/scheduler is required.
+5. **Auth hardening**: password reset, admin reset-link completion, and authenticated profile password updates set `users.password_changed_at`; protected requests reject JWTs issued before that timestamp.
+6. **Announcements and notifications**: recruiter selects passing applications and calls `POST /api/announcements/bulk`; the backend updates pass/fail statuses atomically, writes `AuditLog` rows, and records non-blocking workflow email notification metadata.
 
 ---
 
@@ -179,19 +180,23 @@ screenai-lab/
 │   │   ├── candidate.py       — Candidate, CandidateDocument, DimensionScore
 │   │   ├── rubric.py          — Rubric + Dimension
 │   │   ├── period.py          — RecruitmentPeriod + current_phase property
-│   │   └── audit.py           — AuditLog
+│   │   ├── audit.py           — AuditLog
+│   │   └── email_notification.py — EmailNotification delivery log
 │   │
 │   ├── routers/
 │   │   ├── auth.py            — register / login / verify / forgot-reset / me / admin reset
 │   │   ├── users.py           — self-service profile + super-admin user management
-│   │   ├── applications.py    — application CRUD + submit + recruiter list
-│   │   ├── documents.py       — upload / list / download / verify
+│   │   ├── applications.py    — application CRUD + submit + document-review finalization + recruiter list
+│   │   ├── documents.py       — upload / list / download / review/verify
 │   │   ├── periods.py         — RecruitmentPeriod CRUD + active stats
 │   │   ├── rubrics.py         — rubric CRUD
 │   │   ├── candidates.py      — candidate detail + score override + history
 │   │   ├── evaluate_batch.py  — division-based batch evaluation
 │   │   ├── evaluation.py      — deprecated legacy /api/evaluate
 │   │   ├── upload.py          — deprecated legacy /api/upload
+│   │   ├── analytics.py       — active-period recruitment analytics
+│   │   ├── audit_logs.py      — super-admin audit listing
+│   │   ├── email_notifications.py — super-admin email notification log listing
 │   │   └── announcements.py   — individual + bulk announce + candidate result
 │   │
 │   ├── services/
@@ -205,7 +210,9 @@ screenai-lab/
 │   │   ├── anonymizer.py           — NER + regex anonymization
 │   │   ├── khs_parser.py           — KHS parser
 │   │   ├── ktm_validator.py        — KTM validator
-│   │   ├── submit_anonymization.py — BackgroundTask submit-time processing
+│   │   ├── document_review_service.py — document verification/rejection/correction rules
+│   │   ├── notification_service.py   — non-blocking workflow notification logging/sending
+│   │   ├── submit_anonymization.py — BackgroundTask post-review processing
 │   │   ├── evaluation_service.py   — full evaluation orchestration
 │   │   ├── rag_pipeline.py         — rubric-augmented prompt + DeepSeek JSON parsing
 │   │   ├── scoring.py              — persist scores + validate weights
@@ -341,17 +348,20 @@ Variables are defined in `.env.example`. Backend variables are read by `backend/
 
 ---
 
+Phase 12 implementation note: `applications.py` now owns final submit and document-review finalization, `documents.py` owns per-document review/verify operations, `document_review_service.py` owns verification/rejection/correction rules, `analytics.py` and `audit_logs.py` expose recruiter/admin observability, and `email_notifications.py` exposes the read-only Admin Emails monitoring endpoint. `submit_anonymization.py` now runs after accepted document-review finalization, not at candidate submit time.
+
 ## 8. Data Flow at a Glance
 
 1. **Sign-up & profile**: Candidate registers → email verification link issued → verified candidate can log in and receive a JWT.
 2. **Application creation**: Candidate selects division → `POST /api/applications` creates a `DRAFT` application.
 3. **Document uploads**: Six required document types are uploaded through `/api/documents/upload/{doc_type}` with size, MIME, and magic-byte validation.
-4. **Submit gate**: Submission requires an active period in `SUBMISSION` and all required documents. Status flips to `submitted`, file mutations are locked.
-5. **Submit-time NER**: BackgroundTask extracts/anonymizes CV + Motivation Letter and caches results.
-6. **Recruiter evaluation**: Batch evaluation checks cache, parses KHS, validates KTM, builds prompt, calls DeepSeek, stores scores, and moves application to `screening`.
-7. **Manual selection**: Recruiter checks candidates that pass.
-8. **Bulk publish**: Backend updates pass/fail statuses atomically and writes audit logs.
-9. **Candidate result**: Candidate dashboard/result page reads announcement status.
+4. **Submit gate**: Submission requires a complete profile, an active period in `SUBMISSION`, and all required documents. Status flips to `document_review`, file mutations are locked, and an `application_submitted` notification is logged.
+5. **Document review**: Recruiter/super_admin verifies or rejects each required document. Candidate-facing document decisions are masked until review finalization.
+6. **Correction or accepted finalization**: Rejected finalization moves the application to `correction_requested` and logs/sends `document_rejected`; accepted finalization moves it to `verified` and queues NER.
+7. **Post-review NER**: BackgroundTask extracts/anonymizes CV + Motivation Letter and caches results for verified applications.
+8. **Recruiter evaluation**: Batch evaluation targets `verified` applications, checks cache, parses KHS, validates KTM, builds prompt, calls DeepSeek, stores scores, and moves application to `screening`. `force=true` can re-evaluate `screening`.
+9. **Bulk publish**: Backend updates pass/fail statuses atomically, writes audit logs, and logs/sends `announcement_published`.
+10. **Candidate result**: Candidate status/result page reads announcement status.
 
 ---
 

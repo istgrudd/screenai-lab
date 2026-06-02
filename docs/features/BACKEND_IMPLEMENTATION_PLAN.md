@@ -463,9 +463,9 @@ Workflow notification emails:
 | Document rejected | Candidate | Recruiter rejects document |
 | Announcement published | Candidate | Single or bulk announcement |
 
-### Optional notification log
+### Notification log
 
-If operational tracking is needed, add:
+Implemented workflow notifications are logged in:
 
 ```text
 email_notifications
@@ -483,7 +483,7 @@ email_notifications
 
 ### Smoke test
 
-Script if notification logging is implemented:
+Script:
 
 ```text
 scripts/smoke_test_email_notifications.py
@@ -569,9 +569,9 @@ Implementation implications:
 - Document upload/list endpoints should resolve against the active draft, not cancelled applications.
 - Recruiter operational lists should omit `cancelled` by default unless a status filter explicitly requests it.
 
-### Smoke test
+### Deferred smoke test
 
-Script:
+No required Phase 12 script exists for this behavior. If draft reset/cancel is implemented later, add a targeted script such as:
 
 ```text
 scripts/smoke_test_draft_application_reset.py
@@ -1037,14 +1037,14 @@ announcement_fail
 Future endpoints:
 
 ```text
-GET /api/admin/email-templates
-GET /api/admin/email-templates/{key}
-PUT /api/admin/email-templates/{key}
+GET /api/admin/email-notifications
 ```
 
 Access:
 
 - Super admin only.
+- The current endpoint is read-only monitoring with notification type, status, recipient, date, and pagination filters.
+- Editable email templates remain deferred and would require separate database-backed template endpoints.
 
 ---
 
@@ -1087,9 +1087,9 @@ Expected Alembic migrations:
 - add document verification status fields
 - migrate existing `is_verified` values to review status
 
-### Migration 4 — Optional notification log
+### Migration 4 — Notification log
 
-- create email notification log table if notification tracking is implemented
+- create email notification log table
 
 ### Migration 5 — Optional email templates
 
@@ -1099,14 +1099,14 @@ Expected Alembic migrations:
 
 ## 14. Backend Smoke Test Strategy
 
-### Required new smoke scripts
+### Smoke scripts and deferred coverage
 
 | Feature | Script |
 |---|---|
 | Email verification | `scripts/smoke_test_email_verification.py` |
 | Forgot password | `scripts/smoke_test_forgot_password.py` |
 | Analytics | `scripts/smoke_test_analytics.py` |
-| Draft application reset | `scripts/smoke_test_draft_application_reset.py` |
+| Draft application reset | Deferred; no required script until reset/cancel endpoint behavior is clarified |
 | Document verification gate | `scripts/smoke_test_document_review_flow.py` |
 | Document rejection reason | `scripts/smoke_test_document_rejection.py` |
 | Audit log listing | `scripts/smoke_test_audit_logs.py` |
@@ -1233,7 +1233,7 @@ The first implementation cycle follows the locked decisions in `EXECUTION_PLAN.m
 | Register flow | Registration does not return a normal access token. User must verify email before normal login. |
 | Verification expiry | Verification link/code expires after 60 minutes. |
 | Forgot password session behavior | Successful password reset invalidates older sessions/tokens through `password_changed_at`. |
-| Admin reset password | Existing super-admin reset remains as a manual support fallback and should also update `password_changed_at`. |
+| Admin reset password | Existing super-admin reset remains as a manual support fallback that sends a reset link. `password_changed_at` updates after the target user completes the reset. |
 | Draft cancellation | Use `cancelled` status rather than hard delete. |
 | Rejected document replacement | Candidate can replace rejected documents while the application is in `correction_requested`. |
 | Analytics scope | Analytics defaults to the active recruitment period, with optional `period_id` override. |
@@ -1245,7 +1245,7 @@ The first implementation cycle follows the locked decisions in `EXECUTION_PLAN.m
 These decisions can be addressed after the first implementation cycle without blocking the current phases:
 
 1. Should changing email require a pending-email verification flow?
-2. Should email notifications be logged in the database from the first version, or added after email delivery is stable?
+2. Should account-critical verification/reset emails also be mirrored into `email_notifications`, or should the table remain workflow-notification-only?
 3. Should recruiter and super-admin accounts also require email verification in a later phase?
 4. Should all-period analytics or export/reporting be added after the active-period analytics endpoint is stable?
 

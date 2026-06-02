@@ -32,7 +32,7 @@ No other `TODO/FIXME/XXX/HACK` comments exist in `backend/` or `frontend/src/`.
 - [backend/routers/candidates.py](../backend/routers/candidates.py) now writes an `AuditLog(action_type="score_override")` row alongside each `DimensionScore` override. See [BATCH_2_REPORT.md](reports/BATCH_2_REPORT.md).
 
 ### ✅ Document verification has no audit trail — **Resolved in 2026-05-27 report**
-- [backend/routers/documents.py](../backend/routers/documents.py) now writes an `AuditLog(action_type="document_verification")` row when recruiter/super_admin users toggle `Document.is_verified`. The audit row records the acting recruiter, the owning candidate user, old/new verification values, and document context. See [DOCUMENT_VERIFICATION_AUDIT_REPORT.md](reports/DOCUMENT_VERIFICATION_AUDIT_REPORT.md).
+- [backend/routers/documents.py](../backend/routers/documents.py) now writes an `AuditLog(action_type="document_verification")` row when recruiter/super_admin users review or verify a document. The audit row records the acting recruiter, the owning candidate user, old/new review statuses such as `pending -> verified`, and document context. See [DOCUMENT_VERIFICATION_AUDIT_REPORT.md](reports/DOCUMENT_VERIFICATION_AUDIT_REPORT.md).
 
 ### ✅ Legacy endpoints not flagged deprecated (Task 14.4) — **Resolved in Batch 2**
 - `POST /api/upload` and `POST /api/evaluate` now set `Deprecation: true` headers and log a `warning` on each call. The Lab pipeline (`/api/documents/upload/{doc_type}` + `/api/recruiter/evaluate/batch`) is the supported path.
@@ -62,8 +62,8 @@ No other `TODO/FIXME/XXX/HACK` comments exist in `backend/` or `frontend/src/`.
 ### ✅ No DB-level uniqueness for `is_active=True` — **Resolved in Batch 3** (Postgres only)
 - Alembic migration [15e1fb0f5fe3_partial_unique_active_period](../backend/alembic/versions/15e1fb0f5fe3_partial_unique_active_period.py) adds a partial unique index `CREATE UNIQUE INDEX uq_one_active_period ON recruitment_periods (is_active) WHERE is_active = true` — Postgres only. On dev SQLite the application-level `_deactivate_others` guard remains authoritative.
 
-### 🟧 NER cache vs evaluation race (intended but worth flagging)
-- A candidate submitting at the last second triggers a BackgroundTask. If the recruiter clicks **Run Evaluation** before that task finishes, [evaluation_service.py:237](../backend/services/evaluation_service.py#L237) falls back to inline NER. This is the documented behaviour, not a bug — but it means the same CV may get NER'd twice in a tight race.
+### 🟧 Post-review NER cache vs evaluation race (intended but worth flagging)
+- Accepted document-review finalization triggers the NER BackgroundTask. If the recruiter clicks **Run Evaluation** before that task finishes, [evaluation_service.py](../backend/services/evaluation_service.py) falls back to inline NER for verified applications. This is documented behaviour, not a bug, but it means the same CV may get NER'd twice in a tight race.
 
 ### 🟦 Bulk announce phase bypass
 - `super_admin` can bulk-announce in any phase ([announcements.py:171](../backend/routers/announcements.py#L171)). This is intentional ("manual correction bypass"). Document it operationally so it doesn't surprise auditors.
@@ -83,7 +83,7 @@ No other `TODO/FIXME/XXX/HACK` comments exist in `backend/` or `frontend/src/`.
 
 ### 🟦 General logout token revocation is still limited
 - [backend/services/auth_service.py](../backend/services/auth_service.py) has no token blacklist. `POST /api/auth/logout` is a no-op server-side, so normal logout still depends on the client discarding its token.
-- Phase 4 hardening added `users.password_changed_at`: self-service password reset, admin reset, and authenticated profile password changes reject JWTs issued before the password change.
+- Phase 4/11 hardening uses `users.password_changed_at`: self-service password reset, admin-assisted reset-link completion, and authenticated profile password changes reject JWTs issued before the password change.
 - Remaining hardening: add a `token_blacklist` table or switch to short-lived access + refresh tokens for immediate logout/device revocation.
 
 ### ✅ `evaluate_batch` returns 422 for unknown ValueError — **Resolved in Batch 3**
@@ -94,8 +94,8 @@ No other `TODO/FIXME/XXX/HACK` comments exist in `backend/` or `frontend/src/`.
 
 ### ✅ No password reset flow — **Resolved in Phase 4 backend**
 - `POST /api/auth/forgot-password` and `POST /api/auth/reset-password` implement generic-response, one-time, expiring, hash-only reset links.
-- `POST /api/auth/admin/reset-password` remains as a super-admin fallback and now updates `password_changed_at`, invalidating older JWTs for the target user.
-- Frontend forgot/reset pages are still deferred to Phase 5.
+- `POST /api/auth/admin/reset-password` remains as a super-admin support fallback, but it sends a reset link rather than accepting a direct new password. The target user's `password_changed_at` updates after they complete the link.
+- Frontend forgot/reset pages are implemented.
 
 ---
 
@@ -107,8 +107,8 @@ No other `TODO/FIXME/XXX/HACK` comments exist in `backend/` or `frontend/src/`.
 ### ✅ No memoization in heavy components — **Resolved in Batch 5**
 - [DashboardPage.jsx](../frontend/src/pages/DashboardPage.jsx) wraps `scoredCount` / `topScore` / `evaluatedInView` / `failCount` / `evaluatedInSelectedDivision` in `useMemo`, and exposes a stable `useCallback` for the per-row checkbox handler. A checkbox toggle no longer recomputes the stats above it.
 
-### 🟨 No code splitting
-- All routes loaded eagerly. `npm run build` produces a single bundle. Phase 3 should add `React.lazy` for at least the admin tree (super_admin only ships the rest).
+### 🟨 No code splitting / Vite large chunk warning
+- All routes are still loaded eagerly. Phase 12 `npm run build` passes, but Vite reports the existing large chunk warning (`index` JS >500 kB after minification). Add route-level `React.lazy` or another safe code-splitting strategy in a separate frontend performance task.
 
 ### 🟨 ChromaDB persist directory grows unbounded
 - No cleanup on rubric delete, no eviction strategy. Today's pipeline doesn't actually use vector retrieval at evaluation time, so this is dormant — but if/when retrieval is wired in, plan for cleanup.
@@ -119,8 +119,8 @@ No other `TODO/FIXME/XXX/HACK` comments exist in `backend/` or `frontend/src/`.
 - Async retry backoff uses `asyncio.sleep`, not blocking `time.sleep`; the sync `call_llm` / `call_llm_json` path remains for compatibility.
 - The sync SQLAlchemy Session remains safe because DB operations happen in non-await sections of `_evaluate_one`. Expected N-candidate wall-clock for the LLM portion is approximately `ceil(N/5) × LLM_latency` instead of `N × LLM_latency`.
 
-### ✅ SWOT-text endpoint re-extracts every call — **Resolved in Batch 5**
-- [submit_anonymization.py](../backend/services/submit_anonymization.py) now extracts SWOT raw_text at submit-time and caches it on a `CandidateDocument(document_type="swot")` row. [GET /applications/{id}/swot-text](../backend/routers/applications.py) reads from this cache first; falls back to inline PyMuPDF if the cache row is missing (e.g. the submit-time task crashed before reaching SWOT).
+### ✅ SWOT-text endpoint re-extracts every call — **Resolved in Batch 5 / Phase 8 timing adjusted**
+- [submit_anonymization.py](../backend/services/submit_anonymization.py) extracts SWOT raw_text during post-accepted-review anonymization/cache processing and caches it on a `CandidateDocument(document_type="swot")` row. [GET /applications/{id}/swot-text](../backend/routers/applications.py) reads from this cache first; falls back to inline PyMuPDF if the cache row is missing.
 
 ---
 
@@ -157,6 +157,13 @@ No other `TODO/FIXME/XXX/HACK` comments exist in `backend/` or `frontend/src/`.
 
 ### ✅ Phase 1 invariant comment in `Application` model — **Resolved in Batch 5**
 - [backend/models/application.py:50-58](../backend/models/application.py#L50) — the stale "Periods aren't modelled yet" wording is gone. The comment now states the actual rule ("one application per candidate, period-agnostic") and explicitly flags the option to widen the constraint to `(user_id, period_id)` if multi-period candidates are ever needed.
+
+### Phase 12 final-regression limitations and follow-ups
+- Script-based regression, frontend lint/build, and route smoke are documented in the Phase 12 report.
+- Full authenticated manual browser E2E still needs seeded candidate/recruiter/super-admin credentials and representative uploaded files.
+- Indonesian-vs-English CV scoring consistency guardrails are present in `backend/services/rag_pipeline.py`; a live paired-CV scoring run remains a follow-up unless test LLM credentials and fixture CVs are available.
+- Vite large chunk warning remains a frontend performance follow-up; do not mix broad code splitting into Phase 12.
+- `scripts/smoke_test_draft_application_reset.py` does not exist and is not a required Phase 12 command; draft reset/cancel behavior should get a dedicated test only when the exact endpoint/workflow is clarified.
 
 ---
 
@@ -218,13 +225,27 @@ Target: a self-hosted VPS in the MBC Lab running three Docker containers (fronte
 - Every model change must produce an Alembic migration via `alembic revision --autogenerate -m "..."`. The lifespan `init_db()` calls `alembic upgrade head` on every boot — production will auto-apply pending migrations. Review before deploy.
 
 ### Smoke-test runner
-- `scripts/smoke_test_*.py` are stand-alone Python scripts; they hit `http://localhost:8000` directly. There is no `pytest` harness today. Run them sequentially after a clean DB to validate Phase 2 behaviour:
+- `scripts/smoke_test_*.py` are stand-alone Python scripts. There is no `pytest` harness today. Phase 12 validated them sequentially as module commands:
   ```
+  python -m compileall backend scripts
   python -m scripts.smoke_test_auth
-  python -m scripts.smoke_test_applications
-  python -m scripts.smoke_test_upload
+  python -m scripts.smoke_test_email_verification
+  python -m scripts.smoke_test_forgot_password
+  python -m scripts.smoke_test_token_invalidation
+  python -m scripts.smoke_test_admin_password_reset_link
   python -m scripts.smoke_test_periods
+  python -m scripts.smoke_test_period_safety
+  python -m scripts.smoke_test_phase_enforcement
+  python -m scripts.smoke_test_applications
+  python -m scripts.smoke_test_candidate_profile_completion
+  python -m scripts.smoke_test_document_review_flow
+  python -m scripts.smoke_test_document_rejection
+  python -m scripts.smoke_test_document_verification_audit
   python -m scripts.smoke_test_submit_ner
-  python -m scripts.smoke_test_bulk_announce
+  python -m scripts.smoke_test_ner_evaluation_flow
   python -m scripts.smoke_test_evaluation
+  python -m scripts.smoke_test_analytics
+  python -m scripts.smoke_test_audit_logs
+  python -m scripts.smoke_test_bulk_announce
+  python -m scripts.smoke_test_email_notifications
   ```

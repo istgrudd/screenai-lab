@@ -18,7 +18,7 @@ The detailed implementation documents live beside this file:
 
 ScreenAI Lab already supports the core recruitment flow: candidate registration, profile setup, application creation, document upload, final submission, recruiter evaluation, rubric-based scoring, manual review, and announcement publishing.
 
-However, the next development phase should improve the system from a working MVP into a more proper recruitment portal. The current system has three major areas that need refinement:
+Phase 1 through Phase 11 plus the frontend redesign have moved the system from a working MVP into a more complete recruitment portal. The remaining notes below describe the feature structure and deferred follow-ups after Phase 12 regression.
 
 1. **Frontend information architecture**
    - Candidate pages contain overlapping concepts, especially `Review`, `Status`, and `Result`.
@@ -27,13 +27,13 @@ However, the next development phase should improve the system from a working MVP
    - The recruiter dashboard currently carries too many responsibilities: application list, evaluation trigger, re-evaluation, bulk announcement, filters, phase warning, and candidate selection.
 
 2. **Account and authentication completeness**
-   - Registration does not yet include email verification.
-   - Self-service forgot password is not yet available.
-   - Admin-assisted password reset exists and should remain as a fallback, but it should not be the only recovery flow.
+   - Candidate registration requires email verification before login.
+   - Self-service forgot/reset password is available for all users.
+   - Admin-assisted password reset sends a reset link as a support fallback; direct admin-set-password is retired.
 
 3. **Operational and recruitment workflow completeness**
    - Recruiters need more focused pages for applications, evaluations, document verification, announcements, and analytics.
-   - Super admins need better visibility through audit logs and system-level settings.
+   - Super admins have audit logs and Admin Emails monitoring; global settings remain a placeholder/follow-up.
    - Candidates need clearer status/result feedback and better document rejection visibility.
 
 ---
@@ -198,11 +198,11 @@ The planned features are grouped into three categories:
 | Email verification with Resend | Candidate, Super Admin | P0 | Candidate must verify email before gaining full access. Admin can see verification status. |
 | Forgot password via email token | Candidate, Recruiter, Super Admin | P0 | All users can request a password reset link. Existing admin reset remains as fallback/manual support. |
 | Analytics dashboard | Recruiter, Super Admin | P1 | Displays recruitment statistics from the analytics API. |
-| Cancel/reset draft application | Candidate, Super Admin | P1 | Allows candidates to cancel or reset draft applications before final submission. |
+| Cancel/reset draft application | Candidate, Super Admin | P2 | Dedicated reset/cancel flow is deferred; do not require a Phase 12 smoke script until the behavior is clarified. |
 | Document rejection reason | Candidate, Recruiter, Super Admin | P1 | Recruiter can reject a document with a reason; candidate can see what needs to be fixed. |
 | Email notification lifecycle | Candidate, Recruiter, Super Admin | P1 | Sends emails for verification, reset password, successful submit, document rejection, and announcement publication. |
 | Audit log viewer page | Super Admin | P1 | UI for browsing audit log entries returned by the audit log API. |
-| Email templates/settings page | Super Admin | P2 | UI for editing or configuring email templates and notification behavior. |
+| Admin Emails monitoring | Super Admin | P1 | Read-only UI for workflow notification logs. Editable templates/resend workflows are deferred. |
 | Profile/edit consistency for all roles | Candidate, Recruiter, Super Admin | P1 | Ensures profile viewing and editing behave consistently across role-specific routes. |
 
 ---
@@ -417,7 +417,7 @@ Recommended scripts:
 |---|---|
 | Email verification | `scripts/smoke_test_email_verification.py` |
 | Forgot password | `scripts/smoke_test_forgot_password.py` |
-| Draft application reset | `scripts/smoke_test_draft_application_reset.py` |
+| Draft application reset | Deferred; no required script until reset/cancel endpoint behavior is clarified |
 | Document verification gate | `scripts/smoke_test_document_review_flow.py` |
 | Document rejection reason | `scripts/smoke_test_document_rejection.py` |
 | Analytics | `scripts/smoke_test_analytics.py` |
@@ -513,6 +513,7 @@ The first implementation cycle follows the locked decisions in `EXECUTION_PLAN.m
 | NER timing | NER anonymization runs only after required documents are verified/accepted. |
 | Analytics scope | Analytics defaults to the active recruitment period. |
 | Email templates | Hardcoded in backend service first; database-editable templates are deferred. |
+| Notification logging | Workflow notifications for application submission, finalized document rejection, and announcements are logged in `email_notifications`; failures do not roll back the main workflow. |
 | Smoke tests | Every backend/full-stack feature must include a targeted smoke test script. |
 
 ---

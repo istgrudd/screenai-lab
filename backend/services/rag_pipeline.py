@@ -34,7 +34,7 @@ ATURAN KETAT:
 5. Evidence harus berupa kutipan langsung atau parafrase dekat dari teks CV.
 6. CV dapat ditulis dalam Bahasa Indonesia, Bahasa Inggris, atau campuran keduanya. Evaluasi isi dan bukti kompetensinya secara setara terlepas dari bahasa yang digunakan.
 7. Jangan memberi bonus atau penalti hanya karena CV menggunakan Bahasa Indonesia atau Bahasa Inggris. Jika dua CV memiliki substansi pengalaman yang sama, skor yang diberikan harus konsisten.
-8. Petakan istilah Indonesia dan Inggris ke konsep kompetensi yang sama. Contoh: "Pembelajaran Mesin" setara dengan "Machine Learning", "Visi Komputer" setara dengan "Computer Vision", "Penambangan Data" setara dengan "Data Mining", "Ketua Pelaksana" setara dengan "Chief Organizer", dan "Wakil Koordinator/Head" setara dengan leadership responsibility.
+8. Petakan istilah Indonesia dan Inggris ke konsep kompetensi yang sama. Contoh: "Pembelajaran Mesin" setara dengan "Machine Learning", "Visi Komputer" setara dengan "Computer Vision", "Penambangan Data" setara dengan "Data Mining", "Ketua Pelaksana" setara dengan "Chief Organizer", "Asisten Riset" setara dengan "Research Assistant", dan "Magang Data Engineer" setara dengan "Data Engineer Intern".
 9. Kandidat adalah fresh graduate / entry-level — proyek akademik, tugas kuliah, skripsi, dan peran organisasi adalah bukti valid.
 10. Teks CV sudah dianonimisasi — abaikan token seperti [PERSON_1], [ORG_1], [LOC_1], dll.
 11. Profile summary HARUS ditulis dalam Bahasa Indonesia.
@@ -101,6 +101,11 @@ CATATAN FAIRNESS BAHASA:
 CV kandidat dapat ditulis dalam Bahasa Indonesia, Bahasa Inggris, atau campuran keduanya.
 Terapkan rubrik secara setara tanpa memberi bonus atau penalti berdasarkan bahasa yang digunakan.
 Sebelum memberi skor, petakan istilah lintas bahasa ke konsep kompetensi yang sama.
+Contoh mapping yang harus dianggap setara:
+- Pembelajaran Mesin = Machine Learning
+- Visi Komputer = Computer Vision
+- Penambangan Data = Data Mining
+- Ketua Pelaksana = Chief Organizer
 
 Jika dua CV memiliki substansi pengalaman, pencapaian, dampak, dan bukti kompetensi yang sama, skor harus tetap konsisten meskipun bahasa penulisannya berbeda.
 Nilai kandidat berdasarkan kekuatan bukti, relevansi pengalaman, kompleksitas tanggung jawab, dampak pencapaian, dan kesesuaian terhadap rubrik — bukan berdasarkan gaya bahasa atau pilihan bahasa CV.

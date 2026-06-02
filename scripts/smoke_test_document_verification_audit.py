@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 
 from backend.database import SessionLocal
 from backend.main import app as fastapi_app
-from backend.models.application import Application, Division
+from backend.models.application import Application, ApplicationStatus, Division
 from backend.models.audit import AuditLog
 from backend.models.document import Document, DocumentType
 from backend.models.user import User, UserRole
@@ -101,7 +101,11 @@ def main() -> int:
         db.refresh(recruiter)
         db.refresh(candidate)
 
-        app = Application(user_id=candidate.id, division=Division.BIG_DATA)
+        app = Application(
+            user_id=candidate.id,
+            division=Division.BIG_DATA,
+            status=ApplicationStatus.DOCUMENT_REVIEW,
+        )
         db.add(app)
         db.commit()
         db.refresh(app)
@@ -159,8 +163,8 @@ def main() -> int:
         _check(len(audits) == 1, f"exactly one audit row created (got {len(audits)})")
 
         audit = audits[0]
-        _check(audit.old_value == "False", f"audit old_value is False (got {audit.old_value})")
-        _check(audit.new_value == "True", f"audit new_value is True (got {audit.new_value})")
+        _check(audit.old_value == "pending", f"audit old_value is pending (got {audit.old_value})")
+        _check(audit.new_value == "verified", f"audit new_value is verified (got {audit.new_value})")
         _check(f"doc_id={doc_id}" in (audit.reason or ""), "audit reason includes doc id")
         _check("doc_type=supporting_docs" in (audit.reason or ""), "audit reason includes doc type")
     finally:

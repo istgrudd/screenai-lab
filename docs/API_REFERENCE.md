@@ -49,7 +49,7 @@ big_data | cyber_security | game_tech | gis
 ### Application status enum
 
 ```text
-draft | submitted | screening | announced_pass | announced_fail
+draft | submitted | document_review | correction_requested | verified | screening | announced_pass | announced_fail | cancelled
 ```
 
 ### Recruitment phase enum
@@ -504,7 +504,7 @@ Final submit. Irreversible from candidate side.
 
 **Response 200**
 
-Application object with `status="submitted"`.
+Application object with `status="document_review"` and candidate-safe document-review progress.
 
 **Required conditions**
 
@@ -512,14 +512,17 @@ Application object with `status="submitted"`.
 - Application status is `draft`.
 - There is an active recruitment period.
 - Active period's current phase is `SUBMISSION`.
+- Candidate profile is complete, including WhatsApp.
 - All six required documents exist.
 
 **Side effects**
 
-- Sets `status=submitted`.
+- Sets `status=document_review`.
 - Sets `submitted_at`.
 - Stamps `period_id` from active recruitment period.
-- Schedules `run_submit_anonymization(application_id, SessionLocal)` as a FastAPI BackgroundTask. The task opens and closes its own DB session.
+- Resets every submitted document to pending review.
+- Logs/sends the `application_submitted` workflow notification.
+- Does not run NER. NER is queued only after recruiter/super_admin finalizes document review as accepted.
 
 **Errors**
 
@@ -529,6 +532,30 @@ Application object with `status="submitted"`.
 - `403` no active recruitment period.
 - `403` current phase is not `SUBMISSION`.
 - `400` missing required documents; `detail` includes `missing` and `required` arrays.
+- `400` missing required profile fields; `detail` includes `missing_fields`.
+
+### Recruiter+ `POST /api/applications/{application_id}/finalize-document-review`
+
+Recruiter/super_admin finalizes document review for one application after every required document has been marked `verified` or `rejected`.
+
+**Response 200**
+
+Application object plus:
+
+```json
+{
+  "rejected_document_types": ["khs"],
+  "anonymization_queued": false
+}
+```
+
+**Rules and side effects**
+
+- Application must be in `document_review` or legacy `submitted`.
+- If all required documents are verified, application becomes `verified` and NER anonymization is queued in a background task.
+- If any required document is rejected, application becomes `correction_requested`; candidate can see rejected document types/reasons and can replace only those documents.
+- Finalized rejected review logs/sends `document_rejected` workflow notification.
+- Finalization writes `AuditLog(action_type="document_review_finalized")`.
 
 ### 🔐 `GET /api/applications/{application_id}/swot-text`
 
@@ -551,7 +578,7 @@ Returns plain text extracted from the uploaded SWOT PDF.
 
 | Value | Meaning |
 |---|---|
-| `cache` | Read from `CandidateDocument.raw_text` created by submit-time processing |
+| `cache` | Read from `CandidateDocument.raw_text` created by post-verification anonymization/cache processing |
 | `live` | Cache missing; backend fell back to inline PyMuPDF extraction |
 
 **Rules**
@@ -622,13 +649,56 @@ Candidate-owned pipeline records. Scores are redacted until `Candidate.status ==
 
 ---
 
+## Recruiter Analytics (`/api/recruiter/analytics`)
+
+Source: [`backend/routers/analytics.py`](../backend/routers/analytics.py)
+
+### Recruiter+ `GET /api/recruiter/analytics`
+
+Returns active-period recruitment metrics for recruiter and super_admin dashboards. Candidate access returns `403`.
+
+**Query**
+
+| Param | Meaning |
+|---|---|
+| `division` | optional Division enum filter |
+
+**Response 200**
+
+```json
+{
+  "active_period": { "id": 1, "name": "MBC Recruitment 2026", "current_phase": "SUBMISSION" },
+  "filters": { "division": null },
+  "summary": {
+    "total_applications": 12,
+    "submitted_or_later": 10,
+    "total_verified": 3,
+    "total_evaluated": 2,
+    "total_announced": 0,
+    "total_correction_requested": 1,
+    "average_score": 78.5
+  },
+  "applicants_per_division": [],
+  "funnel_counts": {},
+  "document_completeness": {},
+  "missing_documents_by_type": [],
+  "evaluation_progress": {},
+  "score_distribution": {},
+  "demographics": {}
+}
+```
+
+If there is no active period, the endpoint still returns `200` with zeroed metrics and `active_period: null`.
+
+---
+
 ## Documents (`/api/documents/*`)
 
 Source: [`backend/routers/documents.py`](../backend/routers/documents.py), [`backend/utils/file_storage.py`](../backend/utils/file_storage.py)
 
 ### 👤 `POST /api/documents/upload/{doc_type}`
 
-Uploads or replaces one document for the candidate's draft application.
+Uploads or replaces one document for the candidate's draft application. During `correction_requested`, the same endpoint can replace only an existing rejected document type.
 
 **Path `doc_type`**
 
@@ -654,7 +724,10 @@ file=<File>
   "file_name": "cv.pdf",
   "file_size": 123456,
   "uploaded_at": "2026-05-27T00:00:00+00:00",
-  "is_verified": false
+  "is_verified": false,
+  "verification_status": "pending",
+  "rejection_reason": null,
+  "review_visibility": "visible"
 }
 ```
 
@@ -674,7 +747,7 @@ The backend validates both declared MIME and magic bytes/file signature for supp
 **Errors**
 
 - `404` no application exists.
-- `403` application is no longer draft.
+- `403` application is no longer draft, except rejected-document replacement during `correction_requested`.
 - `415` unsupported MIME.
 - `413` file too large.
 - `400` empty file or content does not match declared type.
@@ -683,10 +756,12 @@ The backend validates both declared MIME and magic bytes/file signature for supp
 
 Replaces an existing uploaded document. Same validation as upload.
 
+During `correction_requested`, only documents with `verification_status="rejected"` are replaceable. Replacement resets the document to `pending`, clears rejection reason/reviewer metadata, invalidates stale NER cache where applicable, and returns the application to `document_review` when no rejected documents remain.
+
 **Errors**
 
 - `404` doc not found.
-- `403` not owner or application already submitted.
+- `403` not owner, locked application, or non-rejected document during correction.
 
 ### 🔐 `GET /api/documents/{application_id}`
 
@@ -704,9 +779,27 @@ Streams raw file via `FileResponse`.
 - `403` not allowed.
 - `410` DB row exists but file missing on disk.
 
+### Recruiter+ `PUT /api/documents/{doc_id}/review`
+
+Recruiter/super_admin marks one document as `verified` or `rejected`.
+
+**Body**
+
+```json
+{ "status": "rejected", "reason": "KHS tidak terbaca dengan jelas." }
+```
+
+**Rules and side effects**
+
+- Application must be in `document_review` or legacy `submitted`.
+- `status` must be `verified` or `rejected`.
+- `reason` is required for rejected documents.
+- Candidate document listing masks in-flight per-document decisions before finalization.
+- Writes `AuditLog(action_type="document_verification")`.
+
 ### 👀 `PUT /api/documents/{doc_id}/verify`
 
-Recruiter/super_admin toggles verification flag.
+Compatibility endpoint that marks a document verified. It delegates to the same document-review service as `/review`.
 
 **Body**
 
@@ -714,12 +807,13 @@ Recruiter/super_admin toggles verification flag.
 { "is_verified": true }
 ```
 
-Used mainly for supporting documents manual verification.
+`is_verified=false` is rejected; use `PUT /api/documents/{doc_id}/review` for rejection or future status changes.
 
 **Side effects**
 
 - Writes `AuditLog(action_type="document_verification")` in the same transaction.
-- Response shape is unchanged; no frontend-supplied reason is required.
+- Application must be in `document_review` or legacy `submitted`.
+- Response shape is unchanged; no frontend-supplied reason is required for verification.
 
 ---
 
@@ -729,7 +823,7 @@ Source: [`backend/routers/periods.py`](../backend/routers/periods.py)
 
 ### 👑 `POST /api/periods`
 
-Creates a new active recruitment period and deactivates other periods in the same transaction.
+Creates a new active recruitment period.
 
 **Body**
 
@@ -751,6 +845,7 @@ Creates a new active recruitment period and deactivates other periods in the sam
 **Errors**
 
 - `400` start date is not in the future.
+- `409` another active period already exists. Close it explicitly before creating/activating another active period.
 - `422` invalid date order. Required order: `start < submission_end < evaluation_end < end`.
 
 ### 🔓 `GET /api/periods/active`
@@ -796,7 +891,7 @@ name | end_date | submission_end_date | evaluation_end_date | threshold_n | is_a
 
 `start_date` is immutable after creation.
 
-Setting `is_active=true` deactivates other periods in the same transaction.
+Setting `is_active=true` is blocked with `409` while another active period exists. Close the current active period explicitly first.
 
 ### 👑 `PUT /api/periods/{period_id}/close`
 
@@ -944,9 +1039,10 @@ Non-standard envelope:
 
 **Rules**
 
-- Always restricted to applications in selected division with status `submitted`.
+- Normal evaluation targets applications in selected division with status `verified`.
 - `force=false`: skip applications whose linked candidate already has `composite_score`.
-- `force=true`: re-score already-scored candidates, but still only if application status is `submitted`.
+- `force=true`: re-score eligible already-scored candidates in `verified` or `screening` status.
+- `draft`, `submitted`, `document_review`, `correction_requested`, `cancelled`, and announced applications are skipped.
 - Successful application evaluations move application status to `screening`.
 - Evaluation outside `EVALUATION` phase is allowed but returns a soft `warning`.
 
@@ -1056,6 +1152,101 @@ Candidate result endpoint.
 
 ---
 
+## Admin Audit Logs (`/api/admin/audit-logs`)
+
+Source: [`backend/routers/audit_logs.py`](../backend/routers/audit_logs.py)
+
+### Super Admin `GET /api/admin/audit-logs`
+
+Read-only audit log listing for super-admin oversight.
+
+**Query**
+
+| Param | Meaning |
+|---|---|
+| `page` | 1-indexed page, default 1 |
+| `limit` | 1-100, default 20 |
+| `action_type` | exact audit action filter |
+| `recruiter_id` | actor user id |
+| `candidate_id` | affected user id stored in `AuditLog.candidate_id` |
+| `date_from` | ISO date/datetime lower bound |
+| `date_to` | ISO date/datetime upper bound |
+
+**Response 200**
+
+```json
+{
+  "page": 1,
+  "limit": 20,
+  "total": 1,
+  "items": [
+    {
+      "id": 10,
+      "action_type": "document_verification",
+      "actor": { "user_id": 2, "email": "recruiter@example.com", "role": "recruiter" },
+      "affected_user": { "user_id": 8, "email": "candidate@example.com", "nim": "103..." },
+      "old_value": "pending",
+      "new_value": "verified",
+      "reason": "doc_id=99; doc_type=cv",
+      "timestamp": "2026-06-02T05:00:00Z"
+    }
+  ]
+}
+```
+
+Recruiter and candidate access returns `403`. Sensitive text markers are redacted from audit text fields.
+
+---
+
+## Admin Email Notifications (`/api/admin/email-notifications`)
+
+Source: [`backend/routers/email_notifications.py`](../backend/routers/email_notifications.py)
+
+### Super Admin `GET /api/admin/email-notifications`
+
+Read-only workflow notification delivery log used by the Admin Emails monitoring page.
+
+**Query**
+
+| Param | Meaning |
+|---|---|
+| `page` | 1-indexed page, default 1 |
+| `limit` | 1-100, default 20 |
+| `notification_type` | exact type, e.g. `application_submitted`, `document_rejected`, `announcement_published` |
+| `status` | `sent`, `captured`, `failed`, or `disabled` |
+| `to_email` | recipient substring |
+| `date_from` | ISO date/datetime lower bound |
+| `date_to` | ISO date/datetime upper bound |
+
+**Response 200**
+
+```json
+{
+  "page": 1,
+  "limit": 20,
+  "total": 1,
+  "summary": { "total": 1, "sent": 0, "captured": 1, "failed": 0, "disabled": 0 },
+  "config": { "provider": "disabled", "email_enabled": false, "environment": "development" },
+  "items": [
+    {
+      "id": 1,
+      "notification_type": "application_submitted",
+      "to_email": "candidate@example.com",
+      "subject": "Aplikasi ScreenAI Lab berhasil dikirim",
+      "provider": "disabled",
+      "status": "captured",
+      "created_at": "2026-06-02T05:00:00Z",
+      "sent_at": "2026-06-02T05:00:00Z",
+      "related_application_id": 12
+    }
+  ]
+}
+```
+
+The table intentionally stores metadata only, not email bodies, reset links, verification links, JWTs, secrets, or raw provider payloads. Workflow notification failures are non-blocking: application submit, document review finalization, and announcement publish continue while the failed/captured/disabled delivery result is logged. Recruiter and candidate access returns `403`.
+
+---
+
 ## Legacy Compatibility Endpoints
 
 These endpoints are **not the Lab pipeline** and should not be used by new code. They remain mounted temporarily for Capstone compatibility, old scripts, or debugging comparisons.
@@ -1112,18 +1303,39 @@ Source: [`frontend/src/App.jsx`](../frontend/src/App.jsx)
 |---|---|---|
 | `/login` | LoginPage | public |
 | `/register` | RegisterPage | public |
+| `/verify-email` | VerifyEmailPage | public |
+| `/forgot-password` | ForgotPasswordPage | public |
+| `/reset-password` | ResetPasswordPage | public |
 | `/` | Recruiter dashboard or candidate redirect | any authenticated |
 | `/dashboard` | Candidate dashboard | candidate |
 | `/profile` | Candidate profile | candidate |
+| `/profile/edit` | Candidate edit profile | candidate |
+| `/application` | Application overview | candidate |
+| `/application/start` | Start/select division | candidate |
 | `/documents` | Candidate document wizard | candidate |
-| `/review` | Final review | candidate |
-| `/submitted` | Submitted confirmation | candidate |
-| `/result` | Candidate result | candidate |
+| `/application/review` | Final application review | candidate |
+| `/application/status` | Unified status/result page | candidate |
+| `/review` | Legacy redirect to review/status | candidate |
+| `/submitted` | Redirect to `/application/status` | candidate |
+| `/result` | Redirect to `/application/status` | candidate |
 | `/my-applications` | Candidate application history | candidate |
 | `/upload` | Legacy upload page | candidate |
+| `/recruiter/dashboard` | Recruiter overview | recruiter, super_admin |
+| `/recruiter/applications` | Recruiter applications | recruiter, super_admin |
+| `/recruiter/evaluation` | Evaluation workspace | recruiter, super_admin |
+| `/recruiter/candidates` | Scored candidates | recruiter, super_admin |
+| `/recruiter/documents` | Document verification | recruiter, super_admin |
+| `/recruiter/announcements` | Announcements | recruiter, super_admin |
+| `/recruiter/analytics` | Active-period analytics | recruiter, super_admin |
 | `/rubrics` | Rubric config | recruiter, super_admin |
 | `/candidates/:id` | Candidate detail | recruiter, super_admin |
 | `/recruiter/profile` | Recruiter profile | recruiter, super_admin |
+| `/recruiter/profile/edit` | Recruiter edit profile | recruiter, super_admin |
+| `/admin/dashboard` | Admin overview | super_admin |
 | `/admin/users` | User management | super_admin |
 | `/admin/periods` | Recruitment period management | super_admin |
+| `/admin/audit-logs` | Audit log listing | super_admin |
+| `/admin/email-templates` | Admin Emails monitoring | super_admin |
+| `/admin/settings` | Settings placeholder | super_admin |
 | `/admin/profile` | Admin profile | super_admin |
+| `/admin/profile/edit` | Admin edit profile | super_admin |

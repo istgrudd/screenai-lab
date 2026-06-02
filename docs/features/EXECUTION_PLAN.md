@@ -217,7 +217,7 @@ The phase is considered complete only after:
 | Phase 9   | Full-stack           | Analytics API + analytics dashboard                                                               | `smoke_test_analytics.py` + frontend build                          |
 | Phase 10  | Full-stack           | Audit log listing + admin audit page                                                              | `smoke_test_audit_logs.py`                                          |
 | Phase 11  | Full-stack           | Email notifications lifecycle                                                                     | `smoke_test_email_notifications.py`                                 |
-| Phase 12  | Regression           | Final cleanup, docs, regression suite                                                             | all smoke tests + frontend build                                    |
+| Phase 12  | Regression           | Final cleanup, docs, regression suite                                                             | all smoke tests + frontend lint/build                               |
 
 ---
 
@@ -1970,7 +1970,7 @@ Must verify:
 
 ---
 
-# Phase 12 — Final Regression and Documentation Update
+# Phase 12 — Final Regression, Manual E2E Validation, and Documentation Update
 
 ## Type
 
@@ -1978,126 +1978,448 @@ Regression/docs.
 
 ## Goal
 
-Ensure all feature phases work together and documentation reflects the final implemented behavior.
+Ensure all implemented feature phases work together as one stable recruitment system, and ensure documentation reflects the final implemented behavior after Phase 1 through Phase 11 and the frontend redesign.
 
-This phase also validates final evaluation consistency, including multilingual CV fairness, so semantically equivalent Indonesian and English CVs are not scored differently only because of language choice.
+Phase 12 is not a new feature phase. It is a final verification, cleanup, documentation, and readiness phase before the application is considered stable enough for deployment/demo/testing with real users.
+
+This phase separates validation into:
+
+1. script-based regression tests;
+2. frontend build/lint checks;
+3. manual browser-based end-to-end tests;
+4. multilingual evaluation fairness check;
+5. documentation synchronization;
+6. final Phase 12 report.
+
+---
 
 ## Scope
 
-Phase 12 is not intended for large new feature development.
+Phase 12 is intended for regression validation and final cleanup only.
 
 Allowed changes:
 
-- regression fixes;
+- regression bug fixes;
+- missing/incorrect smoke test fixes;
 - documentation updates;
 - UI copy consistency improvements;
-- minor prompt hardening;
 - minor frontend consistency fixes;
+- minor evaluation prompt hardening;
 - test hardening;
-- bug fixes found during full regression.
+- final report creation.
 
 Out of scope:
 
 - new major feature flows;
-- email resend workflow;
 - editable email templates;
-- analytics historical period selector;
-- export CSV/PDF features;
+- email resend workflow for logged workflow notifications;
+- historical analytics period selector;
+- CSV/PDF export features;
 - major frontend redesign beyond consistency/readability fixes;
-- changing core recruitment workflow semantics.
+- changing core recruitment workflow semantics;
+- changing the document verification lifecycle;
+- changing the NER/evaluation timing model;
+- adding multi-period candidate re-application unless explicitly planned in a later phase.
 
-## Required Commands
+---
 
-Backend smoke tests:
+## Important Phase 12 Decision
+
+The previous Phase 12 plan referenced:
+
+```bash
+python -m scripts.smoke_test_draft_application_reset
+````
+
+This script is not currently part of the implemented smoke test set.
+
+For the revised Phase 12:
+
+* do not make `smoke_test_draft_application_reset` a required command unless the script is actually created in this phase;
+* if draft reset/cancel behavior still needs dedicated coverage, create a new smoke script intentionally and document it in the Phase 12 report;
+* otherwise, document that draft reset/cancel behavior is covered by existing application/status tests or remains a future targeted test.
+
+---
+
+## Required Script-Based Regression Tests
+
+Run these from the repository root unless stated otherwise.
+
+### 1. Backend Syntax / Compile Check
+
+```bash
+python -m compileall backend scripts
+```
+
+This catches syntax/import-level issues before running workflow smoke tests.
+
+---
+
+### 2. Authentication and Account Lifecycle
 
 ```bash
 python -m scripts.smoke_test_auth
 python -m scripts.smoke_test_email_verification
 python -m scripts.smoke_test_forgot_password
 python -m scripts.smoke_test_token_invalidation
-python -m scripts.smoke_test_applications
-python -m scripts.smoke_test_draft_application_reset
-python -m scripts.smoke_test_document_review_flow
-python -m scripts.smoke_test_document_rejection
-python -m scripts.smoke_test_analytics
-python -m scripts.smoke_test_audit_logs
-python -m scripts.smoke_test_email_notifications
-python -m scripts.smoke_test_evaluation
-python -m scripts.smoke_test_bulk_announce
-````
-
-Evaluation and prompt-related regression:
-
-```bash
-python -m scripts.smoke_test_evaluation
-python -m scripts.smoke_test_ner_evaluation_flow
+python -m scripts.smoke_test_admin_password_reset_link
 ```
 
-Frontend:
+Must verify:
+
+* candidate registration works;
+* candidate email verification is required before login;
+* verification code/link behavior is safe;
+* forgot password returns generic responses;
+* reset password invalidates old tokens;
+* admin-assisted password reset link works as intended;
+* old JWTs are rejected after password changes.
+
+---
+
+### 3. Recruitment Period and Phase Enforcement
 
 ```bash
-cd frontend
+python -m scripts.smoke_test_periods
+python -m scripts.smoke_test_period_safety
+python -m scripts.smoke_test_phase_enforcement
+```
+
+Must verify:
+
+* recruitment period CRUD still works;
+* only one active recruitment period is allowed;
+* super admin cannot accidentally create/activate a conflicting active period;
+* candidate application creation, draft upload, draft replacement, and final submit are blocked outside `SUBMISSION`;
+* correction replacement remains allowed for rejected documents when the application is in `correction_requested`.
+
+---
+
+### 4. Candidate Application, Profile Completion, and Document Review
+
+```bash
+python -m scripts.smoke_test_applications
+python -m scripts.smoke_test_candidate_profile_completion
+python -m scripts.smoke_test_document_review_flow
+python -m scripts.smoke_test_document_rejection
+python -m scripts.smoke_test_document_verification_audit
+```
+
+Must verify:
+
+* candidate can create application during valid submission phase;
+* final submit requires complete candidate profile;
+* final submit requires all required documents;
+* final submit moves application to `document_review`;
+* documents start as pending review;
+* recruiter/super admin can verify documents;
+* recruiter/super admin can reject documents with reason;
+* rejected documents move the application to `correction_requested` after finalization;
+* candidate can replace only rejected documents;
+* replacement resets document review state;
+* document verification/rejection writes audit information where expected;
+* candidate cannot see in-flight per-document decisions before review finalization.
+
+---
+
+### 5. NER and Evaluation Flow
+
+```bash
+python -m scripts.smoke_test_submit_ner
+python -m scripts.smoke_test_ner_evaluation_flow
+python -m scripts.smoke_test_evaluation
+```
+
+Must verify:
+
+* candidate submit does not immediately run NER;
+* individual document review does not run NER;
+* finalized accepted document review moves the application to `verified`;
+* accepted finalization queues or prepares post-verification anonymization;
+* rejected/correction applications do not run NER;
+* replacement documents invalidate stale cache where applicable;
+* evaluation normally targets `verified` applications;
+* force evaluation can include `screening` applications;
+* evaluation skips `draft`, `document_review`, `correction_requested`, `cancelled`, and announced statuses;
+* evaluation result shape remains valid.
+
+---
+
+### 6. Analytics, Audit Logs, Announcements, and Email Notifications
+
+```bash
+python -m scripts.smoke_test_analytics
+python -m scripts.smoke_test_audit_logs
+python -m scripts.smoke_test_bulk_announce
+python -m scripts.smoke_test_email_notifications
+```
+
+Must verify:
+
+* analytics endpoint works for recruiter and super admin;
+* candidate cannot access analytics;
+* analytics defaults to active recruitment period;
+* empty/no-active-period states are safe;
+* audit log listing is super-admin-only;
+* audit log filters and pagination work;
+* announcement publish/bulk publish works;
+* announcement notification logs are created;
+* application submitted notification logs are created;
+* document rejected notification logs are created only after final document review finalization;
+* email disabled/captured mode works;
+* email provider failure does not roll back the main recruitment workflow.
+
+---
+
+## Frontend Validation Commands
+
+Run from `frontend/`.
+
+```bash
+npm run lint
 npm run build
 ```
 
-Optional backend compile check:
+Must verify:
+
+* frontend lint passes;
+* production build passes;
+* existing Vite large chunk warning may remain documented as a known limitation;
+* no route guard, API helper, or role navigation import is broken.
+
+Optional route smoke check with frontend dev server running:
 
 ```bash
-python -m compileall backend scripts
+# Public/auth routes
+curl -I http://127.0.0.1:5173/login
+curl -I http://127.0.0.1:5173/register
+curl -I http://127.0.0.1:5173/forgot-password
+curl -I http://127.0.0.1:5173/reset-password
+curl -I http://127.0.0.1:5173/verify-email
+
+# Candidate routes
+curl -I http://127.0.0.1:5173/dashboard
+curl -I http://127.0.0.1:5173/application
+curl -I http://127.0.0.1:5173/application/start
+curl -I http://127.0.0.1:5173/documents
+curl -I http://127.0.0.1:5173/application/review
+curl -I http://127.0.0.1:5173/application/status
+curl -I http://127.0.0.1:5173/profile
+curl -I http://127.0.0.1:5173/profile/edit
+
+# Recruiter routes
+curl -I http://127.0.0.1:5173/recruiter/dashboard
+curl -I http://127.0.0.1:5173/recruiter/applications
+curl -I http://127.0.0.1:5173/recruiter/documents
+curl -I http://127.0.0.1:5173/recruiter/evaluation
+curl -I http://127.0.0.1:5173/recruiter/candidates
+curl -I http://127.0.0.1:5173/recruiter/announcements
+curl -I http://127.0.0.1:5173/recruiter/analytics
+
+# Admin routes
+curl -I http://127.0.0.1:5173/admin/dashboard
+curl -I http://127.0.0.1:5173/admin/users
+curl -I http://127.0.0.1:5173/admin/periods
+curl -I http://127.0.0.1:5173/admin/audit-logs
+curl -I http://127.0.0.1:5173/admin/email-templates
+curl -I http://127.0.0.1:5173/admin/settings
 ```
+
+Route smoke only verifies that the SPA shell resolves. It does not replace authenticated browser E2E testing.
+
+---
 
 ## Manual Regression Checklist
 
-Check the full recruitment lifecycle manually:
+Manual testing is required for browser behavior, visual quality, role navigation, file preview/upload, copywriting, and full multi-role workflow confidence.
 
-1. Candidate registration and email verification.
-2. Candidate login after email verification.
-3. Candidate profile completion requirement.
-4. Candidate application creation.
-5. Candidate document upload.
-6. Candidate final submit.
-7. Application submitted email notification/log.
-8. Recruiter/super admin document verification.
-9. Document rejection and correction flow.
-10. Document rejected email notification/log after finalize.
-11. Candidate document replacement after correction request.
-12. Finalized accepted document review triggers NER/evaluation readiness.
-13. Evaluation batch flow.
-14. Evaluation result display.
-15. Score override and audit log.
-16. Announcement pass/fail.
-17. Announcement email notification/log.
-18. Candidate announcement visibility.
-19. Analytics dashboard.
-20. Audit log page.
-21. Admin Emails monitoring page.
-22. Role protection for candidate, recruiter, and super admin routes.
+### 1. Candidate Manual Flow
+
+Test with a candidate account.
+
+Checklist:
+
+1. Register candidate account.
+2. Confirm register does not auto-login.
+3. Verify email.
+4. Login after verification.
+5. Confirm incomplete profile redirects or guides candidate to `/profile/edit`.
+6. Complete required profile fields:
+
+   * full name;
+   * email;
+   * NIM;
+   * faculty;
+   * major;
+   * year;
+   * WhatsApp.
+7. Start application during `SUBMISSION` phase.
+8. Select division.
+9. Upload all required documents.
+10. Confirm document upload UI states:
+
+    * loading;
+    * success;
+    * error;
+    * invalid file;
+    * replacement if applicable.
+11. Open review page.
+12. Final submit.
+13. Confirm application moves to document review/status page.
+14. Confirm candidate cannot see in-flight per-document recruiter decisions before finalization.
+15. After recruiter rejection finalization, confirm candidate sees:
+
+    * rejected document type;
+    * rejection reason;
+    * correction instruction;
+    * replace action only for rejected document.
+16. Replace rejected document.
+17. Confirm application returns to `document_review`.
+18. After accepted finalization/evaluation/announcement, confirm candidate can see final announcement result.
+
+---
+
+### 2. Recruiter Manual Flow
+
+Test with a recruiter account.
+
+Checklist:
+
+1. Login as recruiter.
+2. Open recruiter dashboard.
+3. Open applications page.
+4. Confirm filters/table/status badges are readable.
+5. Open document verification page.
+6. Preview candidate PDF/image documents.
+7. Verify one or more documents.
+8. Reject one document with a clear reason.
+9. Finalize document review.
+10. Confirm application becomes `correction_requested` when any required document is rejected.
+11. Confirm document rejected email notification is logged only after finalization.
+12. After candidate replacement, review replacement document.
+13. Finalize accepted review.
+14. Confirm application becomes `verified`.
+15. Run evaluation batch.
+16. Confirm evaluated candidate appears in candidates/evaluation result view.
+17. Confirm force re-evaluation works for `screening` candidates if available.
+18. Publish pass/fail announcement.
+19. Confirm announcement notification is logged.
+20. Confirm candidate announcement visibility.
+
+---
+
+### 3. Super Admin Manual Flow
+
+Test with a super admin account.
+
+Checklist:
+
+1. Login as super admin.
+2. Open admin dashboard.
+3. Open users page.
+4. Test user management actions that are safe for the local test environment.
+5. Test assisted password reset link flow.
+6. Open recruitment periods page.
+7. Create recruitment period.
+8. Confirm active period safety:
+
+   * cannot create/activate another active period while one is active;
+   * explicit close still works.
+9. Open audit logs page.
+10. Test audit filters:
+
+    * action type;
+    * actor ID;
+    * affected user ID;
+    * date range;
+    * pagination.
+11. Open Admin Emails monitoring page.
+12. Test email notification filters:
+
+    * type;
+    * status;
+    * recipient;
+    * date range;
+    * pagination.
+13. Confirm Admin Emails page is read-only.
+14. Confirm Settings page remains placeholder or documented as follow-up if backend settings are not implemented.
+
+---
+
+### 4. Manual Role Protection Checks
+
+Check route protection through browser and/or API.
+
+Candidate should not access:
+
+```text
+/recruiter/dashboard
+/recruiter/applications
+/recruiter/documents
+/recruiter/evaluation
+/recruiter/analytics
+/admin/dashboard
+/admin/users
+/admin/periods
+/admin/audit-logs
+/admin/email-templates
+```
+
+Recruiter should not access:
+
+```text
+/admin/dashboard
+/admin/users
+/admin/periods
+/admin/audit-logs
+/admin/email-templates
+/admin/settings
+```
+
+Super admin should access admin pages and allowed recruitment monitoring pages.
+
+Expected result:
+
+* unauthorized page access redirects, blocks, or shows a safe unauthorized state;
+* unauthorized API access returns `403`;
+* no sensitive data is rendered before access denial.
+
+---
 
 ## Evaluation Fairness / Multilingual CV Consistency
 
-Phase 12 must include a final check for language-related evaluation consistency.
+Phase 12 must include a final multilingual fairness check.
 
-Background:
+### Required Source Check
 
-A manual test found that semantically equivalent Indonesian and English CV variants could produce different evaluation scores, even when the underlying content was the same. This may be caused by prompt sensitivity, rubric-language alignment, terminology mapping, extraction differences, or LLM scoring bias.
+Verify that `backend/services/rag_pipeline.py` includes:
 
-Required adjustment:
+* multilingual fairness rules in `SYSTEM_PROMPT`;
+* a fairness note in `_build_user_prompt()`;
+* instruction not to reward or penalize CV language choice;
+* instruction to map equivalent Indonesian and English competency terms.
 
-* Ensure `SYSTEM_PROMPT` in `backend/services/rag_pipeline.py` contains multilingual fairness guardrails.
-* Ensure `_build_user_prompt()` includes a fairness note explaining that Indonesian and English CVs should be evaluated equivalently when the evidence is semantically the same.
-* The evaluator must not reward or penalize candidates based only on whether the CV is written in Bahasa Indonesia, English, or mixed language.
-* The evaluator should map equivalent terms across languages before scoring, for example:
+Equivalent examples:
 
-  * “Pembelajaran Mesin” = “Machine Learning”
-  * “Visi Komputer” = “Computer Vision”
-  * “Penambangan Data” = “Data Mining”
-  * “Ketua Pelaksana” = “Chief Organizer”
-  * “Asisten Riset” = “Research Assistant”
-  * “Magang Data Engineer” = “Data Engineer Intern”
+```text
+Pembelajaran Mesin = Machine Learning
+Visi Komputer = Computer Vision
+Penambangan Data = Data Mining
+Ketua Pelaksana = Chief Organizer
+Asisten Riset = Research Assistant
+Magang Data Engineer = Data Engineer Intern
+```
 
-Manual validation recommendation:
+### Manual Validation
 
-Evaluate two CVs with equivalent content but different languages using the same rubric.
+Prepare two CV variants:
+
+1. Bahasa Indonesia CV;
+2. English CV.
+
+Both must contain equivalent experience, achievements, responsibilities, and evidence.
+
+Evaluate both with the same rubric.
 
 Compare:
 
@@ -2109,58 +2431,70 @@ evidence
 profile_summary
 ```
 
-Expected behavior:
+Expected result:
 
-* Scores should be broadly consistent when evidence is equivalent.
-* Minor variation is acceptable.
-* Large differences should be explainable by missing evidence, extraction differences, or actual content differences.
-* A practical tolerance target is around 0–3 composite-score points for semantically equivalent CVs.
-* Differences around 5–7% should be treated as a finding and documented unless clearly justified by evidence.
+* score should be broadly consistent when evidence is semantically equivalent;
+* practical tolerance target: 0–3 composite-score points;
+* difference around 5–7% should be documented as a finding unless clearly explained by missing evidence, extraction differences, or actual content differences;
+* profile summary should remain in Bahasa Indonesia;
+* evidence and justification should not imply that English wording is inherently better than Bahasa Indonesia wording.
 
-If the score gap remains large:
+If significant score gap remains:
 
-* Document it in `docs/ISSUES_AND_NOTES.md`.
-* Mention it in the Phase 12 report as a known limitation.
-* Recommend future structured evidence extraction before scoring.
+* document the result in `docs/ISSUES_AND_NOTES.md`;
+* mention it in the Phase 12 report;
+* recommend future structured evidence extraction or rubric-normalized scoring before LLM scoring.
+
+---
 
 ## Frontend Consistency Review
 
-Phase 12 should also check UI consistency, especially because several pages were added across multiple phases.
+Review all redesigned frontend pages after Phase 1–11 and frontend redesign.
 
-Review:
+Check:
 
-* language consistency between Bahasa Indonesia and English;
+* candidate-facing language consistency;
+* recruiter/admin language consistency;
+* page titles;
+* CTA labels;
 * empty states;
 * loading states;
-* error messages;
-* button labels;
-* page titles;
+* error states;
+* table/card spacing;
+* status badge wording;
 * role-specific navigation labels;
-* admin/recruiter/candidate dashboard wording;
-* table/card spacing consistency;
-* whether pages feel too plain or insufficiently informative.
+* dashboard wording;
+* modal/dialog overflow;
+* mobile responsiveness for important pages;
+* whether pages feel informative and not plain.
 
 Recommended language policy:
 
-* Candidate-facing recruitment flow should primarily use Bahasa Indonesia.
-* Internal technical/admin labels may use English where already established.
-* Avoid mixing English and Bahasa Indonesia in the same component unless intentional.
-* Use consistent terms:
+* candidate-facing recruitment flow should primarily use Bahasa Indonesia;
+* recruiter/admin operational pages may use English where already established;
+* do not mix English and Bahasa Indonesia in the same component unless intentional;
+* use consistent terms per page context:
 
-  * “Kandidat”
-  * “Recruiter”
-  * “Super Admin”
-  * “Dokumen”
-  * “Evaluasi”
-  * “Pengumuman”
-  * “Audit Log”
-  * “Email Notifications” or “Notifikasi Email”, but choose one per page context.
+  * Kandidat;
+  * Recruiter;
+  * Super Admin;
+  * Dokumen;
+  * Evaluasi;
+  * Pengumuman;
+  * Audit Log;
+  * Email Operations / Admin Emails / Notifikasi Email, choose one naming style consistently.
 
-If frontend design issues are large, record them as follow-up rather than expanding Phase 12 too far.
+If a frontend issue is small and safe, fix it in Phase 12.
+
+If a frontend issue requires a large redesign, record it as follow-up rather than expanding Phase 12.
+
+---
 
 ## Documentation Updates
 
-Update:
+Update documentation to match final implemented behavior.
+
+Required documents to review/update:
 
 ```text
 docs/API_REFERENCE.md
@@ -2174,21 +2508,30 @@ docs/features/BACKEND_IMPLEMENTATION_PLAN.md
 docs/features/EXECUTION_PLAN.md
 ```
 
-Documentation must reflect the final implemented behavior for:
+Documentation must reflect:
 
-* email verification;
+* candidate email verification;
 * forgot password;
+* token invalidation after password reset/change;
 * admin-assisted password reset link;
-* candidate profile completion;
-* application submission;
+* candidate profile completion requirement;
+* active recruitment period safety;
+* phase-based candidate restrictions;
+* application submit to `document_review`;
 * document verification;
 * document rejection/correction;
-* NER/evaluation timing;
-* analytics;
-* audit logs;
+* candidate review visibility masking before finalization;
+* NER timing after accepted document review finalization;
+* evaluation eligibility and force re-evaluation behavior;
+* analytics active-period scope;
+* audit log listing;
 * email notification lifecycle;
-* admin emails monitoring page;
-* evaluation fairness guardrails.
+* Admin Emails monitoring page;
+* notification non-blocking policy;
+* multilingual fairness guardrails;
+* known limitations and follow-up items.
+
+---
 
 ## Phase 12 Report
 
@@ -2198,59 +2541,126 @@ Create:
 docs/reports/phase_12_final_regression_documentation.md
 ```
 
-Report must include:
+The report must include:
 
 1. Implementation Date
+
 2. Branch
+
 3. Phase Name
 
-   * Phase 12 — Final Regression and Documentation Update
+   ```text
+   Phase 12 — Final Regression, Manual E2E Validation, and Documentation Update
+   ```
+
 4. Summary
+
 5. Regression Scope
-6. Commands Run
-7. Smoke Test Results
-8. Frontend Build Result
-9. Manual End-to-End Test Result
-10. Evaluation Fairness / Multilingual CV Consistency Check
-11. Frontend Consistency Findings
-12. Bugs Found and Fixes Applied
-13. Documentation Updated
-14. Known Limitations
-15. Final Readiness Notes
 
-## Done Criteria
+6. Script-Based Tests Run
 
-* All required smoke tests pass.
-* Frontend build passes.
-* Optional backend compile check passes, or any compile issue is documented.
-* Docs match implemented behavior.
-* Old route redirects work if applicable.
-* Backend role protection is confirmed.
-* Candidate, recruiter, and super admin workflows are manually checked.
-* Application submitted, document rejected, and announcement email notifications are verified.
-* Audit logs and email notification logs are verified.
-* Evaluation prompt includes multilingual fairness guardrails.
-* Indonesian and English CV evaluation consistency is manually checked or documented as a known limitation.
-* Frontend language/design consistency issues are either fixed or documented as follow-up.
-* Phase 12 report is created.
+7. Script-Based Test Results
+
+8. Frontend Lint/Build Result
+
+9. Optional Route Smoke Result
+
+10. Manual Candidate E2E Result
+
+11. Manual Recruiter E2E Result
+
+12. Manual Super Admin E2E Result
+
+13. Role Protection Result
+
+14. Email Notification Lifecycle Result
+
+15. Audit Log Verification Result
+
+16. Admin Emails Monitoring Result
+
+17. Evaluation Fairness / Multilingual CV Consistency Check
+
+18. Frontend Consistency Findings
+
+19. Bugs Found and Fixes Applied
+
+20. Documentation Updated
+
+21. Known Limitations
+
+22. Follow-Up Recommendations
+
+23. Final Readiness Notes
 
 ---
 
-## Final Implementation Order Recommendation
+## Done Criteria
 
-Recommended implementation order:
+Phase 12 is complete only when:
 
-1. Phase 1 — candidate frontend IA cleanup.
-2. Phase 2 — recruiter/super admin frontend workspace split.
-3. Phase 3 — email verification backend.
-4. Phase 4 — forgot password and session invalidation backend.
-5. Phase 5 — auth email frontend pages.
-6. Phase 6 — document verification gate backend.
-7. Phase 7 — document rejection/correction full-stack flow.
-8. Phase 8 — NER/evaluation timing adjustment.
-9. Phase 9 — analytics API and dashboard.
-10. Phase 10 — audit log listing and admin page.
-11. Phase 11 — email notification lifecycle.
-12. Phase 12 — final regression and docs.
+* backend compile check passes or any issue is documented;
+* required backend smoke tests pass;
+* frontend lint passes;
+* frontend build passes;
+* missing/nonexistent required smoke scripts are either created or removed from the required command list;
+* candidate manual E2E flow is checked;
+* recruiter manual E2E flow is checked;
+* super admin manual E2E flow is checked;
+* role protection is confirmed;
+* application submitted notification is verified/logged;
+* document rejected notification is verified/logged after finalization;
+* announcement notification is verified/logged;
+* audit log page is verified;
+* Admin Emails monitoring page is verified;
+* analytics dashboard is verified;
+* document preview/upload behavior is manually checked with real files;
+* multilingual evaluation fairness guardrails are present;
+* Indonesian vs English CV consistency is manually tested or documented as a known limitation;
+* frontend language/design consistency issues are fixed or documented;
+* documentation is updated to match final implementation;
+* `docs/reports/phase_12_final_regression_documentation.md` is created.
 
-This order keeps frontend structure clean before large workflow changes, while ensuring backend-critical authentication and document verification features are implemented before analytics and notification polish.
+---
+
+## Recommended Phase 12 Implementation Order
+
+1. Create Phase 12 branch.
+
+   ```bash
+   git checkout -b regression/phase-12-final-docs
+   ```
+
+2. Review current smoke test files and remove/fix missing required command references.
+
+3. Run backend compile check.
+
+4. Run authentication/account smoke tests.
+
+5. Run recruitment period and phase enforcement smoke tests.
+
+6. Run application/document/correction smoke tests.
+
+7. Run NER/evaluation smoke tests.
+
+8. Run analytics/audit/announcement/email notification smoke tests.
+
+9. Run frontend lint and build.
+
+10. Run optional route smoke checks.
+
+11. Perform manual candidate E2E.
+
+12. Perform manual recruiter E2E.
+
+13. Perform manual super admin E2E.
+
+14. Perform role protection checks.
+
+15. Perform multilingual CV fairness check.
+
+16. Review frontend consistency and apply only minor safe fixes.
+
+17. Update documentation.
+
+18. Create Phase 12 report.

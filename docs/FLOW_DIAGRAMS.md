@@ -234,7 +234,7 @@ Source: [backend/routers/applications.py:260](../backend/routers/applications.py
 
 ## 5. Candidate Submission Flow
 
-End-to-end from "create application" to "submitted, NER scheduled".
+End-to-end from "create application" to `document_review`. NER is intentionally not scheduled here.
 
 ```mermaid
 sequenceDiagram
@@ -242,8 +242,6 @@ sequenceDiagram
     participant API as Backend API
     participant DB as DB
     participant FS as uploads/ (disk)
-    participant BG as BackgroundTasks
-    participant NER as run_submit_anonymization
 
     Note over C,API: 1. Create application
     C->>API: POST /api/applications<br/>{ division }
@@ -266,30 +264,33 @@ sequenceDiagram
         API-->>C: 403 "Tidak ada periode aktif"
     else phase != SUBMISSION
         API-->>C: 403 (phase-aware Indonesian message)
+    else incomplete profile
+        API-->>C: 400 { missing_fields: [...] }
     else missing required docs
         API-->>C: 400 { missing: ["khs", ...] }
     else all OK
-        API->>DB: UPDATE applications<br/>status=submitted, submitted_at, period_id
-        API->>BG: schedule run_submit_anonymization(app_id, fresh_db)
+        API->>DB: UPDATE applications<br/>status=document_review, submitted_at, period_id
+        API->>DB: RESET documents review status to pending
+        API->>DB: INSERT email_notifications<br/>application_submitted
         API-->>C: 200 ApplicationOut
-        Note right of API: BackgroundTask runs<br/>after the response is sent
-        BG->>NER: extract → normalize → anonymize<br/>(CV + Motivation Letter)
-        NER->>DB: UPSERT Candidate (rubric_id=null)
-        NER->>DB: UPSERT CandidateDocument(s)<br/>with anonymized_text
+        Note right of API: Recruiter/admin document review<br/>is the next gate.
     end
 ```
 
-Source: [backend/routers/applications.py:212–307](../backend/routers/applications.py#L212), [backend/services/submit_anonymization.py](../backend/services/submit_anonymization.py).
+Source: [backend/routers/applications.py](../backend/routers/applications.py), [backend/services/document_review_service.py](../backend/services/document_review_service.py), [backend/services/notification_service.py](../backend/services/notification_service.py).
 
 ---
 
-## 6. Document Anonymization Pipeline (submit-time)
+## 6. Document Review and Post-Review Anonymization Pipeline
 
-Detail of the BackgroundTask that fires after a successful submit. Failures are logged but never raised (the server must keep running).
+Detail of the review gate and BackgroundTask that fires only after accepted document-review finalization. Failures are logged but never raised to the user-facing request.
 
 ```mermaid
 flowchart TD
-    A[Submit committed → BackgroundTask fires] --> B[Load Application from fresh db session]
+    A[Recruiter/admin finalizes document review] --> A1{Any required doc rejected?}
+    A1 -- yes --> R[Set application=correction_requested<br/>log document_rejected notification<br/>no NER]
+    A1 -- no --> A2[Set application=verified<br/>schedule BackgroundTask]
+    A2 --> B[Load Application from fresh db session]
     B --> C{Application exists?}
     C -- no --> Z[log warning + return]
     C -- yes --> D[Ensure Candidate row<br/>rubric_id=None, status=anonymized]
@@ -311,6 +312,7 @@ flowchart TD
     N --> Z2[finally: db.close&#40;&#41;]
 
     style A fill:#dff
+    style R fill:#fee
     style Z fill:#fee
     style Z2 fill:#efe
 ```
@@ -340,7 +342,7 @@ sequenceDiagram
     ES->>KHS: parse_khs(file_path)
     ES->>DB: ensure Candidate (set rubric_id)
     ES->>DB: SELECT CandidateDocument<br/>WHERE doc_type='cv'<br/>AND anonymized_text IS NOT NULL
-    alt cache hit (submit-time NER ran)
+    alt cache hit (post-review NER ran)
         DB-->>ES: cached anonymized_text
     else cache miss
         ES->>ANO: extract → normalize → anonymize CV
@@ -469,6 +471,9 @@ graph TD
 
     P --> Login[LoginPage]
     P --> Reg[RegisterPage]
+    P --> Verify[/verify-email - VerifyEmailPage/]
+    P --> Forgot[/forgot-password - ForgotPasswordPage/]
+    P --> Reset[/reset-password - ResetPasswordPage/]
 
     AS --> RR[RootRedirect /]
     AS --> CT[Candidate tree]
@@ -477,20 +482,33 @@ graph TD
 
     CT --> CD[/dashboard - DashboardPage/]
     CT --> CP[/profile - ProfilePage/]
-    CT --> CDoc[/documents - DocumentsPage]
-    CT --> CR[/review - ReviewPage/]
-    CT --> CS[/submitted - SubmittedPage/]
-    CT --> CRes[/result - ResultPage/]
+    CT --> CPE[/profile/edit - EditProfilePage/]
+    CT --> CAO[/application - ApplicationOverviewPage/]
+    CT --> CAS[/application/start - StartApplicationPage/]
+    CT --> CDoc[/documents - DocumentsPage/]
+    CT --> CR[/application/review - ReviewPage/]
+    CT --> CS[/application/status - ApplicationStatusPage/]
+    CT --> CLegacy[/review, /submitted, /result - redirects/]
     CT --> CHist[/my-applications/]
     CT --> CUp[/upload - legacy/]
 
-    RT --> RDash[/ - DashboardPage/]
+    RT --> RDash[/recruiter/dashboard - OverviewPage/]
+    RT --> RApps[/recruiter/applications - ApplicationsPage/]
+    RT --> RDocs[/recruiter/documents - DocumentVerificationPage/]
+    RT --> REval[/recruiter/evaluation - EvaluationPage/]
+    RT --> RCands[/recruiter/candidates - CandidatesPage/]
+    RT --> RAnn[/recruiter/announcements - AnnouncementsPage/]
+    RT --> RAn[/recruiter/analytics - AnalyticsPage/]
     RT --> RRub[/rubrics - RubricConfigPage/]
     RT --> RDet[/candidates/:id - CandidateDetailPage/]
     RT --> RProf[/recruiter/profile/]
 
+    AT --> ADash[/admin/dashboard - OverviewPage/]
     AT --> AUsers[/admin/users - AdminPage/]
     AT --> APer[/admin/periods - RecruitmentPeriodPage/]
+    AT --> ALogs[/admin/audit-logs - AuditLogsPage/]
+    AT --> AEmails[/admin/email-templates - Admin Emails monitoring/]
+    AT --> ASet[/admin/settings - Settings placeholder/]
     AT --> AProf[/admin/profile/]
 
     CDoc -.uses.-> DUS[DocumentUploadStep × 6]
