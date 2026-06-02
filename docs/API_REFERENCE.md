@@ -86,6 +86,8 @@ Source: [`backend/routers/auth.py`](../backend/routers/auth.py)
 Registers a candidate account. Role is always forced to `candidate`.
 The account must verify email before login; this endpoint no longer returns
 a normal access token.
+IPK is intentionally not accepted during registration; candidates fill it
+later through `PUT /api/users/me`.
 
 Rate limit: `5/minute`.
 
@@ -150,6 +152,7 @@ Rate limit: `10/minute`.
       "faculty": "Informatics",
       "major": "Software Engineering",
       "year": 2023,
+      "ipk": null,
       "whatsapp": null,
       "role": "candidate",
       "is_active": true,
@@ -360,16 +363,19 @@ Returns current profile enriched with candidate application state.
   "faculty": "Informatics",
   "major": "Software Engineering",
   "year": 2023,
+  "ipk": 3.75,
   "whatsapp": "62812...",
   "division": "big_data",
   "application_status": "draft",
+  "ipk_editable": true,
   "role": "candidate",
   "is_active": true,
   "email_verified_at": "2026-05-29T10:15:00"
 }
 ```
 
-For recruiter/super_admin, `division` and `application_status` are `null`.
+For recruiter/super_admin, `division` and `application_status` are `null`,
+and `ipk_editable` is `false`.
 
 ### 🔐 `PUT /api/users/me`
 
@@ -386,6 +392,7 @@ Updates current user's profile. Every field is optional; only sent fields update
   "faculty": "Informatics",
   "major": "Software Engineering",
   "year": 2023,
+  "ipk": 3.75,
   "division": "big_data",
   "password": "new-min8-password"
 }
@@ -396,9 +403,14 @@ Updates current user's profile. Every field is optional; only sent fields update
 - `full_name`, `whatsapp`, and `password` remain editable in every phase.
 - Updating `password` sets `password_changed_at`; existing JWTs for that user are rejected after the update.
 - `nim`, `faculty`, `major`, `year` lock once application status is past `draft`.
+- `ipk` is optional at registration but required before final submit.
+- `ipk` accepts numeric values from `0.00` to `4.00` with at most 2 decimals.
+- `ipk` is editable before submit, locks after submit, and reopens only when application status is `correction_requested` and the KHS document is rejected.
 - `division` locks as soon as any application exists, including `draft`.
 - Sending `division` as a candidate with no application creates a draft application.
 - Non-candidates cannot set `division`.
+- Non-candidates cannot set `ipk`.
+- Recruiters verify IPK only through KHS document review/rejection reasons; no recruiter endpoint edits candidate IPK.
 - Phase 3: candidate email changes are temporarily blocked until email re-verification UI/flow is implemented. Sending the same email value is allowed.
 - Recruiter and `super_admin` email changes keep the existing behavior with duplicate checks.
 
@@ -512,7 +524,7 @@ Application object with `status="document_review"` and candidate-safe document-r
 - Application status is `draft`.
 - There is an active recruitment period.
 - Active period's current phase is `SUBMISSION`.
-- Candidate profile is complete, including WhatsApp.
+- Candidate profile is complete, including WhatsApp and IPK.
 - All six required documents exist.
 
 **Side effects**
@@ -532,7 +544,8 @@ Application object with `status="document_review"` and candidate-safe document-r
 - `403` no active recruitment period.
 - `403` current phase is not `SUBMISSION`.
 - `400` missing required documents; `detail` includes `missing` and `required` arrays.
-- `400` missing required profile fields; `detail` includes `missing_fields`.
+- `400` missing required profile fields; `detail` includes `missing_fields`
+  such as `["ipk"]` when IPK has not been filled.
 
 ### Recruiter+ `POST /api/applications/{application_id}/finalize-document-review`
 
@@ -624,7 +637,9 @@ Array of application rows with extra fields:
     "nim": "1031234567890",
     "faculty": "Informatics",
     "major": "Software Engineering",
-    "year": 2023
+    "year": 2023,
+    "ipk": 3.75,
+    "whatsapp": "62812..."
   },
   "evaluation": {
     "candidate_id": 5,
@@ -968,7 +983,7 @@ Returns candidate detail:
 - `composite_score`, `language_score`, `language_bonus`, `cefr_level`;
 - `profile_summary`;
 - cross-linked `application`;
-- revealed `user_profile` for recruiter review;
+- revealed `user_profile` for recruiter review, including candidate `ipk`;
 - processed `documents`;
 - `dimension_scores` with evidence, justification, override status, and override reason.
 

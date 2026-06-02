@@ -12,6 +12,7 @@ import { getMyApplication, getMyProfile } from "@/lib/api";
 import {
   applicationReferenceId,
   formatDivision,
+  formatIpk,
   isNotFoundError,
 } from "@/lib/candidateApplication";
 
@@ -111,6 +112,7 @@ export default function ProfilePage() {
             <Field label="Fakultas" value={profile.faculty} />
             <Field label="Jurusan" value={profile.major} />
             <Field label="Angkatan" value={profile.year} />
+            <Field label="IPK" value={formatIpk(profile.ipk)} />
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
                 Akun

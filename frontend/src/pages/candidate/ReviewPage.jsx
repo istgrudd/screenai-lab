@@ -27,6 +27,7 @@ import {
 } from "@/lib/api";
 import {
   REQUIRED_DOCUMENTS,
+  formatIpk,
   isSubmissionPhase,
   missingRequiredProfileFields,
   PROFILE_FIELD_LABELS,
@@ -296,6 +297,7 @@ export default function ReviewPage() {
             <Field label="Email" value={user.email} />
             <Field label="WhatsApp" value={user.whatsapp} />
             <Field label="Angkatan" value={user.year} />
+            <Field label="IPK" value={formatIpk(user.ipk)} />
             <Field label="Fakultas" value={user.faculty} />
             <Field label="Jurusan" value={user.major} />
             <Field

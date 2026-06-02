@@ -3,7 +3,7 @@
 import enum
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, Column, DateTime, Enum, Integer, String
+from sqlalchemy import Boolean, Column, DateTime, Enum, Float, Integer, String
 from sqlalchemy.orm import relationship
 
 from backend.database import Base
@@ -46,6 +46,7 @@ class User(Base):
     faculty = Column(String(255), nullable=True)
     major = Column(String(255), nullable=True)
     year = Column(Integer, nullable=True)
+    ipk = Column(Float, nullable=True)
 
     # Optional contact field. Editable from the candidate ProfilePage even
     # after submit, since recruiters may need to reach out at any phase.

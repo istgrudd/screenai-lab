@@ -58,6 +58,7 @@ _REQUIRED_PROFILE_FIELDS = (
     "faculty",
     "major",
     "year",
+    "ipk",
     "whatsapp",
 )
 
@@ -575,6 +576,7 @@ def list_submitted_applications(
                 "faculty": app.user.faculty,
                 "major": app.user.major,
                 "year": app.user.year,
+                "ipk": app.user.ipk,
                 "whatsapp": app.user.whatsapp,
             },
             "evaluation": {

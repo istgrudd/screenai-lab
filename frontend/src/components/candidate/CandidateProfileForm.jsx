@@ -14,6 +14,8 @@ import { updateMyProfile } from "@/lib/api";
 
 const WHATSAPP_ERROR =
   "Nomor WhatsApp tidak valid. Gunakan format 08..., 628..., atau +628...";
+const IPK_ERROR =
+  "IPK harus berupa angka 0.00 sampai 4.00 dengan maksimal 2 desimal.";
 
 function isValidIndonesianWhatsapp(value) {
   const trimmed = value.trim();
@@ -35,7 +37,21 @@ function isValidIndonesianWhatsapp(value) {
   );
 }
 
-function LockHint() {
+function isValidIpk(value) {
+  const trimmed = value.trim();
+  if (!trimmed) return true;
+  if (!/^\d+(?:\.\d{1,2})?$/.test(trimmed)) return false;
+  const number = Number(trimmed);
+  return Number.isFinite(number) && number >= 0 && number <= 4;
+}
+
+function formatIpkForInput(value) {
+  if (value == null || value === "") return "";
+  const number = Number(value);
+  return Number.isNaN(number) ? "" : number.toFixed(2);
+}
+
+function LockHint({ message = "Tidak dapat diubah setelah submit." }) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -46,19 +62,19 @@ function LockHint() {
           <Lock className="w-3.5 h-3.5" />
         </span>
       </TooltipTrigger>
-      <TooltipContent>Tidak dapat diubah setelah submit.</TooltipContent>
+      <TooltipContent>{message}</TooltipContent>
     </Tooltip>
   );
 }
 
-function FieldLabel({ children, htmlFor, locked }) {
+function FieldLabel({ children, htmlFor, locked, lockMessage }) {
   return (
     <Label
       htmlFor={htmlFor}
       className="flex items-center gap-1.5 text-xs uppercase tracking-wide text-muted-foreground"
     >
       {children}
-      {locked && <LockHint />}
+      {locked && <LockHint message={lockMessage} />}
     </Label>
   );
 }
@@ -73,9 +89,11 @@ export default function CandidateProfileForm({ profile, locked, onSaved }) {
   const [year, setYear] = useState(
     profile.year != null ? String(profile.year) : ""
   );
+  const [ipk, setIpk] = useState(formatIpkForInput(profile.ipk));
   const [password, setPassword] = useState("");
   const [passwordConfirm, setPasswordConfirm] = useState("");
   const [saving, setSaving] = useState(false);
+  const ipkLocked = profile.ipk_editable === false;
 
   const onSubmit = async (event) => {
     event.preventDefault();
@@ -94,6 +112,10 @@ export default function CandidateProfileForm({ profile, locked, onSaved }) {
     }
     if (!whatsapp.trim()) {
       toast.error("Nomor WhatsApp wajib diisi sebelum submit aplikasi.");
+      return;
+    }
+    if (!isValidIpk(ipk || "")) {
+      toast.error(IPK_ERROR);
       return;
     }
 
@@ -119,6 +141,18 @@ export default function CandidateProfileForm({ profile, locked, onSaved }) {
       const yearNum = year === "" ? null : Number(year);
       if (yearNum != null && yearNum !== profile.year) payload.year = yearNum;
     }
+    if (!ipkLocked) {
+      const ipkText = (ipk || "").trim();
+      const currentIpk = profile.ipk == null ? null : Number(profile.ipk);
+      if (!ipkText && currentIpk != null) {
+        payload.ipk = null;
+      } else if (ipkText) {
+        const nextIpk = Number(ipkText);
+        if (currentIpk == null || nextIpk !== currentIpk) {
+          payload.ipk = nextIpk;
+        }
+      }
+    }
 
     if (password) payload.password = password;
 
@@ -136,7 +170,9 @@ export default function CandidateProfileForm({ profile, locked, onSaved }) {
       onSaved(updated);
     } catch (error) {
       const message = error.message || "Gagal memperbarui profil";
-      if (message.includes("locked_fields")) {
+      if (error.detail?.locked_fields?.includes("ipk")) {
+        toast.error("IPK tidak dapat diubah pada status aplikasi saat ini.");
+      } else if (error.detail?.locked_fields?.length) {
         toast.error("Field terkunci tidak dapat diubah setelah submit.");
       } else {
         toast.error(message);
@@ -239,6 +275,25 @@ export default function CandidateProfileForm({ profile, locked, onSaved }) {
           onChange={(event) => setYear(event.target.value)}
           disabled={saving || locked}
           readOnly={locked}
+        />
+      </div>
+      <div className="space-y-1.5">
+        <FieldLabel
+          htmlFor="ipk"
+          locked={ipkLocked}
+          lockMessage="IPK terkunci setelah submit kecuali KHS ditolak untuk koreksi."
+        >
+          IPK
+        </FieldLabel>
+        <Input
+          id="ipk"
+          type="text"
+          inputMode="decimal"
+          value={ipk}
+          onChange={(event) => setIpk(event.target.value)}
+          placeholder="Contoh: 3.75"
+          disabled={saving || ipkLocked}
+          readOnly={ipkLocked}
         />
       </div>
 

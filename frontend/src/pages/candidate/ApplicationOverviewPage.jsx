@@ -20,6 +20,7 @@ import {
   documentCompleteness,
   formatDateTime,
   formatDivision,
+  formatIpk,
   isNotFoundError,
   nextApplicationTarget,
 } from "@/lib/candidateApplication";
@@ -134,6 +135,7 @@ export default function ApplicationOverviewPage() {
             <Detail label="Fakultas" value={profile.faculty} />
             <Detail label="Jurusan" value={profile.major} />
             <Detail label="Angkatan" value={profile.year} />
+            <Detail label="IPK" value={formatIpk(profile.ipk)} />
           </CardContent>
         </Card>
 

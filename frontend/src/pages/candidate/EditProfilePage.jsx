@@ -48,6 +48,7 @@ export default function EditProfilePage() {
   if (!profile) return null;
 
   const locked = POST_SUBMIT_STATUSES.has(profile.application_status);
+  const ipkCorrectionOpen = locked && profile.ipk_editable === true;
   const missingFields = location.state?.missingProfileFields || [];
 
   return (
@@ -57,7 +58,9 @@ export default function EditProfilePage() {
         title="Edit Profil"
         description="Lengkapi data pribadi, kontak, dan akademik agar pendaftaran bisa dikirim."
         status={
-          locked ? (
+          ipkCorrectionOpen ? (
+            <StatusBadge label="Koreksi IPK tersedia" tone="warning" size="md" />
+          ) : locked ? (
             <StatusBadge label="Field akademik terkunci" tone="warning" size="md" />
           ) : (
             <StatusBadge label="Bisa diedit" tone="brand" size="md" />
@@ -103,8 +106,9 @@ export default function EditProfilePage() {
               </p>
               <p className="mt-1 text-sm leading-6 text-muted-foreground">
                 Setelah pendaftaran dikirim, NIM, fakultas, jurusan, dan
-                angkatan tidak dapat diubah. Nama, email, WhatsApp, dan password
-                tetap dapat diperbarui.
+                angkatan tidak dapat diubah. IPK juga terkunci setelah submit,
+                tetapi dapat dibuka kembali jika KHS ditolak dan perlu koreksi.
+                Nama, email, WhatsApp, dan password tetap dapat diperbarui.
               </p>
             </div>
           </CardContent>

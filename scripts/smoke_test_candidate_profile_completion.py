@@ -12,7 +12,7 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi.testclient import TestClient
 
-from backend.database import SessionLocal
+from backend.database import SessionLocal, init_db
 from backend.main import app as fastapi_app
 from backend.models.application import Application
 from backend.models.audit import AuditLog
@@ -103,6 +103,7 @@ def _deactivate_all_periods() -> None:
 
 
 def main() -> int:
+    init_db()
     _cleanup()
     _deactivate_all_periods()
     failures = 0
@@ -126,6 +127,7 @@ def main() -> int:
             faculty="Fakultas Informatika",
             major="Informatika",
             year=2023,
+            ipk=None,
             whatsapp=None,
             role=UserRole.CANDIDATE,
             is_active=True,
@@ -172,11 +174,15 @@ def main() -> int:
         failures += _assert(response.status_code == 201, f"upload {doc_type.value} -> 201")
 
     response = client.post(f"/api/applications/{app_id}/submit", headers=auth)
-    failures += _assert(response.status_code == 400, "submit missing WhatsApp -> 400")
+    failures += _assert(response.status_code == 400, "submit missing WhatsApp/IPK -> 400")
     detail = response.json().get("detail", {})
     failures += _assert(
         "whatsapp" in detail.get("missing_fields", []),
         "missing_fields includes whatsapp",
+    )
+    failures += _assert(
+        "ipk" in detail.get("missing_fields", []),
+        "missing_fields includes ipk",
     )
 
     response = client.put("/api/users/me", headers=auth, json={"whatsapp": "12345"})
@@ -186,7 +192,33 @@ def main() -> int:
     failures += _assert(response.status_code == 200, "valid WhatsApp profile update -> 200")
 
     response = client.post(f"/api/applications/{app_id}/submit", headers=auth)
-    failures += _assert(response.status_code == 200, "submit complete profile -> 200")
+    failures += _assert(response.status_code == 400, "submit missing IPK -> 400")
+    detail = response.json().get("detail", {})
+    failures += _assert(
+        detail.get("missing_fields", []) == ["ipk"],
+        "missing_fields only includes ipk after WhatsApp is filled",
+    )
+
+    invalid_ipk_values = [-1, 4.01, 5, "abc", 3.999, "3.999"]
+    for value in invalid_ipk_values:
+        response = client.put("/api/users/me", headers=auth, json={"ipk": value})
+        failures += _assert(
+            response.status_code == 422,
+            f"invalid IPK {value!r} -> 422",
+        )
+
+    for value in [0, "0.00", "3.75", "4.00"]:
+        response = client.put("/api/users/me", headers=auth, json={"ipk": value})
+        failures += _assert(
+            response.status_code == 200,
+            f"valid IPK {value!r} profile update -> 200",
+        )
+
+    response = client.put("/api/users/me", headers=auth, json={"ipk": 3.75})
+    failures += _assert(response.status_code == 200, "final valid IPK profile update -> 200")
+
+    response = client.post(f"/api/applications/{app_id}/submit", headers=auth)
+    failures += _assert(response.status_code == 200, "submit complete profile with IPK -> 200")
     failures += _assert(
         response.json()["data"]["status"] == "document_review",
         "complete profile submit moves to document_review",
@@ -194,6 +226,8 @@ def main() -> int:
 
     response = client.put("/api/users/me", headers=auth, json={"nim": "1039876519999"})
     failures += _assert(response.status_code == 403, "academic identity locked after submit -> 403")
+    response = client.put("/api/users/me", headers=auth, json={"ipk": 3.80})
+    failures += _assert(response.status_code == 403, "IPK locked during document_review -> 403")
 
     print()
     if failures == 0:

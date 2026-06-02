@@ -21,6 +21,7 @@ out of the system.
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation
 import re
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -30,6 +31,7 @@ from sqlalchemy.orm import Session
 from backend.database import get_db
 from backend.middleware.auth_middleware import get_current_user, require_role
 from backend.models.application import Application, ApplicationStatus, Division
+from backend.models.document import Document, DocumentType, DocumentVerificationStatus
 from backend.models.user import User, UserRole
 from backend.utils.security import hash_password
 
@@ -41,6 +43,7 @@ _super_admin_only = require_role(UserRole.SUPER_ADMIN)
 _NIM_PATTERN = re.compile(r"^\d{10,}$")
 _WHATSAPP_ALLOWED_CHARS = re.compile(r"^\+?[\d\s().-]+$")
 _WHATSAPP_ERROR = "Nomor WhatsApp tidak valid. Gunakan format 08..., 628..., atau +628..."
+_IPK_ERROR = "IPK harus berupa angka 0.00 sampai 4.00 dengan maksimal 2 desimal."
 
 # Status set that locks academic identity fields (Task 13.4.2). Once a
 # candidate has submitted, they cannot change their NIM, division, etc.
@@ -68,6 +71,7 @@ class UserAdminOut(BaseModel):
     faculty: str | None
     major: str | None
     year: int | None
+    ipk: float | None
     whatsapp: str | None
     role: str
     is_active: bool
@@ -84,6 +88,7 @@ class UserAdminOut(BaseModel):
             faculty=u.faculty,
             major=u.major,
             year=u.year,
+            ipk=u.ipk,
             whatsapp=u.whatsapp,
             role=u.role.value if hasattr(u.role, "value") else str(u.role),
             is_active=u.is_active,
@@ -114,9 +119,11 @@ class MeOut(BaseModel):
     faculty: str | None
     major: str | None
     year: int | None
+    ipk: float | None
     whatsapp: str | None
     division: str | None
     application_status: str | None
+    ipk_editable: bool
     role: str
     is_active: bool
     email_verified_at: str | None
@@ -139,6 +146,7 @@ class ProfileUpdate(BaseModel):
     faculty: str | None = Field(default=None, min_length=1, max_length=255)
     major: str | None = Field(default=None, min_length=1, max_length=255)
     year: int | None = Field(default=None, ge=2000, le=2100)
+    ipk: float | None = Field(default=None)
     division: Division | None = None
     password: str | None = Field(default=None, min_length=8, max_length=72)
 
@@ -174,6 +182,27 @@ class ProfileUpdate(BaseModel):
             raise ValueError(_WHATSAPP_ERROR)
         return trimmed
 
+    @field_validator("ipk", mode="before")
+    @classmethod
+    def _validate_ipk(cls, v) -> float | None:
+        if v is None:
+            return None
+        if isinstance(v, str):
+            v = v.strip()
+            if not v:
+                return None
+        try:
+            value = Decimal(str(v))
+        except (InvalidOperation, ValueError):
+            raise ValueError(_IPK_ERROR)
+        if not value.is_finite():
+            raise ValueError(_IPK_ERROR)
+        if value < Decimal("0") or value > Decimal("4"):
+            raise ValueError(_IPK_ERROR)
+        if -value.as_tuple().exponent > 2:
+            raise ValueError(_IPK_ERROR)
+        return float(value)
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -203,11 +232,35 @@ def _latest_application(db: Session, user_id: int) -> Application | None:
     )
 
 
+def _is_khs_rejected(db: Session, app: Application) -> bool:
+    return (
+        db.query(Document)
+        .filter(
+            Document.application_id == app.id,
+            Document.doc_type == DocumentType.KHS,
+            Document.verification_status == DocumentVerificationStatus.REJECTED.value,
+        )
+        .first()
+        is not None
+    )
+
+
+def _is_ipk_editable(db: Session, app: Application | None) -> bool:
+    if app is None:
+        return True
+    if app.status == ApplicationStatus.DRAFT:
+        return True
+    if app.status == ApplicationStatus.CORRECTION_REQUESTED:
+        return _is_khs_rejected(db, app)
+    return False
+
+
 def _me_payload(db: Session, user: User) -> dict:
     """Build the GET /me response, deriving division from the user's app."""
     app = _latest_application(db, user.id) if user.role == UserRole.CANDIDATE else None
     division = None
     app_status = None
+    ipk_editable = False
     if app is not None:
         division = (
             app.division.value if hasattr(app.division, "value") else str(app.division)
@@ -215,6 +268,8 @@ def _me_payload(db: Session, user: User) -> dict:
         app_status = (
             app.status.value if hasattr(app.status, "value") else str(app.status)
         )
+    if user.role == UserRole.CANDIDATE:
+        ipk_editable = _is_ipk_editable(db, app)
     return MeOut(
         id=user.id,
         email=user.email,
@@ -223,9 +278,11 @@ def _me_payload(db: Session, user: User) -> dict:
         faculty=user.faculty,
         major=user.major,
         year=user.year,
+        ipk=user.ipk,
         whatsapp=user.whatsapp,
         division=division,
         application_status=app_status,
+        ipk_editable=ipk_editable,
         role=user.role.value if hasattr(user.role, "value") else str(user.role),
         is_active=user.is_active,
         email_verified_at=(
@@ -273,20 +330,28 @@ def update_me(
     division_locked = bool(app)  # any Application — DRAFT or beyond
 
     data = payload.model_dump(exclude_unset=True)
+    ipk_editable = _is_ipk_editable(db, app) if is_candidate else False
 
     # Reject locked-field changes early for a clear error message.
     locked_attempted: set[str] = set()
     if submit_locked:
         locked_attempted |= {"nim", "faculty", "major", "year"} & data.keys()
+    if "ipk" in data and is_candidate and not ipk_editable:
+        locked_attempted.add("ipk")
     if division_locked and "division" in data and data["division"] != (
         app.division.value if hasattr(app.division, "value") else str(app.division)
     ):
         locked_attempted.add("division")
     if locked_attempted:
+        message = (
+            "IPK tidak dapat diubah pada status aplikasi saat ini."
+            if locked_attempted == {"ipk"}
+            else "Field tidak dapat diubah setelah aplikasi dibuat."
+        )
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail={
-                "message": "Field tidak dapat diubah setelah aplikasi dibuat.",
+                "message": message,
                 "locked_fields": sorted(locked_attempted),
             },
         )
@@ -297,6 +362,22 @@ def update_me(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Hanya kandidat yang memiliki divisi.",
+        )
+    if "ipk" in data and not is_candidate:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Hanya kandidat yang memiliki IPK.",
+        )
+    if (
+        "ipk" in data
+        and is_candidate
+        and app is not None
+        and app.status != ApplicationStatus.DRAFT
+        and data["ipk"] is None
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="IPK tidak boleh dikosongkan setelah aplikasi dikirim.",
         )
 
     # Email uniqueness check before mutating anything.
@@ -348,6 +429,8 @@ def update_me(
         current_user.major = data["major"].strip()
     if "year" in data:
         current_user.year = data["year"]
+    if "ipk" in data:
+        current_user.ipk = data["ipk"]
     if "whatsapp" in data:
         # Allow clearing by sending empty string; keep otherwise.
         wa = data["whatsapp"]

@@ -30,6 +30,7 @@ import {
   formatDivision,
   isEvaluatedApplication,
 } from "@/lib/recruiterWorkspace";
+import { formatIpk } from "@/lib/candidateApplication";
 import { makeDetailNavigationState } from "@/lib/navigationContext";
 
 export function ScoreBadge({ score }) {
@@ -127,6 +128,7 @@ export default function ApplicationsTable({
               {selectable && <TableHead className="w-10" />}
               <TableHead>Candidate</TableHead>
               <TableHead>NIM</TableHead>
+              <TableHead>IPK</TableHead>
               <TableHead>Division</TableHead>
               <TableHead>Status</TableHead>
               <TableHead className="min-w-[160px]">Docs</TableHead>
@@ -215,6 +217,9 @@ export default function ApplicationsTable({
                   </TableCell>
                   <TableCell className="font-mono text-xs">
                     {application.candidate?.nim || "-"}
+                  </TableCell>
+                  <TableCell className="text-xs tabular-nums">
+                    {formatIpk(application.candidate?.ipk)}
                   </TableCell>
                   <TableCell>
                     <DivisionBadge division={application.division} />

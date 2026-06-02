@@ -46,6 +46,7 @@ import JustificationCard from "@/components/JustificationCard";
 import DocumentPreviewDialog from "@/components/DocumentPreviewDialog";
 import SwotHighlightPanel from "@/components/SwotHighlightPanel";
 import { defaultPathForRole, getCurrentUser } from "@/lib/auth";
+import { formatIpk } from "@/lib/candidateApplication";
 
 const CHART_COLORS = [
   "hsl(210, 80%, 55%)",
@@ -118,6 +119,34 @@ function LanguageCertificateCard({ candidate }) {
         )}
       </CardContent>
     </Card>
+  );
+}
+
+function CandidateProfileSnapshot({ profile }) {
+  if (!profile) return null;
+  const items = [
+    ["Nama", profile.full_name],
+    ["Email", profile.email],
+    ["NIM", profile.nim],
+    ["Fakultas", profile.faculty],
+    ["Jurusan", profile.major],
+    ["Angkatan", profile.year],
+    ["IPK", formatIpk(profile.ipk)],
+  ];
+
+  return (
+    <div className="grid grid-cols-1 gap-3 rounded-lg border border-amber-300/50 bg-amber-50/50 px-3 py-3 text-sm dark:bg-amber-900/10 md:grid-cols-2">
+      {items.map(([label, value]) => (
+        <div key={label}>
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+            {label}
+          </p>
+          <p className={label === "NIM" ? "mt-1 font-mono" : "mt-1"}>
+            {value || "-"}
+          </p>
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -423,6 +452,9 @@ export default function CandidateDetailPage() {
             )}
           </CardHeader>
           {identityRevealed && (() => {
+            const profileNode = (
+              <CandidateProfileSnapshot profile={candidate.user_profile} />
+            );
             // Gather entities from all documents
             const allEntities = (candidate.documents || []).flatMap(
               (doc) => doc.entities || []
@@ -451,7 +483,8 @@ export default function CandidateDetailPage() {
 
             if (allEntities.length === 0) {
               return (
-                <CardContent className="pt-0 pb-4">
+                <CardContent className="pt-0 pb-4 space-y-3">
+                  {profileNode}
                   <p className="text-sm text-muted-foreground italic">
                     No identity entities were detected during anonymization.
                   </p>
@@ -461,6 +494,7 @@ export default function CandidateDetailPage() {
 
             return (
               <CardContent className="pt-0 pb-4 space-y-3">
+                {profileNode}
                 <div className="rounded-lg border border-amber-300/50 bg-amber-50/50 dark:bg-amber-900/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
                   This information was masked during evaluation to ensure unbiased screening.
                 </div>

@@ -67,6 +67,7 @@ export const REQUIRED_PROFILE_FIELDS = [
   "faculty",
   "major",
   "year",
+  "ipk",
   "whatsapp",
 ];
 
@@ -77,6 +78,7 @@ export const PROFILE_FIELD_LABELS = {
   faculty: "Fakultas",
   major: "Jurusan",
   year: "Angkatan",
+  ipk: "IPK",
   whatsapp: "Nomor WhatsApp",
 };
 
@@ -99,6 +101,13 @@ export function formatDateTime(value, empty = "-") {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return empty;
   return date.toLocaleString();
+}
+
+export function formatIpk(value) {
+  if (value == null || value === "") return "-";
+  const number = Number(value);
+  if (Number.isNaN(number)) return "-";
+  return number.toFixed(2);
 }
 
 export function applicationReferenceId(application) {

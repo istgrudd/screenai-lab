@@ -210,6 +210,7 @@ def get_candidate(candidate_id: int, db: Session = Depends(get_db)):
                 "faculty": user.faculty,
                 "major": user.major,
                 "year": user.year,
+                "ipk": user.ipk,
             } if user else None,
             "documents": [
                 {
