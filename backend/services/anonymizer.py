@@ -1,11 +1,14 @@
-"""NER-based text anonymization service (blind screening).
+"""NER-based text anonymization service (AI-anonymized evaluation).
 
 Detects personal identity attributes in CV text using:
 1. IndoBERT NER model (PERSON, LOC, ORG entities)
 2. Regex fallback (phone numbers, emails, NIK, NIM, URLs)
 
-Replaces detected entities with indexed anonymous tokens
-to enable blind screening while preserving document structure.
+Replaces detected entities with indexed anonymous tokens so that personal
+identifiers are excluded from the document text sent to AI evaluation, while
+preserving document structure. This protects candidate data from the AI and
+reduces identity-based AI scoring; recruiters retain full access to candidate
+identity for verification and decision-making.
 """
 
 import re

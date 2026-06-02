@@ -157,7 +157,9 @@ def get_candidate(candidate_id: int, db: Session = Depends(get_db)):
 
     # Cross-link to the candidate's Phase-1 Application (and its user row).
     # Lets the recruiter detail view show uploaded-document completeness and
-    # reveal identity without a second round-trip.
+    # the candidate profile without a second round-trip. Recruiters may view
+    # this identity for verification/decision-making; it is the anonymized
+    # document text — not these fields — that is withheld from AI evaluation.
     app = None
     user = None
     if candidate.user_id:
@@ -206,6 +208,7 @@ def get_candidate(candidate_id: int, db: Session = Depends(get_db)):
             "user_profile": {
                 "full_name": user.full_name,
                 "email": user.email,
+                "whatsapp": user.whatsapp,
                 "nim": user.nim,
                 "faculty": user.faculty,
                 "major": user.major,

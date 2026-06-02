@@ -109,6 +109,7 @@ def _create_user(
     faculty: str | None = None,
     major: str | None = None,
     year: int | None | object = _UNSET,
+    ipk: float | None = None,
 ) -> User:
     now = datetime.now(timezone.utc)
     user = User(
@@ -131,6 +132,7 @@ def _create_user(
             if year is not _UNSET
             else (2023 if role == UserRole.CANDIDATE else None)
         ),
+        ipk=ipk,
         whatsapp="+6281234567890" if role == UserRole.CANDIDATE else None,
         role=role,
         is_active=True,
@@ -227,6 +229,7 @@ def _add_application(
     faculty: str | None = None,
     major: str | None = None,
     year: int | None | object = _UNSET,
+    ipk: float | None = None,
 ) -> Application:
     user = _create_user(
         db,
@@ -237,6 +240,7 @@ def _add_application(
         faculty=faculty,
         major=major,
         year=year,
+        ipk=ipk,
     )
     app = Application(
         user_id=user.id,
@@ -289,6 +293,7 @@ def _seed_applications(period_id: int) -> None:
             faculty="Fakultas Informatika",
             major="Data Science",
             year=2023,
+            ipk=3.75,
         )
         _add_application(
             db,
@@ -307,6 +312,7 @@ def _seed_applications(period_id: int) -> None:
             faculty="Fakultas Informatika",
             major="Software Engineering",
             year=2023,
+            ipk=3.20,
         )
         _add_application(
             db,
@@ -319,6 +325,7 @@ def _seed_applications(period_id: int) -> None:
             faculty="Fakultas Rekayasa Industri",
             major="Industrial Engineering",
             year=2022,
+            ipk=2.80,
         )
         _add_application(
             db,
@@ -332,6 +339,7 @@ def _seed_applications(period_id: int) -> None:
             faculty="Fakultas Informatika",
             major="Data Science",
             year=2024,
+            ipk=2.10,
         )
         _add_application(
             db,
@@ -357,6 +365,7 @@ def _seed_applications(period_id: int) -> None:
             faculty="Fakultas Teknik Elektro",
             major="Computer Engineering",
             year=2023,
+            ipk=3.55,
         )
         _add_application(
             db,
@@ -370,6 +379,7 @@ def _seed_applications(period_id: int) -> None:
             faculty="",
             major="",
             year=None,
+            ipk=3.49,
         )
         _add_application(
             db,
@@ -383,6 +393,7 @@ def _seed_applications(period_id: int) -> None:
             faculty="Fakultas Informatika",
             major="Data Science",
             year=2025,
+            ipk=3.95,
         )
         _add_application(
             db,
@@ -460,6 +471,7 @@ def main() -> int:
                 "faculty_distribution",
                 "major_distribution",
                 "year_distribution",
+                "ipk_distribution",
             }.issubset(empty_demographics),
             "empty active period returns all demographic keys",
         )
@@ -474,6 +486,10 @@ def main() -> int:
         failures += _assert(
             empty_demographics.get("year_distribution") == [],
             "empty active period year distribution is empty",
+        )
+        failures += _assert(
+            empty_demographics.get("ipk_distribution") == [],
+            "empty active period ipk distribution is empty",
         )
 
     _seed_applications(period_id)
@@ -564,6 +580,7 @@ def main() -> int:
             "faculty_distribution",
             "major_distribution",
             "year_distribution",
+            "ipk_distribution",
         }.issubset(demographics),
         "seeded analytics returns all demographic keys",
     )
@@ -596,6 +613,32 @@ def main() -> int:
     }
     for label, expected in expected_majors.items():
         failures += _assert(major_counts.get(label) == expected, f"major {label}={expected}")
+
+    ipk_items = demographics.get("ipk_distribution", [])
+    ipk_counts = {item["label"]: item["count"] for item in ipk_items}
+    ipk_labels = [item["label"] for item in ipk_items]
+    expected_ipk = {
+        "0.00 - 2.49": 1,
+        "2.50 - 2.99": 1,
+        "3.00 - 3.49": 2,
+        "3.50 - 4.00": 3,
+        "Belum Diisi": 2,
+    }
+    for label, expected in expected_ipk.items():
+        failures += _assert(
+            ipk_counts.get(label) == expected,
+            f"ipk bucket {label}={expected}",
+        )
+    failures += _assert(
+        ipk_labels
+        == ["0.00 - 2.49", "2.50 - 2.99", "3.00 - 3.49", "3.50 - 4.00", "Belum Diisi"],
+        "ipk distribution keeps stable bucket order",
+    )
+    ipk_pct = {item["label"]: item["percentage"] for item in ipk_items}
+    failures += _assert(
+        ipk_pct.get("Belum Diisi") == 22.2,
+        "ipk percentage uses total scope (2/9 -> 22.2)",
+    )
 
     year_counts = {
         item["label"]: item["count"]
@@ -679,6 +722,22 @@ def main() -> int:
         failures += _assert(
             filtered_year_counts.get(label) == expected,
             f"division filter scopes year {label}={expected}",
+        )
+    filtered_ipk_counts = {
+        item["label"]: item["count"]
+        for item in filtered_demographics.get("ipk_distribution", [])
+    }
+    expected_filtered_ipk = {
+        "0.00 - 2.49": 1,
+        "2.50 - 2.99": 1,
+        "3.00 - 3.49": 1,
+        "3.50 - 4.00": 1,
+        "Belum Diisi": 0,
+    }
+    for label, expected in expected_filtered_ipk.items():
+        failures += _assert(
+            filtered_ipk_counts.get(label) == expected,
+            f"division filter scopes ipk {label}={expected}",
         )
     filtered_divisions = {
         item["division"]: item for item in filtered.get("applicants_per_division", [])

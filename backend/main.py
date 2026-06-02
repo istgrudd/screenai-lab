@@ -90,7 +90,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="ScreenAI Lab",
-    description="MBC Laboratory recruitment screening system — candidate portal + AI-driven evaluation (NER blind screening, RAG competency evaluation, Explainable AI).",
+    description="MBC Laboratory recruitment screening system — candidate portal + AI-driven evaluation (NER-based AI-anonymized evaluation, RAG competency evaluation, Explainable AI).",
     version="0.1.0",
     lifespan=lifespan,
 )

@@ -327,7 +327,7 @@ For endpoint-level detail see [API_REFERENCE.md](API_REFERENCE.md). For runtime 
 
 ## 7. AI Pipeline — NER Anonymization
 
-**Responsibility.** Replace identity attributes with indexed tokens for blind screening.
+**Responsibility.** Replace identity attributes with indexed tokens so personal identifiers are excluded from the document text sent to AI (AI-anonymized evaluation). Recruiters retain full access to candidate identity; this is not full blind recruitment.
 
 **Key files**
 

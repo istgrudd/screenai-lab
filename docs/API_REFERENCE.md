@@ -699,11 +699,33 @@ Returns active-period recruitment metrics for recruiter and super_admin dashboar
   "missing_documents_by_type": [],
   "evaluation_progress": {},
   "score_distribution": {},
-  "demographics": {}
+  "demographics": {
+    "faculty_distribution": [{ "label": "Fakultas Informatika", "count": 5, "percentage": 55.6 }],
+    "major_distribution": [{ "label": "Data Science", "count": 3, "percentage": 33.3 }],
+    "year_distribution": [{ "label": "2023", "count": 3, "percentage": 33.3 }],
+    "ipk_distribution": [
+      { "label": "0.00 - 2.49", "count": 1, "percentage": 11.1 },
+      { "label": "2.50 - 2.99", "count": 1, "percentage": 11.1 },
+      { "label": "3.00 - 3.49", "count": 2, "percentage": 22.2 },
+      { "label": "3.50 - 4.00", "count": 3, "percentage": 33.3 },
+      { "label": "Belum Diisi", "count": 2, "percentage": 22.2 }
+    ]
+  }
 }
 ```
 
-If there is no active period, the endpoint still returns `200` with zeroed metrics and `active_period: null`.
+**`demographics`** is scoped to applications in the active period that are not `draft` and not `cancelled` (division filter applies). Each distribution item carries `label`, `count`, and `percentage`. `percentage` is computed over the full scoped population.
+
+- `faculty_distribution`, `major_distribution` — sorted by count descending; missing/empty values are bucketed under `Unknown`.
+- `year_distribution` — sorted by year descending, with `Unknown` last.
+- `ipk_distribution` — derived from `User.ipk`, returned in a **fixed, count-independent order** so the IPK ranges stay stable:
+  - `0.00 - 2.49`
+  - `2.50 - 2.99`
+  - `3.00 - 3.49`
+  - `3.50 - 4.00`
+  - `Belum Diisi` (candidate has no IPK recorded)
+
+If there is no active period, the endpoint still returns `200` with zeroed metrics and `active_period: null`. In that case every demographic distribution (including `ipk_distribution`) is an empty array.
 
 ---
 
@@ -983,7 +1005,7 @@ Returns candidate detail:
 - `composite_score`, `language_score`, `language_bonus`, `cefr_level`;
 - `profile_summary`;
 - cross-linked `application`;
-- revealed `user_profile` for recruiter review, including candidate `ipk`;
+- `user_profile` for recruiter review (`full_name`, `email`, `whatsapp`, `nim`, `faculty`, `major`, `year`, `ipk`) — candidate identity is always visible to recruiters; only the AI-facing document text is anonymized;
 - processed `documents`;
 - `dimension_scores` with evidence, justification, override status, and override reason.
 

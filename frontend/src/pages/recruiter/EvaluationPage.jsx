@@ -159,7 +159,7 @@ export default function RecruiterEvaluationPage() {
       <PageHeader
         eyebrow="Recruiter / Evaluation"
         title="Evaluation"
-        description="Run AI evaluation per division. Controls are locked while evaluation is running to prevent duplicate or inconsistent processing."
+        description="Run AI-anonymized evaluation per division. Personal identifiers are excluded from AI evaluation input, while recruiter-facing candidate data stays visible. Controls are locked while evaluation is running to prevent duplicate or inconsistent processing."
       />
 
       <EvaluationRunningOverlay running={evaluating} />

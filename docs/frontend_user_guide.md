@@ -505,15 +505,14 @@ Fitur utama:
 
 - Menampilkan anonymous ID kandidat.
 - Menampilkan status dan composite score.
+- Menampilkan card Candidate Profile (nama, email, WhatsApp, NIM, fakultas, jurusan, angkatan, IPK, divisi, status aplikasi, submitted at, anonymous ID) di bagian atas. Identitas kandidat selalu terlihat oleh recruiter untuk verifikasi dan pengambilan keputusan; yang dianonimkan hanya teks dokumen yang dikirim ke AI.
 - Menampilkan dokumen aplikasi.
-- Preview/download dokumen.
-- Menampilkan SWOT highlight.
+- Preview/download dokumen, termasuk dokumen SWOT Analysis.
 - Menampilkan language certificate jika ada.
 - Menampilkan profile summary.
 - Menampilkan chart kompetensi.
 - Menampilkan score breakdown.
 - Menampilkan justification dan evidence.
-- Reveal/hide identity candidate.
 - Override score per dimensi.
 
 Tombol utama:
@@ -525,8 +524,6 @@ Tombol utama:
 - Tombol pencil pada score card: membuka dialog override.
 - `Save Override`: menyimpan override score.
 - `Cancel`: membatalkan override.
-- `Reveal Identity`: menampilkan identity yang sebelumnya disembunyikan.
-- `Hide Identity`: menyembunyikan identity.
 - `Open in new tab`: membuka dokumen di tab baru.
 - `Download`: mengunduh dokumen.
 

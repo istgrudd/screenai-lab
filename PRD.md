@@ -18,7 +18,7 @@
 
 ### 1.1 Ringkasan Produk
 
-ScreenAI Lab adalah fork dari ScreenAI (Capstone) yang diadaptasi untuk kebutuhan rekrutasi internal MBC Laboratory, Telkom University. Platform ini mengintegrasikan **Blind Screening** berbasis NER, **evaluasi kompetensi berbasis LLM dengan konteks rubrik**, dan **justifikasi evaluasi** ke dalam alur rekrutmen end-to-end: kandidat mendaftar, memilih divisi, mengunggah dokumen, melakukan submit final, kemudian rekruter menjalankan evaluasi AI, melakukan crosscheck manual, dan mempublikasikan hasil seleksi.
+ScreenAI Lab adalah fork dari ScreenAI (Capstone) yang diadaptasi untuk kebutuhan rekrutasi internal MBC Laboratory, Telkom University. Platform ini mengintegrasikan **AI-Anonymized Evaluation** berbasis NER (identitas pribadi dihapus dari teks dokumen sebelum dikirim ke AI), **evaluasi kompetensi berbasis LLM dengan konteks rubrik**, dan **justifikasi evaluasi** ke dalam alur rekrutmen end-to-end: kandidat mendaftar, memilih divisi, mengunggah dokumen, melakukan submit final, kemudian rekruter menjalankan evaluasi AI, melakukan crosscheck manual, dan mempublikasikan hasil seleksi. Ini bukan full blind recruitment — recruiter tetap dapat melihat identitas kandidat untuk verifikasi administratif dan pengambilan keputusan akhir; anonymization hanya berlaku pada input AI.
 
 Pada implementasi saat ini, pipeline evaluasi menggunakan pendekatan **rubric-augmented LLM scoring**: konteks rubrik dimasukkan langsung ke prompt bersama teks kandidat yang sudah dianonimkan, ringkasan KHS, dan Motivation Letter. Dependensi LangChain dan ChromaDB masih tersedia di codebase untuk kompatibilitas/future retrieval, tetapi retrieval vektor aktif belum menjadi bagian utama alur evaluasi produksi.
 
@@ -248,7 +248,7 @@ Pada implementasi saat ini, pipeline evaluasi menggunakan pendekatan **rubric-au
 | F-54 | Skor per dimensi + justifikasi dari `DimensionScore.justification` | Recruiter | Must Have | ✅ |
 | F-55 | Ranking kandidat per divisi | Recruiter | Must Have | ✅ |
 | F-56 | Override skor dengan audit log `score_override` | Recruiter | Must Have | ✅ |
-| F-57 | Reveal Identity post-evaluasi | Recruiter | Must Have | ✅ |
+| F-57 | Candidate Profile selalu terlihat oleh recruiter (identitas tidak disembunyikan; hanya input AI yang dianonimkan) | Recruiter | Must Have | ✅ |
 | F-58 | Force re-evaluate (`force=true`) | Recruiter | Should Have | ✅ |
 | F-59 | Filter `SUBMITTED`-only selalu berlaku saat batch evaluation | System | Must Have | ✅ |
 | F-90 | Highlight hijau kandidat di atas threshold (`is_recommended` flag) | Recruiter | Should Have | ✅ |
@@ -350,7 +350,7 @@ Recruiter: Login → Dashboard → pilih/filter divisi
         → store hasil: skor + justifikasi
     → Lihat ranking: kandidat rank ≤ threshold di-highlight hijau
     → Override skor jika perlu (logged)
-    → Reveal Identity
+    → Lihat Candidate Profile (identitas selalu terlihat untuk verifikasi)
     → Checklist manual: centang kandidat yang lolos
     → "Publish Hasil" → bulk announce
 
@@ -380,7 +380,7 @@ Operator VPS:
 | Role | Akses |
 |---|---|
 | **Super Admin** | Semua fitur + manage users + reset password + manage recruitment period + set threshold + bypass bulk-announce phase lock |
-| **Recruiter** | Dashboard pelamar, run evaluation, force re-evaluate, override skor, reveal identity, checklist manual, publish hasil |
+| **Recruiter** | Dashboard pelamar, run evaluation, force re-evaluate, override skor, lihat candidate profile, checklist manual, publish hasil |
 | **Candidate** | Registrasi, upload dokumen, submit, lihat status & hasil pengumuman |
 
 ---

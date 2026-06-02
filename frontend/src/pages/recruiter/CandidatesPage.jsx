@@ -65,7 +65,7 @@ export default function RecruiterCandidatesPage() {
       <PageHeader
         eyebrow="Recruiter / Candidates"
         title="Candidates"
-        description="Ranked candidate review list with recommendation, score, and evidence detail."
+        description="Ranked candidate review list with recommendation, score, and evidence detail. AI scoring uses anonymized document content; recruiter-facing candidate data remains visible for operational review."
       />
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-4">

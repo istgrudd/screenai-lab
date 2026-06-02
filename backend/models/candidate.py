@@ -36,8 +36,11 @@ def _generate_anon_id() -> str:
 class Candidate(Base):
     """A job applicant whose documents are being screened.
 
-    The anonymous_id is the only identifier shown on the recruiter
-    dashboard (blind screening).
+    The anonymous_id labels the candidate in AI-facing contexts. It is the
+    identifier that travels with the anonymized document text into AI
+    evaluation; recruiters can still view the candidate's real identity for
+    verification and decision-making (AI-anonymized evaluation, not full
+    blind recruitment).
     """
 
     __tablename__ = "candidates"

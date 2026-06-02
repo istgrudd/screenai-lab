@@ -59,6 +59,7 @@ const EMPTY_ANALYTICS = {
     faculty_distribution: [],
     major_distribution: [],
     year_distribution: [],
+    ipk_distribution: [],
   },
 };
 
@@ -198,8 +199,16 @@ export default function RecruiterAnalyticsPage() {
     () => demographics.faculty_distribution || [],
     [demographics]
   );
+  const majorDistribution = useMemo(
+    () => demographics.major_distribution || [],
+    [demographics]
+  );
   const yearDistribution = useMemo(
     () => demographics.year_distribution || [],
+    [demographics]
+  );
+  const ipkDistribution = useMemo(
+    () => demographics.ipk_distribution || [],
     [demographics]
   );
 
@@ -223,9 +232,17 @@ export default function RecruiterAnalyticsPage() {
     () => maxOf(facultyDistribution, "count"),
     [facultyDistribution]
   );
+  const maxMajorCount = useMemo(
+    () => maxOf(majorDistribution, "count"),
+    [majorDistribution]
+  );
   const maxYearCount = useMemo(
     () => maxOf(yearDistribution, "count"),
     [yearDistribution]
+  );
+  const maxIpkCount = useMemo(
+    () => maxOf(ipkDistribution, "count"),
+    [ipkDistribution]
   );
   const hasApplications = Number(summary.total_applications || 0) > 0;
 
@@ -353,7 +370,7 @@ export default function RecruiterAnalyticsPage() {
         />
       </div>
 
-      <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
         <InsightCard title="Applicants Per Division">
           {applicantsByDivision.length ? (
             applicantsByDivision.map((item) => (
@@ -379,23 +396,6 @@ export default function RecruiterAnalyticsPage() {
               max={maxFunnelCount}
             />
           ))}
-        </InsightCard>
-
-        <InsightCard title="Year Distribution">
-          {yearDistribution.length ? (
-            yearDistribution.map((item) => (
-              <BarRow
-                key={item.label}
-                label={item.label}
-                value={item.count}
-                max={maxYearCount}
-                detail={`${formatScore(item.percentage)}% of scope`}
-                tone="success"
-              />
-            ))
-          ) : (
-            <p className="py-4 text-sm text-muted-foreground">No year data.</p>
-          )}
         </InsightCard>
       </div>
 
@@ -439,7 +439,7 @@ export default function RecruiterAnalyticsPage() {
         </InsightCard>
       </div>
 
-      <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+      <div className="grid grid-cols-1 gap-6">
         <InsightCard title="Score Distribution">
           <div className="grid grid-cols-3 gap-3">
             <SmallStat label="Scored" value={scoreDistribution.count || 0} />
@@ -460,7 +460,9 @@ export default function RecruiterAnalyticsPage() {
             <p className="py-4 text-sm text-muted-foreground">No score data.</p>
           )}
         </InsightCard>
+      </div>
 
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
         <InsightCard title="Faculty Distribution">
           {facultyDistribution.length ? (
             facultyDistribution.map((item) => (
@@ -475,6 +477,61 @@ export default function RecruiterAnalyticsPage() {
           ) : (
             <p className="py-4 text-sm text-muted-foreground">
               No faculty distribution data.
+            </p>
+          )}
+        </InsightCard>
+
+        <InsightCard title="Major Distribution">
+          {majorDistribution.length ? (
+            majorDistribution.map((item) => (
+              <BarRow
+                key={item.label}
+                label={item.label}
+                value={item.count}
+                max={maxMajorCount}
+                detail={`${formatScore(item.percentage)}% of scope`}
+                tone="success"
+              />
+            ))
+          ) : (
+            <p className="py-4 text-sm text-muted-foreground">
+              No major distribution data.
+            </p>
+          )}
+        </InsightCard>
+
+        <InsightCard title="Year Distribution">
+          {yearDistribution.length ? (
+            yearDistribution.map((item) => (
+              <BarRow
+                key={item.label}
+                label={item.label}
+                value={item.count}
+                max={maxYearCount}
+                detail={`${formatScore(item.percentage)}% of scope`}
+                tone="success"
+              />
+            ))
+          ) : (
+            <p className="py-4 text-sm text-muted-foreground">No year data.</p>
+          )}
+        </InsightCard>
+
+        <InsightCard title="IPK Distribution">
+          {ipkDistribution.length ? (
+            ipkDistribution.map((item) => (
+              <BarRow
+                key={item.label}
+                label={item.label}
+                value={item.count}
+                max={maxIpkCount}
+                detail={`${formatScore(item.percentage)}% of scope`}
+                tone="warning"
+              />
+            ))
+          ) : (
+            <p className="py-4 text-sm text-muted-foreground">
+              No IPK distribution data.
             </p>
           )}
         </InsightCard>

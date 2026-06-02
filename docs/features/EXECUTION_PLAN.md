@@ -94,7 +94,7 @@ candidate register
 
 Important note:
 
-Document verification is an administrative validation step. Recruiters may see raw documents during this step. Blind screening starts after documents are accepted and NER anonymization runs.
+Document verification is an administrative validation step. Recruiters may see raw documents during this step. AI-anonymized evaluation applies after documents are accepted and NER anonymization runs — personal identifiers are excluded from the document text sent to AI, while recruiters keep full access to candidate identity.
 
 ---
 
@@ -884,7 +884,7 @@ submit
 
 ## Important Design Note
 
-Recruiter document verification happens before blind screening. Recruiters may see raw documents to validate file correctness. The AI evaluation path should use anonymized content after verification.
+Recruiter document verification happens before AI-anonymized evaluation. Recruiters may see raw documents to validate file correctness. The AI evaluation path uses anonymized content after verification; recruiter-facing candidate identity stays visible throughout.
 
 ## Suggested API
 

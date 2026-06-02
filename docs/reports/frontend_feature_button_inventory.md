@@ -181,7 +181,7 @@ Allowed role: `candidate`. Semua route candidate memakai `CandidateShell` kecual
 | `/recruiter/announcements` | `recruiter/AnnouncementsPage` | Pilih kandidat yang lolos dan publish hasil per divisi. | Filter, checkbox pass, Publish Results, confirm publication. |
 | `/recruiter/analytics` | `recruiter/AnalyticsPage` | Dashboard analytics active period dan division filter. | Select division filter. |
 | `/rubrics` | `RubricConfigPage` | Kelola rubric evaluasi. | New Rubric, edit, add/remove dimensions/indicators, save, delete. |
-| `/candidates/:id` | `CandidateDetailPage` | Detail candidate hasil evaluasi, dokumen, SWOT, score, identity reveal, override. | Back, preview document, supporting doc verified toggle, refresh SWOT, override score, reveal/hide identity, download/open preview. |
+| `/candidates/:id` | `CandidateDetailPage` | Detail candidate hasil evaluasi: Candidate Profile card (identitas selalu terlihat), dokumen aplikasi, score, override. | Back, preview document (termasuk SWOT), supporting doc verified toggle, override score, download/open preview. |
 | `/recruiter/profile` | `recruiter/ProfilePage` | Account summary recruiter. | Edit Profile. |
 | `/recruiter/profile/edit` | `recruiter/EditProfilePage` | Edit nama, email, password recruiter. | Simpan Perubahan. |
 
@@ -386,9 +386,9 @@ Recruiter memantau dashboard dan periode aktif, memfilter aplikasi, melakukan re
 #### Candidate Detail
 
 - Route: `/candidates/:id`
-- Tujuan halaman: Membuka detail candidate hasil evaluasi, documents, SWOT, language certificate, charts, evidence, identity reveal, dan override score.
-- Data yang ditampilkan: `getCandidate(id)`, `listApplicationDocuments(application.id)`, `getSwotText`, `fetchDocumentBlob`.
-- Tombol/action: `Back`, supporting document `Verified` checkbox, `Preview`, `Refresh` SWOT, pencil override, `Cancel`, `Save Override`, `Reveal Identity`/`Hide Identity`, preview `Open in new tab`, `Download`.
+- Tujuan halaman: Membuka detail candidate hasil evaluasi: Candidate Profile card (identitas selalu terlihat untuk recruiter), documents, language certificate, charts, evidence, dan override score.
+- Data yang ditampilkan: `getCandidate(id)`, `listApplicationDocuments(application.id)`, `fetchDocumentBlob`.
+- Tombol/action: `Back`, supporting document `Verified` checkbox, `Preview` (termasuk dokumen SWOT), pencil override, `Cancel`, `Save Override`, preview `Open in new tab`, `Download`.
 - Dampak action: supporting document checkbox memakai legacy `verifyDocument`; score override memakai `overrideScore`; preview/download memakai blob URL.
 - Precondition: override butuh score 0-100 dan reason.
 - State: candidate not found, no scores, no SWOT/missing SWOT, preview loading/error, identity hidden by default.
@@ -535,8 +535,6 @@ Super admin memegang oversight sistem: melihat dashboard dan active period stats
 | Recruiter+ | Rubrics | Save Rubric | Create/update rubric. | `createRubric`/`updateRubric` | No | High |
 | Recruiter+ | Rubrics | Delete | Hapus rubric dan dimension scores terkait. | `deleteRubric` | Dialog | High |
 | Recruiter+ | Candidate Detail | Verified checkbox | Toggle legacy supporting document verification. | `verifyDocument` | No | Medium |
-| Recruiter+ | Candidate Detail | Refresh SWOT | Reload text SWOT. | `getSwotText` | No | Low |
-| Recruiter+ | Candidate Detail | Reveal/Hide Identity | Tampilkan/sembunyikan entity identity hasil anonymization. | Local state | No | High |
 | Recruiter+ | Candidate Detail | Save Override | Ubah dimension score dengan reason. | `overrideScore` | Dialog form, no extra confirm | High |
 | Recruiter+ | Candidate Detail | Open in new tab/Download | Buka/download preview blob. | Blob URL from `fetchDocumentBlob` | No | Low |
 | Recruiter/Admin | Profile Edit | Simpan Perubahan | Update nama/email/password staff. | `updateMyProfile` | No | Medium |
@@ -726,7 +724,7 @@ Recruiter checklist:
 - Document Verification: pilih candidate, preview dokumen, verify, reject tanpa reason (harus error), reject dengan reason, finalize verified/correction.
 - Evaluation: pilih divisi, run evaluation, lihat skipped candidates jika dokumen belum verified, re-evaluate all dan confirm dialog.
 - Candidates: filter, cek recommended badge, top score, row detail.
-- Candidate Detail: preview/download document, refresh SWOT, reveal/hide identity, override score dengan reason.
+- Candidate Detail: lihat Candidate Profile card, preview/download document (termasuk SWOT), override score dengan reason.
 - Announcements: filter ke satu divisi, checklist pass, publish saat fase announcement, verify fail count, verify disabled state saat division all/no active period.
 - Analytics: ganti division filter, cek no active period/empty data/loading.
 - Rubrics: create, edit, invalid weight, add/remove dimension/indicator, delete dengan confirm.

@@ -5,11 +5,9 @@ import {
   Loader2,
   User,
   FileText,
-  Pencil,
   ShieldCheck,
   AlertTriangle,
   Eye,
-  EyeOff,
   Languages,
   ClipboardList,
   CheckCircle2,
@@ -44,7 +42,6 @@ import {
 import OverrideDialog from "@/components/OverrideDialog";
 import JustificationCard from "@/components/JustificationCard";
 import DocumentPreviewDialog from "@/components/DocumentPreviewDialog";
-import SwotHighlightPanel from "@/components/SwotHighlightPanel";
 import { defaultPathForRole, getCurrentUser } from "@/lib/auth";
 import { formatIpk } from "@/lib/candidateApplication";
 
@@ -122,31 +119,64 @@ function LanguageCertificateCard({ candidate }) {
   );
 }
 
-function CandidateProfileSnapshot({ profile }) {
-  if (!profile) return null;
+function formatDateTime(value) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+  return date.toLocaleString();
+}
+
+function formatDivisionLabel(division) {
+  if (!division) return "-";
+  return String(division).replace(/_/g, " ");
+}
+
+function CandidateProfileCard({ candidate }) {
+  const profile = candidate.user_profile || {};
+  const application = candidate.application || {};
+
   const items = [
-    ["Nama", profile.full_name],
+    ["Full Name", profile.full_name],
     ["Email", profile.email],
-    ["NIM", profile.nim],
-    ["Fakultas", profile.faculty],
-    ["Jurusan", profile.major],
-    ["Angkatan", profile.year],
+    ["WhatsApp", profile.whatsapp],
+    ["NIM", profile.nim, "font-mono"],
+    ["Faculty", profile.faculty],
+    ["Major", profile.major],
+    ["Year", profile.year],
     ["IPK", formatIpk(profile.ipk)],
+    ["Division", formatDivisionLabel(application.division)],
+    ["Application Status", application.status],
+    ["Submitted At", formatDateTime(application.submitted_at)],
+    ["Anonymous ID", candidate.anonymous_id, "font-mono"],
   ];
 
   return (
-    <div className="grid grid-cols-1 gap-3 rounded-lg border border-amber-300/50 bg-amber-50/50 px-3 py-3 text-sm dark:bg-amber-900/10 md:grid-cols-2">
-      {items.map(([label, value]) => (
-        <div key={label}>
-          <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-            {label}
-          </p>
-          <p className={label === "NIM" ? "mt-1 font-mono" : "mt-1"}>
-            {value || "-"}
-          </p>
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base flex items-center gap-2">
+          <User className="w-4 h-4" /> Candidate Profile
+        </CardTitle>
+        <CardDescription>
+          Candidate identity is visible to recruiters for verification and
+          decision-making. Personal identifiers are excluded from AI evaluation
+          input.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <div className="grid grid-cols-1 gap-x-6 gap-y-4 text-sm sm:grid-cols-2 lg:grid-cols-3">
+          {items.map(([label, value, className]) => (
+            <div key={label}>
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                {label}
+              </p>
+              <p className={`mt-1 break-words ${className || ""}`}>
+                {value || value === 0 ? value : "-"}
+              </p>
+            </div>
+          ))}
         </div>
-      ))}
-    </div>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -160,7 +190,6 @@ export default function CandidateDetailPage() {
   const [candidate, setCandidate] = useState(null);
   const [loading, setLoading] = useState(true);
   const [overrideTarget, setOverrideTarget] = useState(null);
-  const [identityRevealed, setIdentityRevealed] = useState(false);
   const [appDocuments, setAppDocuments] = useState([]);
   const [previewDoc, setPreviewDoc] = useState(null);
   const [verifyingDocId, setVerifyingDocId] = useState(null);
@@ -292,6 +321,9 @@ export default function CandidateDetailPage() {
         </div>
       </div>
 
+      {/* Candidate profile — visible to recruiters for verification */}
+      <CandidateProfileCard candidate={candidate} />
+
       {/* Phase-1 application documents */}
       <ApplicationDocumentsCard
         application={candidate.application}
@@ -300,11 +332,6 @@ export default function CandidateDetailPage() {
         onVerifyToggle={handleVerify}
         verifyingDocId={verifyingDocId}
       />
-
-      {/* SWOT highlight (read-only, not AI-scored) */}
-      {candidate.application?.id && (
-        <SwotHighlightPanel applicationId={candidate.application.id} />
-      )}
 
       {/* Language certificate (Capstone) */}
       <LanguageCertificateCard candidate={candidate} />
@@ -412,115 +439,6 @@ export default function CandidateDetailPage() {
             ))}
           </div>
         </div>
-      )}
-
-      {/* Reveal Identity — only shown after scoring */}
-      {hasScores && (
-        <Card className={identityRevealed ? "border-amber-400/50 bg-amber-50/30 dark:bg-amber-950/10" : ""}>
-          <CardHeader className="pb-3">
-            <div className="flex items-center justify-between">
-              <CardTitle className="text-base flex items-center gap-2">
-                {identityRevealed ? (
-                  <Eye className="w-4 h-4 text-amber-600" />
-                ) : (
-                  <EyeOff className="w-4 h-4" />
-                )}
-                Candidate Identity
-              </CardTitle>
-              <Button
-                variant={identityRevealed ? "outline" : "secondary"}
-                size="sm"
-                onClick={() => setIdentityRevealed((v) => !v)}
-              >
-                {identityRevealed ? (
-                  <>
-                    <EyeOff className="w-3.5 h-3.5 mr-1.5" />
-                    Hide Identity
-                  </>
-                ) : (
-                  <>
-                    <Eye className="w-3.5 h-3.5 mr-1.5" />
-                    Reveal Identity
-                  </>
-                )}
-              </Button>
-            </div>
-            {!identityRevealed && (
-              <p className="text-xs text-muted-foreground mt-1">
-                Identity is hidden during blind screening. Reveal only after evaluation is complete.
-              </p>
-            )}
-          </CardHeader>
-          {identityRevealed && (() => {
-            const profileNode = (
-              <CandidateProfileSnapshot profile={candidate.user_profile} />
-            );
-            // Gather entities from all documents
-            const allEntities = (candidate.documents || []).flatMap(
-              (doc) => doc.entities || []
-            );
-            // Group by label for display
-            const grouped = allEntities.reduce((acc, e) => {
-              const key = e.label || "OTHER";
-              if (!acc[key]) acc[key] = [];
-              if (!acc[key].includes(e.text)) acc[key].push(e.text);
-              return acc;
-            }, {});
-            const labelOrder = ["PERSON", "ORG", "LOC", "PHONE", "EMAIL", "URL", "NIK"];
-            const sortedKeys = [
-              ...labelOrder.filter((k) => grouped[k]),
-              ...Object.keys(grouped).filter((k) => !labelOrder.includes(k)),
-            ];
-            const labelColor = {
-              PERSON: "bg-blue-500/15 text-blue-700 dark:text-blue-400",
-              ORG: "bg-purple-500/15 text-purple-700 dark:text-purple-400",
-              LOC: "bg-green-500/15 text-green-700 dark:text-green-400",
-              PHONE: "bg-orange-500/15 text-orange-700 dark:text-orange-400",
-              EMAIL: "bg-pink-500/15 text-pink-700 dark:text-pink-400",
-              URL: "bg-cyan-500/15 text-cyan-700 dark:text-cyan-400",
-              NIK: "bg-red-500/15 text-red-700 dark:text-red-400",
-            };
-
-            if (allEntities.length === 0) {
-              return (
-                <CardContent className="pt-0 pb-4 space-y-3">
-                  {profileNode}
-                  <p className="text-sm text-muted-foreground italic">
-                    No identity entities were detected during anonymization.
-                  </p>
-                </CardContent>
-              );
-            }
-
-            return (
-              <CardContent className="pt-0 pb-4 space-y-3">
-                {profileNode}
-                <div className="rounded-lg border border-amber-300/50 bg-amber-50/50 dark:bg-amber-900/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
-                  This information was masked during evaluation to ensure unbiased screening.
-                </div>
-                {sortedKeys.map((label) => (
-                  <div key={label} className="space-y-1">
-                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                      {label}
-                    </p>
-                    <div className="flex flex-wrap gap-2">
-                      {grouped[label].map((text, i) => (
-                        <span
-                          key={i}
-                          className={`inline-flex items-center px-2.5 py-1 rounded-md text-sm font-medium ${
-                            labelColor[label] || "bg-muted text-foreground"
-                          }`}
-                        >
-                          {text}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </CardContent>
-            );
-          })()}
-        </Card>
       )}
 
       {/* Documents info */}

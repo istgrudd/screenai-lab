@@ -55,6 +55,17 @@ _SCORE_BUCKETS = [
     {"label": "81-100", "min": 81, "max": 100},
 ]
 
+# IPK buckets are range-stable: rendered in this fixed order regardless of
+# count, never sorted by frequency. `max_exclusive=None` is the final/open
+# bucket. Candidates without an IPK fall into the Unknown bucket below.
+_IPK_BUCKETS = [
+    {"label": "0.00 - 2.49", "max_exclusive": 2.50},
+    {"label": "2.50 - 2.99", "max_exclusive": 3.00},
+    {"label": "3.00 - 3.49", "max_exclusive": 3.50},
+    {"label": "3.50 - 4.00", "max_exclusive": None},
+]
+_IPK_UNKNOWN_LABEL = "Belum Diisi"
+
 
 def _utc_iso(dt: datetime | None) -> str | None:
     if dt is None:
@@ -107,6 +118,7 @@ def _zero_payload(division: Division | None) -> dict:
             "faculty_distribution": [],
             "major_distribution": [],
             "year_distribution": [],
+            "ipk_distribution": [],
         },
         "message": "No active recruitment period.",
     }
@@ -411,6 +423,47 @@ def _distribution(items: list[str], *, sort_by_year: bool = False) -> list[dict]
     ]
 
 
+def _ipk_bucket_label(ipk: float) -> str:
+    for bucket in _IPK_BUCKETS:
+        max_exclusive = bucket["max_exclusive"]
+        if max_exclusive is None or ipk < max_exclusive:
+            return bucket["label"]
+    return _IPK_BUCKETS[-1]["label"]
+
+
+def _ipk_distribution(ipks: list[float | None]) -> list[dict]:
+    """Bucket IPK values into range-stable groups.
+
+    Percentages are computed over the full scoped population (``ipks`` already
+    contains one entry per scoped application, with ``None`` for candidates
+    who have not filled in their IPK). Buckets are returned in fixed order,
+    never sorted by count, so the IPK ranges stay visually stable.
+    """
+    total = len(ipks)
+    if total == 0:
+        return []
+
+    counts: dict[str, int] = {bucket["label"]: 0 for bucket in _IPK_BUCKETS}
+    counts[_IPK_UNKNOWN_LABEL] = 0
+    for ipk in ipks:
+        if ipk is None:
+            counts[_IPK_UNKNOWN_LABEL] += 1
+        else:
+            counts[_ipk_bucket_label(float(ipk))] += 1
+
+    ordered_labels = [bucket["label"] for bucket in _IPK_BUCKETS] + [
+        _IPK_UNKNOWN_LABEL
+    ]
+    return [
+        {
+            "label": label,
+            "count": counts[label],
+            "percentage": round((counts[label] / total) * 100, 1),
+        }
+        for label in ordered_labels
+    ]
+
+
 def _demographics_payload(
     apps: list[Application],
     users_by_id: dict[int, User],
@@ -419,17 +472,20 @@ def _demographics_payload(
     faculties: list[str] = []
     majors: list[str] = []
     years: list[str] = []
+    ipks: list[float | None] = []
 
     for app in scoped_apps:
         user = users_by_id.get(app.user_id)
         faculties.append(_clean_demographic_label(user.faculty if user else None))
         majors.append(_clean_demographic_label(user.major if user else None))
         years.append(_clean_demographic_label(user.year if user else None))
+        ipks.append(user.ipk if user else None)
 
     return {
         "faculty_distribution": _distribution(faculties),
         "major_distribution": _distribution(majors),
         "year_distribution": _distribution(years, sort_by_year=True),
+        "ipk_distribution": _ipk_distribution(ipks),
     }
 
 
