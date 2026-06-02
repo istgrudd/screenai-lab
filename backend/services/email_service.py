@@ -90,6 +90,12 @@ def send_email(
         "text": text,
     }
     body = json.dumps(payload).encode("utf-8")
+    user_agent_url = (
+        settings.public_frontend_url
+        or settings.frontend_url
+        or "https://screenai-lab.local"
+    ).strip()
+
     req = request.Request(
         "https://api.resend.com/emails",
         data=body,
@@ -97,6 +103,8 @@ def send_email(
         headers={
             "Authorization": f"Bearer {settings.resend_api_key}",
             "Content-Type": "application/json",
+            "Accept": "application/json",
+            "User-Agent": f"ScreenAI-Lab/0.1 (+{user_agent_url})",
         },
     )
 
