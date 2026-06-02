@@ -17,11 +17,17 @@ from sqlalchemy.orm import Session
 from backend.database import get_db
 from backend.middleware.auth_middleware import get_current_user, require_role
 from backend.models.application import Application, Division
-from backend.models.candidate import Candidate, DimensionScore
+from backend.models.candidate import Candidate, CandidateDocument, DimensionScore
+from backend.models.document import DocumentType
 from backend.models.period import RecruitmentPeriod
 from backend.models.rubric import Rubric
 from backend.models.user import User, UserRole
 from backend.services.evaluation_service import run_evaluation_pipeline
+from backend.services.khs_parser import (
+    khs_cache_scoring_metadata,
+    khs_processing_status,
+    parsed_khs_from_cache,
+)
 from backend.utils.period_utils import get_current_phase
 
 router = APIRouter(prefix="/api/recruiter", tags=["evaluation"])
@@ -163,6 +169,65 @@ def _phase_warning(db: Session) -> str | None:
     return None
 
 
+def _khs_result_metadata(candidate: Candidate, db: Session) -> dict:
+    """Return safe KHS metadata for recruiter result views.
+
+    Raw KHS text is intentionally not exposed here. Recruiters can still use
+    existing document preview/download endpoints for original files.
+    """
+    khs_doc = (
+        db.query(CandidateDocument)
+        .filter(
+            CandidateDocument.candidate_id == candidate.id,
+            CandidateDocument.document_type == DocumentType.KHS.value,
+        )
+        .order_by(CandidateDocument.created_at.desc())
+        .first()
+    )
+    if not khs_doc:
+        return {
+            "khs_summary": None,
+            "khs_used_in_ai_scoring": False,
+            "khs_source": "missing",
+            "khs_warning": "No cached KHS found",
+        }
+
+    parsed = parsed_khs_from_cache(khs_doc.sections_json)
+    scoring = khs_cache_scoring_metadata(khs_doc.sections_json)
+    if not parsed:
+        return {
+            "khs_summary": None,
+            "khs_used_in_ai_scoring": bool(scoring.get("khs_used_in_ai_scoring", False)),
+            "khs_source": scoring.get("khs_source") or "missing",
+            "khs_warning": scoring.get("khs_warning") or "KHS cache is empty",
+        }
+
+    warning = (
+        scoring.get("khs_warning")
+        or parsed.get("parse_error")
+        or parsed.get("parse_warning")
+    )
+    summary = None
+    if not parsed.get("parse_error"):
+        summary = {
+            "ipk_final": parsed.get("ipk_final", parsed.get("ipk")),
+            "total_sks_final": parsed.get("total_sks_final", parsed.get("total_sks")),
+            "ips_history": parsed.get("ips_history") or [],
+            "courses": parsed.get("courses") or [],
+            "ongoing_courses": parsed.get("ongoing_courses") or [],
+            "parse_warning": parsed.get("parse_warning"),
+            "parser_version": parsed.get("parser_version"),
+        }
+
+    return {
+        "khs_summary": summary,
+        "khs_used_in_ai_scoring": bool(scoring.get("khs_used_in_ai_scoring", False)),
+        "khs_source": scoring.get("khs_source")
+        or (khs_processing_status(parsed) if parsed.get("parse_error") else "cache"),
+        "khs_warning": warning,
+    }
+
+
 @router.get(
     "/results/{application_id}",
     dependencies=[Depends(_recruiter_or_admin)],
@@ -200,6 +265,7 @@ def get_evaluation_result(
         .filter(DimensionScore.candidate_id == candidate.id)
         .all()
     )
+    khs_metadata = _khs_result_metadata(candidate, db)
 
     return {
         "success": True,
@@ -212,6 +278,10 @@ def get_evaluation_result(
             "status": candidate.status,
             "language_score": candidate.language_score,
             "language_bonus": candidate.language_bonus,
+            "khs_summary": khs_metadata["khs_summary"],
+            "khs_used_in_ai_scoring": khs_metadata["khs_used_in_ai_scoring"],
+            "khs_source": khs_metadata["khs_source"],
+            "khs_warning": khs_metadata["khs_warning"],
             "dimension_scores": [
                 {
                     "id": ds.id,

@@ -44,6 +44,9 @@ from backend.models.email_notification import EmailNotification
 from backend.models.period import RecruitmentPeriod
 from backend.models.rubric import Dimension, Rubric
 from backend.models.user import User, UserRole
+from backend.services.extractor import extract_text_from_pdf
+from backend.services.document_review_service import invalidate_candidate_document_cache
+from backend.services.khs_parser import build_khs_cache_payload
 from backend.utils.file_storage import purge_application_dir
 from backend.utils.security import hash_password
 
@@ -58,6 +61,48 @@ CAND_NIM = "1039876500001"
 TEST_PASSWORD = "hunter2secure"
 PERIOD_NAME = "smoke+eval cycle"
 NER_CALLS: list[int] = []
+EVAL_PROMPTS: list[str] = []
+
+SMOKE_PARSED_KHS = {
+    "ipk_final": 3.5,
+    "total_sks_final": 100,
+    "ips_history": [
+        {"term_label": "Semester 5", "ips": 3.5, "total_sks": 20},
+    ],
+    "courses": [
+        {
+            "code": "CII3A3",
+            "name_id": "Machine Learning",
+            "name_en": None,
+            "sks": 3,
+            "grade": "A",
+            "term_label": "Semester 5",
+            "status": "completed",
+            "is_completed": True,
+            "name": "Machine Learning",
+            "semester": 5,
+        }
+    ],
+    "ongoing_courses": [],
+    "parse_warning": None,
+    "parser_version": "telkom_khs_llm_v1",
+    "ipk": 3.5,
+    "total_sks": 100,
+    "relevant_courses": [
+        {
+            "code": "CII3A3",
+            "name_id": "Machine Learning",
+            "name_en": None,
+            "sks": 3,
+            "grade": "A",
+            "term_label": "Semester 5",
+            "status": "completed",
+            "is_completed": True,
+            "name": "Machine Learning",
+            "semester": 5,
+        }
+    ],
+}
 
 
 def _assert(cond: bool, msg: str) -> int:
@@ -96,24 +141,98 @@ def _fake_run_submit_anonymization(application_id: int, session_factory) -> None
             .filter(Document.application_id == application_id, Document.doc_type == DocumentType.CV)
             .first()
         )
-        db.add(
-            CandidateDocument(
-                candidate_id=candidate.id,
-                filename=cv_doc.file_name if cv_doc else "cv.pdf",
-                file_path=cv_doc.file_path if cv_doc else "fake",
-                document_type="cv",
-                raw_text="raw cv",
-                normalized_text="normalized cv",
-                anonymized_text="[NAME] has relevant experience.",
-                entities_json=[],
+        db.query(CandidateDocument).filter(
+            CandidateDocument.candidate_id == candidate.id,
+            CandidateDocument.document_type.in_(
+                ["cv", "motivation_letter", "swot", "khs"]
+            ),
+        ).delete(synchronize_session=False)
+        if cv_doc:
+            db.add(
+                CandidateDocument(
+                    candidate_id=candidate.id,
+                    filename=cv_doc.file_name,
+                    file_path=cv_doc.file_path,
+                    document_type="cv",
+                    raw_text="raw cv",
+                    normalized_text="normalized cv",
+                    anonymized_text="[PERSON_1] has relevant experience.",
+                    entities_json=[],
+                )
             )
+        ml_doc = (
+            db.query(Document)
+            .filter(
+                Document.application_id == application_id,
+                Document.doc_type == DocumentType.MOTIVATION_LETTER,
+            )
+            .first()
         )
+        if ml_doc:
+            db.add(
+                CandidateDocument(
+                    candidate_id=candidate.id,
+                    filename=ml_doc.file_name,
+                    file_path=ml_doc.file_path,
+                    document_type="motivation_letter",
+                    raw_text="raw motivation",
+                    normalized_text="normalized motivation",
+                    anonymized_text="Motivation letter shows collaboration and persistence.",
+                    entities_json=[],
+                )
+            )
+        swot_doc = (
+            db.query(Document)
+            .filter(Document.application_id == application_id, Document.doc_type == DocumentType.SWOT)
+            .first()
+        )
+        if swot_doc:
+            extraction = extract_text_from_pdf(swot_doc.file_path)
+            db.add(
+                CandidateDocument(
+                    candidate_id=candidate.id,
+                    filename=swot_doc.file_name,
+                    file_path=swot_doc.file_path,
+                    document_type="swot",
+                    raw_text=(extraction.get("raw_text") or "").strip(),
+                    page_count=(extraction.get("metadata") or {}).get("page_count"),
+                    file_size_kb=(extraction.get("metadata") or {}).get("file_size_kb"),
+                )
+            )
+        khs_doc = (
+            db.query(Document)
+            .filter(Document.application_id == application_id, Document.doc_type == DocumentType.KHS)
+            .first()
+        )
+        if khs_doc:
+            extraction = extract_text_from_pdf(khs_doc.file_path)
+            raw_text = (extraction.get("raw_text") or "").strip()
+            parsed = dict(SMOKE_PARSED_KHS)
+            db.add(
+                CandidateDocument(
+                    candidate_id=candidate.id,
+                    filename=khs_doc.file_name,
+                    file_path=khs_doc.file_path,
+                    document_type="khs",
+                    raw_text=raw_text,
+                    sections_json=build_khs_cache_payload(
+                        parsed,
+                        processing_status="parse_error" if parsed.get("parse_error") else "parsed",
+                        processing_error=parsed.get("parse_error"),
+                        source="llm_parser",
+                    ),
+                    page_count=(extraction.get("metadata") or {}).get("page_count"),
+                    file_size_kb=(extraction.get("metadata") or {}).get("file_size_kb"),
+                )
+            )
         db.commit()
     finally:
         db.close()
 
 
 async def _fake_evaluate_candidate(*args, **kwargs) -> dict:
+    payload = args[0] if args else kwargs.get("anonymized_cv")
+    EVAL_PROMPTS.append((payload or {}).get("anonymized_text", ""))
     return {
         "composite_score": 82.0,
         "profile_summary": "Smoke-test profile summary.",
@@ -216,6 +335,7 @@ def main() -> int:
     _cleanup()
     _deactivate_all_periods()
     NER_CALLS.clear()
+    EVAL_PROMPTS.clear()
     applications_router.run_submit_anonymization = _fake_run_submit_anonymization
     evaluation_service.evaluate_candidate = _fake_evaluate_candidate
     failures = 0
@@ -308,6 +428,7 @@ def main() -> int:
         user = db.query(User).filter(User.email == CAND_EMAIL).first()
         user.email_verified_at = datetime.now(timezone.utc)
         user.whatsapp = "+6281234567890"
+        user.ipk = 3.46
         db.commit()
     finally:
         db.close()
@@ -396,6 +517,35 @@ def main() -> int:
             "finalized application is verified before evaluation",
         )
 
+    db = SessionLocal()
+    try:
+        candidate = (
+            db.query(Candidate)
+            .join(User, User.id == Candidate.user_id)
+            .filter(User.email == CAND_EMAIL)
+            .first()
+        )
+        cached_types = set()
+        khs_cache = None
+        if candidate:
+            cached_docs = (
+                db.query(CandidateDocument)
+                .filter(CandidateDocument.candidate_id == candidate.id)
+                .all()
+            )
+            cached_types = {doc.document_type for doc in cached_docs}
+            khs_cache = next((doc for doc in cached_docs if doc.document_type == "khs"), None)
+        failures += _assert(
+            {"cv", "motivation_letter", "swot", "khs"}.issubset(cached_types),
+            "background cache creates cv, motivation_letter, swot, and khs CandidateDocument rows",
+        )
+        failures += _assert(
+            bool(khs_cache and khs_cache.sections_json and khs_cache.sections_json.get("parsed_khs")),
+            "background cache stores parsed structured KHS JSON",
+        )
+    finally:
+        db.close()
+
     # =====================================================================
     # TEST 1: Empty rubric -> 400
     # =====================================================================
@@ -437,8 +587,8 @@ def main() -> int:
                 rubric_id=rubric.id,
                 name="Technical Skills",
                 weight=0.5,
-                description="Programming and data science skills",
-                indicators=["Python", "Machine Learning", "Data Analysis"],
+                description="Programming, data science, and academic readiness",
+                indicators=["Python", "Machine Learning", "konsistensi IPK", "mata kuliah relevan"],
             )
         )
         db.add(
@@ -480,8 +630,20 @@ def main() -> int:
                 "result has khs_summary or khs_warning",
             )
             failures += _assert(
+                first.get("khs_used_in_ai_scoring") is True,
+                "academic rubric uses KHS in AI scoring",
+            )
+            failures += _assert(
+                first.get("khs_source") == "cache",
+                f"academic rubric uses cached KHS source (got {first.get('khs_source')})",
+            )
+            failures += _assert(
                 "ktm_warning" in first,
                 "result has ktm_warning field",
+            )
+            failures += _assert(
+                bool(EVAL_PROMPTS and "DATA AKADEMIK TERSTRUKTUR" in EVAL_PROMPTS[-1]),
+                "academic rubric prompt includes structured academic block",
             )
         else:
             # LLM call may have failed — that's ok if errors are reported
@@ -529,6 +691,63 @@ def main() -> int:
     if r.status_code == 200:
         body = r.json()
         failures += _assert(body["evaluated_count"] == 1, "force=true re-evaluates screening app")
+
+    # =====================================================================
+    # TEST 2b: Non-academic rubric should not send KHS to the AI prompt
+    # =====================================================================
+    db = SessionLocal()
+    try:
+        rubric = db.query(Rubric).filter(Rubric.division == "big_data").first()
+        if rubric:
+            for dim in rubric.dimensions:
+                if dim.name == "Technical Skills":
+                    dim.description = "Portfolio projects and practical technical work"
+                    dim.indicators = ["Python project", "Data visualization", "Backend API"]
+                if dim.name == "Soft Skills":
+                    dim.description = "Leadership, teamwork, communication, and motivation"
+                    dim.indicators = ["Leadership", "Teamwork", "Communication", "Motivation"]
+            db.commit()
+    finally:
+        db.close()
+
+    EVAL_PROMPTS.clear()
+    r = client.post(
+        "/api/recruiter/evaluate/batch",
+        headers=rec_auth,
+        json={"division": "big_data", "application_ids": [app_id], "force": True},
+    )
+    failures += _assert(r.status_code == 200, "non-academic force re-evaluate request -> 200")
+    if r.status_code == 200:
+        body = r.json()
+        failures += _assert(body["evaluated_count"] == 1, "non-academic force re-evaluates screening app")
+        first = (body.get("data", {}).get("results") or [{}])[0]
+        failures += _assert(
+            first.get("khs_used_in_ai_scoring") is False,
+            "non-academic rubric skips KHS in AI scoring",
+        )
+        failures += _assert(
+            first.get("khs_source") == "cache",
+            f"non-academic rubric still reports cached KHS metadata (got {first.get('khs_source')})",
+        )
+        failures += _assert(
+            bool(EVAL_PROMPTS and "DATA AKADEMIK TERSTRUKTUR" not in EVAL_PROMPTS[-1]),
+            "non-academic rubric prompt does not include KHS block",
+        )
+
+    r = client.get(f"/api/recruiter/results/{app_id}", headers=rec_auth)
+    failures += _assert(r.status_code == 200, f"GET evaluation result -> 200 (got {r.status_code})")
+    if r.status_code == 200:
+        result_data = r.json()["data"]
+        failures += _assert(
+            "khs_summary" in result_data
+            and "khs_used_in_ai_scoring" in result_data
+            and "khs_source" in result_data,
+            "result endpoint exposes safe KHS metadata fields",
+        )
+        failures += _assert(
+            result_data.get("khs_used_in_ai_scoring") is False,
+            "result endpoint reflects latest non-academic KHS skip",
+        )
 
     # TEST 3: Announcements
     # =====================================================================
@@ -615,6 +834,45 @@ def main() -> int:
         r.status_code == 403,
         f"candidate announcement -> 403 (got {r.status_code})",
     )
+
+    # =====================================================================
+    # TEST 6: KHS cache invalidation helper covers correction replacement
+    # =====================================================================
+    db = SessionLocal()
+    try:
+        app_row = db.query(Application).filter(Application.id == app_id).first()
+        candidate = db.query(Candidate).filter(Candidate.user_id == app_row.user_id).first()
+        before = (
+            db.query(CandidateDocument)
+            .filter(
+                CandidateDocument.candidate_id == candidate.id,
+                CandidateDocument.document_type == "khs",
+            )
+            .count()
+            if candidate
+            else 0
+        )
+        deleted = invalidate_candidate_document_cache(
+            db,
+            app=app_row,
+            doc_type=DocumentType.KHS,
+        )
+        db.commit()
+        after = (
+            db.query(CandidateDocument)
+            .filter(
+                CandidateDocument.candidate_id == candidate.id,
+                CandidateDocument.document_type == "khs",
+            )
+            .count()
+            if candidate
+            else 0
+        )
+        failures += _assert(before >= 1, "khs cache invalidation: cache exists before invalidation")
+        failures += _assert(deleted >= 1, "khs cache invalidation: helper deletes khs cache row")
+        failures += _assert(after == 0, "khs cache invalidation: no khs cache remains")
+    finally:
+        db.close()
 
     # =====================================================================
     # Summary

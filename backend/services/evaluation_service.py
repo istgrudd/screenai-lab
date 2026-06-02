@@ -25,7 +25,15 @@ from backend.models.document import Document, DocumentType
 from backend.models.rubric import Rubric
 from backend.models.user import User
 from backend.services.extractor import extract_text_from_pdf
-from backend.services.khs_parser import KhsResult, format_khs_summary, parse_khs
+from backend.services.khs_parser import (
+    KhsResult,
+    build_khs_cache_payload,
+    format_khs_summary,
+    khs_parse_error,
+    khs_processing_status,
+    parse_khs,
+    parsed_khs_from_cache,
+)
 from backend.services.ktm_validator import validate_ktm
 from backend.services.normalizer import normalize_and_segment
 from backend.services.anonymizer import anonymize_text
@@ -40,6 +48,27 @@ logger = logging.getLogger(__name__)
 # Keep this small enough to stay under DeepSeek rate limits but large enough
 # that batch wall-clock scales sub-linearly with N.
 _LLM_CONCURRENCY = 5
+
+_ACADEMIC_EVIDENCE_KEYWORDS = (
+    "ipk",
+    "ips",
+    "gpa",
+    "cgpa",
+    "academic",
+    "akademik",
+    "mata kuliah",
+    "coursework",
+    "course",
+    "kuliah",
+    "nilai",
+    "transkrip",
+    "khs",
+    "sks",
+    "academic readiness",
+    "konsistensi ipk",
+    "relevant course",
+    "mata kuliah relevan",
+)
 
 
 def _utcnow() -> datetime:
@@ -243,21 +272,16 @@ async def _evaluate_one(
     result["ktm_valid"] = ktm_result.get("valid", False)
     result["ktm_warning"] = ktm_result.get("warning") or ktm_result.get("error")
 
-    # --- KHS parsing ---
-    khs_result = _run_khs(app, db)
-    if "parse_error" in khs_result:
-        result["khs_summary"] = None
-        result["khs_warning"] = khs_result["parse_error"]
-    else:
-        result["khs_summary"] = {
-            "ipk": khs_result.get("ipk"),
-            "total_sks": khs_result.get("total_sks"),
-            "relevant_courses": khs_result.get("relevant_courses", []),
-        }
-        result["khs_warning"] = None
-
     # --- Task 10.3/10.4: Ensure Candidate exists (moved up for cache check) ---
     candidate = _ensure_candidate(app, rubric, user, db)
+
+    # --- KHS parsing/cache resolution ---
+    khs_context = _resolve_khs_context(app, candidate, rubric, db)
+    result["khs_summary"] = khs_context["khs_summary"]
+    result["khs_warning"] = khs_context["khs_warning"]
+    result["khs_used_in_ai_scoring"] = khs_context["khs_used_in_ai_scoring"]
+    result["khs_source"] = khs_context["khs_source"]
+    khs_result = khs_context["parsed_khs"]
 
     cv_doc = _get_doc(app.id, DocumentType.CV, db)
     if not cv_doc:
@@ -408,14 +432,15 @@ async def _evaluate_one(
             "=====================\n"
         )
 
-    # Task 8.2: Prepend KHS data if successfully parsed
-    if result["khs_summary"] is not None:
+    # KHS is sent to the LLM only when the rubric asks for academic evidence.
+    if result["khs_used_in_ai_scoring"] and khs_result is not None:
         khs_block = format_khs_summary(khs_result)
         full_text = (
-            "=== DATA AKADEMIK ===\n"
+            "=== DATA AKADEMIK TERSTRUKTUR ===\n"
             f"{khs_block}\n"
-            "Gunakan data IPK dan mata kuliah sebagai sinyal "
-            "kompetensi teknis kandidat.\n"
+            "Gunakan data akademik hanya untuk dimensi rubrik yang relevan. "
+            "Jangan menghitung mata kuliah ongoing atau nilai kosong sebagai "
+            "bukti performa akademik.\n"
             "=====================\n\n"
             + full_text
         )
@@ -532,6 +557,261 @@ def _get_ready_candidate_document(
     return cached
 
 
+def rubric_requires_academic_evidence(rubric: Rubric) -> bool:
+    """Return True when rubric text asks for academic/KHS evidence."""
+    parts: list[str] = [
+        rubric.name or "",
+        rubric.position or "",
+        rubric.description or "",
+    ]
+    for dim in rubric.dimensions or []:
+        parts.extend([dim.name or "", dim.description or ""])
+        indicators = dim.indicators or []
+        if isinstance(indicators, list):
+            parts.extend(str(item) for item in indicators)
+        else:
+            parts.append(str(indicators))
+
+    haystack = " ".join(parts).lower()
+    return any(keyword in haystack for keyword in _ACADEMIC_EVIDENCE_KEYWORDS)
+
+
+def _resolve_khs_context(
+    app: Application,
+    candidate: Candidate,
+    rubric: Rubric,
+    db: Session,
+) -> dict:
+    """Load cached KHS or parse inline fallback, then decide prompt usage."""
+    requires_academic = rubric_requires_academic_evidence(rubric)
+    khs_doc = _get_doc(app.id, DocumentType.KHS, db)
+    if not khs_doc:
+        logger.info("KHS cache miss for application %d: no KHS document", app.id)
+        return {
+            "parsed_khs": None,
+            "khs_summary": None,
+            "khs_warning": "No KHS document uploaded",
+            "khs_used_in_ai_scoring": False,
+            "khs_source": "missing",
+        }
+
+    cached = _get_cached_khs_document(candidate, khs_doc, db)
+    parsed: KhsResult | None = None
+    cache_doc: CandidateDocument | None = None
+    source = "missing"
+
+    if cached:
+        parsed = parsed_khs_from_cache(cached.sections_json)
+        cache_doc = cached
+        source = "cache"
+        logger.info("KHS cache hit for application %d", app.id)
+    else:
+        logger.info("KHS cache miss for application %d, parsing inline", app.id)
+        parsed, cache_doc = _parse_and_store_khs_inline(app, candidate, khs_doc, db)
+        source = "inline_fallback"
+
+    warning = None
+    if not parsed:
+        source = "missing"
+        warning = "KHS cache is empty"
+    elif parsed.get("parse_error"):
+        source = khs_processing_status(parsed)
+        warning = parsed.get("parse_error")
+        logger.warning("KHS parse error for application %d: %s", app.id, warning)
+    else:
+        warning = parsed.get("parse_warning")
+
+    used_in_ai = bool(requires_academic and parsed and not parsed.get("parse_error"))
+    if used_in_ai:
+        logger.info(
+            "KHS academic summary will be used in AI scoring for application %d",
+            app.id,
+        )
+    elif not requires_academic:
+        logger.info(
+            "KHS skipped from AI scoring for application %d because rubric does not require academic evidence",
+            app.id,
+        )
+
+    public_summary = (
+        _public_khs_summary(parsed)
+        if parsed and not parsed.get("parse_error")
+        else None
+    )
+    _update_khs_scoring_metadata(
+        cache_doc,
+        parsed,
+        source=source,
+        used_in_ai_scoring=used_in_ai,
+        warning=warning,
+        db=db,
+    )
+
+    return {
+        "parsed_khs": parsed,
+        "khs_summary": public_summary,
+        "khs_warning": warning,
+        "khs_used_in_ai_scoring": used_in_ai,
+        "khs_source": source,
+    }
+
+
+def _get_cached_khs_document(
+    candidate: Candidate,
+    khs_doc: Document,
+    db: Session,
+) -> CandidateDocument | None:
+    cached = (
+        db.query(CandidateDocument)
+        .filter(
+            CandidateDocument.candidate_id == candidate.id,
+            CandidateDocument.document_type == DocumentType.KHS.value,
+        )
+        .order_by(CandidateDocument.created_at.desc())
+        .first()
+    )
+    if not cached:
+        return None
+    if not _cache_matches_document(cached, khs_doc):
+        logger.info("Ignoring stale KHS cache for application %d", khs_doc.application_id)
+        return None
+    if not parsed_khs_from_cache(cached.sections_json):
+        return None
+    return cached
+
+
+def _parse_and_store_khs_inline(
+    app: Application,
+    candidate: Candidate,
+    khs_doc: Document,
+    db: Session,
+) -> tuple[KhsResult, CandidateDocument | None]:
+    try:
+        extraction = extract_text_from_pdf(khs_doc.file_path)
+        raw_text = (extraction.get("raw_text") or "").strip()
+        metadata = extraction.get("metadata") or {}
+        parsed = parse_khs(khs_doc.file_path)
+    except Exception as exc:  # noqa: BLE001 - evaluation should degrade gracefully
+        logger.warning("Inline KHS parse failed for application %d: %s", app.id, exc)
+        raw_text = ""
+        metadata = {}
+        parsed = khs_parse_error(f"Inline KHS parse failed: {exc}")
+
+    cache_doc = _store_khs_cache(
+        candidate=candidate,
+        portal_doc=khs_doc,
+        raw_text=raw_text,
+        parsed=parsed,
+        metadata=metadata,
+        db=db,
+        source="inline_fallback",
+    )
+    if parsed.get("parse_error"):
+        logger.warning(
+            "KHS parse error for application %d: %s",
+            app.id,
+            parsed.get("parse_error"),
+        )
+    else:
+        logger.info("KHS parse success for application %d", app.id)
+    return parsed, cache_doc
+
+
+def _store_khs_cache(
+    *,
+    candidate: Candidate,
+    portal_doc: Document,
+    raw_text: str,
+    parsed: KhsResult,
+    metadata: dict | None,
+    db: Session,
+    source: str,
+) -> CandidateDocument:
+    metadata = metadata or {}
+    payload = build_khs_cache_payload(
+        parsed,
+        processing_status=khs_processing_status(parsed),
+        processing_error=parsed.get("parse_error"),
+        source="llm_parser",
+    )
+    existing = (
+        db.query(CandidateDocument)
+        .filter(
+            CandidateDocument.candidate_id == candidate.id,
+            CandidateDocument.document_type == DocumentType.KHS.value,
+        )
+        .first()
+    )
+    if existing:
+        existing.filename = portal_doc.file_name
+        existing.file_path = portal_doc.file_path
+        existing.raw_text = raw_text
+        existing.normalized_text = None
+        existing.sections_json = payload
+        existing.anonymized_text = None
+        existing.entities_json = None
+        existing.page_count = metadata.get("page_count")
+        existing.file_size_kb = metadata.get("file_size_kb")
+        db.flush()
+        return existing
+
+    cache_doc = CandidateDocument(
+        candidate_id=candidate.id,
+        filename=portal_doc.file_name,
+        file_path=portal_doc.file_path,
+        document_type=DocumentType.KHS.value,
+        raw_text=raw_text,
+        sections_json=payload,
+        page_count=metadata.get("page_count"),
+        file_size_kb=metadata.get("file_size_kb"),
+    )
+    db.add(cache_doc)
+    db.flush()
+    return cache_doc
+
+
+def _update_khs_scoring_metadata(
+    cache_doc: CandidateDocument | None,
+    parsed: KhsResult | None,
+    *,
+    source: str,
+    used_in_ai_scoring: bool,
+    warning: str | None,
+    db: Session,
+) -> None:
+    if not cache_doc or not parsed:
+        return
+    current = cache_doc.sections_json if isinstance(cache_doc.sections_json, dict) else {}
+    payload = build_khs_cache_payload(
+        parsed,
+        processing_status=current.get("processing_status"),
+        processing_error=current.get("processing_error") or parsed.get("parse_error"),
+        source=current.get("source") or "llm_parser",
+        scoring={
+            "khs_used_in_ai_scoring": used_in_ai_scoring,
+            "khs_source": source,
+            "khs_warning": warning,
+            "evaluated_at": _utcnow().isoformat(),
+        },
+    )
+    cache_doc.sections_json = payload
+    db.flush()
+
+
+def _public_khs_summary(parsed: KhsResult | None) -> dict | None:
+    if not parsed:
+        return None
+    return {
+        "ipk_final": parsed.get("ipk_final", parsed.get("ipk")),
+        "total_sks_final": parsed.get("total_sks_final", parsed.get("total_sks")),
+        "ips_history": parsed.get("ips_history") or [],
+        "courses": parsed.get("courses") or [],
+        "ongoing_courses": parsed.get("ongoing_courses") or [],
+        "parse_warning": parsed.get("parse_warning"),
+        "parser_version": parsed.get("parser_version"),
+    }
+
+
 def _run_ktm(app: Application, user: User | None, db: Session) -> dict:
     """Validate KTM — returns ktm_validator output or synthetic error."""
     ktm_doc = _get_doc(app.id, DocumentType.KTM, db)
@@ -542,7 +822,7 @@ def _run_ktm(app: Application, user: User | None, db: Session) -> dict:
     return validate_ktm(ktm_doc.file_path, expected_nim=expected_nim)
 
 
-def _run_khs(app: Application, db: Session) -> KhsResult:
+def _legacy_parse_khs_inline(app: Application, db: Session) -> KhsResult:
     """Parse KHS — returns khs_parser output."""
     khs_doc = _get_doc(app.id, DocumentType.KHS, db)
     if not khs_doc:

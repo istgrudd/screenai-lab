@@ -9,7 +9,7 @@
 | Phase | Scope | Status |
 |---|---|---|
 | **Phase 1 — Candidate Portal MVP** | Platform pendaftaran + upload dokumen + dashboard kandidat | ✅ Complete |
-| **Phase 2 — Full Recruitment Flow** | Evaluasi AI + NER submit-time + periode rekrutmen + seleksi manual rekruter | ✅ Complete |
+| **Phase 2 — Full Recruitment Flow** | Evaluasi AI + post-review processing cache + periode rekrutmen + seleksi manual rekruter | ✅ Complete |
 | **Phase 3 — Deployment** | Docker/VPS lab self-hosted + production config | 🔄 In Progress — deployment assets ready, production cutover pending |
 
 ---
@@ -63,10 +63,11 @@ Pada implementasi saat ini, pipeline evaluasi menggunakan pendekatan **rubric-au
 
 ### Phase 2 — Full Recruitment Flow (✅ Complete)
 
-#### 2A — Submit-time NER
+#### 2A — Post-review Processing Cache
 
-- NER anonymization dijalankan otomatis via **BackgroundTask** saat kandidat submit.
-- CV + Motivation Letter dianonimkan dan disimpan di DB saat itu juga.
+- Processing dokumen dijalankan otomatis via **BackgroundTask** setelah recruiter/super_admin memfinalisasi document review sebagai accepted.
+- CV + Motivation Letter dianonimkan dan disimpan di DB setelah dokumen verified.
+- KHS text-based PDF diekstrak, direduksi PII, diparse oleh DeepSeek V4 Flash menjadi structured academic summary, lalu di-cache di `candidate_documents.sections_json`.
 - Background task membuka session DB sendiri melalui `SessionLocal`, bukan memakai request-scoped session.
 - Saat batch evaluation, NER dilewati jika anonymized text sudah ada (cached).
 - Jika cache belum tersedia atau background task gagal, evaluasi fallback ke inline NER agar pipeline tetap berjalan.
@@ -105,8 +106,10 @@ Pada implementasi saat ini, pipeline evaluasi menggunakan pendekatan **rubric-au
 
 #### 2D — Pipeline Evaluation Update
 
-- Pipeline evaluasi menggunakan cache NER dari submit-time.
-- KHS summary block diinjeksikan ke konteks evaluasi.
+- Pipeline evaluasi menggunakan cache NER dan cache KHS dari post-review processing jika tersedia.
+- Jika cache KHS belum ada atau stale, evaluation fallback parse inline agar pipeline tetap berjalan.
+- KHS summary block hanya diinjeksikan ke konteks AI jika rubrik/dimensi/indikator membutuhkan academic evidence.
+- Raw KHS tidak dikirim ke AI scoring; hanya structured academic summary yang aman. Untuk parser KHS, teks PDF direduksi PII sebelum dikirim ke DeepSeek V4 Flash.
 - KTM validation bersifat soft warning, tidak memblokir evaluasi.
 - SWOT bersifat highlight only, tidak masuk skor.
 - Legacy Capstone endpoints (`/api/upload`, `/api/evaluate`) tetap mounted untuk kompatibilitas, tetapi sudah diberi deprecation header dan warning log.
@@ -144,11 +147,11 @@ Pada implementasi saat ini, pipeline evaluasi menggunakan pendekatan **rubric-au
 
 | ID | Dokumen | Wajib | Diproses AI | Timing NER | Keterangan |
 |---|---|---|---|---|---|
-| D-01 | CV (PDF) | ✅ | ✅ LLM scoring + NER | Submit-time (background), fallback evaluation-time | Anonymized text cached di DB |
-| D-02 | KHS / Transkrip Nilai (PDF) | ✅ | ✅ Parser khusus | Evaluation-time | IPK + mata kuliah → konteks evaluasi |
+| D-01 | CV (PDF) | ✅ | ✅ LLM scoring + NER | Post-review background, fallback evaluation-time | Anonymized text cached di DB |
+| D-02 | KHS / Transkrip Nilai (PDF) | ✅ | ✅ LLM parser khusus | Post-review cache, fallback evaluation-time | Text-based PDF saja; PII direduksi sebelum parser; structured academic summary masuk AI scoring hanya jika rubrik membutuhkan academic evidence |
 | D-03 | KTM / Student ID (PDF/JPG/PNG) | ✅ | ✅ Rule-based validator | Evaluation-time | Soft warning jika invalid |
-| D-04 | Motivation Letter (PDF) | ✅ | ✅ LLM scoring + NER | Submit-time (background), fallback evaluation-time | Anonymized text cached di DB |
-| D-05 | Analisis SWOT Diri Sendiri (PDF) | ✅ | ⚠️ Highlight only | Submit-time text cache, tanpa NER | Tidak di-score, dibaca rekruter |
+| D-04 | Motivation Letter (PDF) | ✅ | ✅ LLM scoring + NER | Post-review background, fallback evaluation-time | Anonymized text cached di DB |
+| D-05 | Analisis SWOT Diri Sendiri (PDF) | ✅ | ⚠️ Highlight only | Post-review text cache, tanpa NER | Tidak di-score, dibaca rekruter |
 | D-06 | Dokumen Pendukung (PDF) | ✅ | ❌ Manual checklist | — | Diverifikasi manual rekruter |
 
 ---
@@ -214,14 +217,14 @@ Pada implementasi saat ini, pipeline evaluasi menggunakan pendekatan **rubric-au
 
 ### Phase 2 Features (✅ Complete)
 
-#### 2A — Submit-time NER
+#### 2A — Post-review Processing Cache
 | ID | Fitur | Role | Prioritas | Status |
 |---|---|---|---|---|
 | F-70 | NER anonymization otomatis saat submit (BackgroundTask) | System | Must Have | ✅ |
 | F-71 | Cache anonymized text di `candidate_documents` | System | Must Have | ✅ |
 | F-72 | Evaluation pipeline skip NER jika cached, fallback inline jika cache miss | System | Must Have | ✅ |
 | F-73 | Background task menggunakan `SessionLocal` sendiri | System | Must Have | ✅ |
-| F-74 | SWOT text cache di submit-time untuk panel rekruter | System | Should Have | ✅ |
+| F-74 | SWOT text cache di post-review processing untuk panel rekruter | System | Should Have | ✅ |
 
 #### 2B — Manajemen Periode Rekrutmen
 | ID | Fitur | Role | Prioritas | Status |
@@ -242,7 +245,7 @@ Pada implementasi saat ini, pipeline evaluasi menggunakan pendekatan **rubric-au
 | ID | Fitur | Role | Prioritas | Status |
 |---|---|---|---|---|
 | F-50 | Batch evaluation per divisi (NER cached → context-augmented LLM scoring) | Recruiter | Must Have | ✅ |
-| F-51 | KHS Parser: IPK + mata kuliah → konteks evaluasi | System | Must Have | ✅ |
+| F-51 | KHS LLM Parser: IPK + IPS + mata kuliah → konteks evaluasi | System | Must Have | ✅ |
 | F-52 | KTM Validator: soft warning (tidak blokir) | System | Must Have | ✅ |
 | F-53 | SWOT Highlight panel di detail kandidat | Recruiter | Must Have | ✅ |
 | F-54 | Skor per dimensi + justifikasi dari `DimensionScore.justification` | Recruiter | Must Have | ✅ |
@@ -292,13 +295,13 @@ Pada implementasi saat ini, pipeline evaluasi menggunakan pendekatan **rubric-au
 | Layer | Stack | Keterangan |
 |---|---|---|
 | PDF Parsing | PyMuPDF | Ekstraksi text PDF pada CV, KHS, ML, SWOT, dan legacy upload |
-| NER | IndoBERT (`ageng-anugrah/indobert-large-p2-finetuned-ner`) | Submit-time via BackgroundTasks, fallback inline saat evaluasi |
+| NER | IndoBERT (`ageng-anugrah/indobert-large-p2-finetuned-ner`) | Post-review via BackgroundTasks, fallback inline saat evaluasi |
 | Evaluation Prompting | Rubric-augmented LLM scoring | Rubrik dimasukkan langsung ke prompt bersama CV/ML/KHS; bukan retrieval vektor aktif |
 | RAG / Vector Store | LangChain + ChromaDB | Dependency tersedia/future retrieval; current production path memakai inline rubric context |
 | LLM Inference | DeepSeek V4 Flash (`deepseek-v4-flash`) via OpenAI-compatible SDK | temperature 0.1, max 4096 token, 3× retry exponential backoff |
-| KHS Parser | Custom rule-based + PyMuPDF | Extract IPK, total SKS, dan mata kuliah relevan |
+| KHS Parser | DeepSeek V4 Flash + PyMuPDF text extraction + validation layer | Text-based KHS PDF direduksi PII, diparse strict JSON, lalu divalidasi sebelum cache |
 | KTM Validator | Custom rule-based | Soft warning, tidak memblokir evaluasi |
-| Background Tasks | FastAPI BackgroundTasks | Untuk submit-time NER dan SWOT text cache |
+| Background Tasks | FastAPI BackgroundTasks | Untuk post-review NER, SWOT text cache, dan KHS parsed cache |
 | Backend | FastAPI + SQLAlchemy + Alembic + python-jose + bcrypt | bcrypt pinned `==4.0.1`; slowapi rate limiting |
 | Frontend | React 19 + Vite 8 + Tailwind 4 + shadcn/ui | Academic Luminary style |
 | Database | SQLite (dev) / PostgreSQL 16 Docker service (prod) | Legacy `postgres://` URL dinormalisasi otomatis di `database.py` |
@@ -328,11 +331,12 @@ Super Admin: Login → Admin Panel: manage users + periods
 ### Phase 2 — Full Recruitment Flow (✅ Complete)
 
 ```text
-[Submit-time — otomatis]
-Candidate submit → BackgroundTask:
+[Post-document-review — otomatis]
+Recruiter finalize accepted document review → BackgroundTask:
     NER anonymize (CV + Motivation Letter)
     → simpan anonymized_text di candidate_documents
     → cache raw SWOT text untuk panel rekruter
+    → redact PII KHS, LLM-parse KHS, dan cache structured academic summary
 
 [Super Admin — setup]
 Super Admin: buat RecruitmentPeriod (buka/tutup)
@@ -344,8 +348,9 @@ Recruiter: Login → Dashboard → pilih/filter divisi
         cached NER (skip jika ada)
         → fallback inline NER jika cache belum tersedia
         → KTM validate (soft warning)
-        → KHS parse (IPK + courses → konteks evaluasi)
-        → rubric-augmented prompt (CV + ML + KHS + rubrik divisi)
+        → KHS cache-first, fallback LLM parse inline jika cache belum tersedia
+        → rubric-driven academic evidence gating
+        → rubric-augmented prompt (CV + ML + KHS summary bila relevan + rubrik divisi)
         → LLM Inference (DeepSeek V4 Flash)
         → store hasil: skor + justifikasi
     → Lihat ranking: kandidat rank ≤ threshold di-highlight hijau
@@ -443,6 +448,7 @@ page_count         INTEGER     jumlah halaman PDF bila tersedia
 Catatan:
 - CV dan Motivation Letter menyimpan `anonymized_text`.
 - SWOT menyimpan `raw_text` untuk panel highlight, tanpa NER dan tanpa skor.
+- KHS menyimpan `raw_text` internal dan parsed structured JSON di `sections_json` (`parsed_khs`, `processing_status`, `parser_version`, `model`, `last_scoring`), tanpa NER. Parser LLM menerima teks yang sudah direduksi PII; scoring LLM hanya menerima structured academic summary.
 
 ---
 
@@ -482,12 +488,13 @@ Legacy endpoints tetap mounted untuk kompatibilitas, tetapi sudah deprecated:
 ### NER Timing
 
 - **Capstone legacy**: NER dijalankan saat upload (`/api/upload`).
-- **Lab current**: NER dijalankan saat submit via `BackgroundTasks` dan disimpan di `candidate_documents`.
+- **Lab current**: NER dijalankan setelah accepted document-review finalization via `BackgroundTasks` dan disimpan di `candidate_documents`.
 - **Fallback**: jika cache kosong saat evaluasi, pipeline menjalankan inline NER agar evaluasi tidak gagal hanya karena background task belum selesai.
+- **KHS current**: KHS text-based PDF direduksi PII dan diparse oleh DeepSeek V4 Flash pada post-review background processing; evaluation fallback parse inline jika cache belum tersedia atau stale. Image-based/scanned KHS tanpa text layer ditandai `machine_unreadable`; OCR out-of-scope.
 
 ### Evaluation Prompting vs RAG
 
-Istilah "RAG" di project ini mengacu pada pola evaluasi yang memperkaya prompt dengan konteks rubrik dan data kandidat. Implementasi aktif saat ini belum melakukan retrieval vektor dari ChromaDB saat evaluasi; rubric context dibangun langsung dari tabel `rubrics` dan `dimensions`.
+Istilah "RAG" di project ini mengacu pada pola evaluasi yang memperkaya prompt dengan konteks rubrik dan data kandidat yang aman. Implementasi aktif saat ini belum melakukan retrieval vektor dari ChromaDB saat evaluasi; rubric context dibangun langsung dari tabel `rubrics` dan `dimensions`. KHS hanya masuk prompt sebagai structured academic summary jika rubrik membutuhkan academic evidence.
 
 Konsekuensi:
 - Evaluasi tetap berbasis konteks rubrik yang terstruktur.

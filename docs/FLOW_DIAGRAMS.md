@@ -281,14 +281,14 @@ Source: [backend/routers/applications.py](../backend/routers/applications.py), [
 
 ---
 
-## 6. Document Review and Post-Review Anonymization Pipeline
+## 6. Document Review and Post-Review Processing Pipeline
 
 Detail of the review gate and BackgroundTask that fires only after accepted document-review finalization. Failures are logged but never raised to the user-facing request.
 
 ```mermaid
 flowchart TD
     A[Recruiter/admin finalizes document review] --> A1{Any required doc rejected?}
-    A1 -- yes --> R[Set application=correction_requested<br/>log document_rejected notification<br/>no NER]
+    A1 -- yes --> R[Set application=correction_requested<br/>log document_rejected notification<br/>no background processing]
     A1 -- no --> A2[Set application=verified<br/>schedule BackgroundTask]
     A2 --> B[Load Application from fresh db session]
     B --> C{Application exists?}
@@ -307,8 +307,10 @@ flowchart TD
     K --> L[UPSERT CandidateDocument<br/>raw_text, normalized_text,<br/>anonymized_text, entities_json]
     L --> E
 
-    E -. all docs processed .-> M[db.commit&#40;&#41;]
-    M --> N[log: NER completed for app X]
+    E -. CV/ML processed .-> S[Extract SWOT raw text<br/>UPSERT CandidateDocument swot]
+    S --> T[Extract KHS raw text<br/>if empty: machine_unreadable<br/>else redact PII + LLM parse strict JSON<br/>validate + UPSERT CandidateDocument khs]
+    T --> M[db.commit&#40;&#41;]
+    M --> N[log: post-review processing completed for app X]
     N --> Z2[finally: db.close&#40;&#41;]
 
     style A fill:#dff
@@ -339,8 +341,14 @@ sequenceDiagram
 
     ES->>DB: load Application + User
     ES->>KTM: validate_ktm(file_path, expected_nim=user.nim)
-    ES->>KHS: parse_khs(file_path)
     ES->>DB: ensure Candidate (set rubric_id)
+    ES->>DB: SELECT cached KHS CandidateDocument<br/>WHERE doc_type='khs'
+    alt KHS cache hit and current upload matches
+        DB-->>ES: parsed_khs from sections_json
+    else KHS cache miss/stale
+        ES->>KHS: parse_khs(file_path)<br/>extract text, redact PII,<br/>DeepSeek V4 Flash strict JSON
+        ES->>DB: UPSERT CandidateDocument khs cache
+    end
     ES->>DB: SELECT CandidateDocument<br/>WHERE doc_type='cv'<br/>AND anonymized_text IS NOT NULL
     alt cache hit (post-review NER ran)
         DB-->>ES: cached anonymized_text
@@ -349,7 +357,8 @@ sequenceDiagram
         ANO-->>ES: anonymized_text
         ES->>ANO: same for motivation_letter (best-effort)
     end
-    ES->>ES: prepend KHS block<br/>+ append ML block to full_text
+    ES->>ES: append ML block to full_text
+    ES->>ES: if rubric requires academic evidence,<br/>prepend structured KHS summary only
     ES->>RAG: evaluate_candidate(<br/>{anonymized_text}, rubric_id, db)
     RAG->>DB: load Rubric + Dimensions
     RAG->>RAG: build SYSTEM_PROMPT<br/>+ rubric_context<br/>+ user_prompt

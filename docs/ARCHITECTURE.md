@@ -12,8 +12,8 @@
 
 - A **candidate self-service portal**: registration → profile → multi-document upload → review → submit.
 - A **phase-aware recruitment period**: `UPCOMING → SUBMISSION → EVALUATION → ANNOUNCEMENT → CLOSED`.
-- A **post-document-review anonymization pipeline**: CV + Motivation Letter are anonymized through IndoBERT NER only after recruiter/super_admin finalizes document review as accepted.
-- A **rubric-augmented LLM scoring pipeline**: cached anonymized candidate text, KHS summary, Motivation Letter, and division rubric are sent to the configured DeepSeek model for structured scoring. The AI produces an initial score and justification; recruiters can override individual dimension scores when the AI result is wrong.
+- A **post-document-review processing pipeline**: CV + Motivation Letter are anonymized through IndoBERT NER, SWOT raw text is cached, and text-based KHS is redacted for PII then parsed by DeepSeek V4 Flash into structured academic JSON only after recruiter/super_admin finalizes document review as accepted.
+- A **rubric-augmented LLM scoring pipeline**: cached anonymized candidate text, Motivation Letter, and division rubric are sent to the configured DeepSeek model for structured scoring. Cached KHS summary is added only when the rubric asks for academic evidence. The AI produces an initial score and justification; recruiters can override individual dimension scores when the AI result is wrong.
 - A **recruiter "Validasi Evaluasi AI" marker**: recruiters can mark an AI evaluation as `validated` or `needs_discussion` (with a note) as an accountability checkpoint. This is informative only — it does not change the score or application status, and it is not currently a gate for announcement. A fresh (re-)evaluation resets the marker to `pending`.
 - A **recruiter / super-admin console**: filtering, evaluation, re-evaluation, score override, AI-evaluation validation, threshold highlight, manual checklist, and bulk announcement.
 
@@ -88,8 +88,8 @@ browser HTTPS -> host Nginx/Caddy -> frontend container :80
 Key data paths:
 
 1. **Document review gate**: `submit_application` commits the application into `document_review`; recruiter/super_admin reviews every required document and finalizes the application as either `verified` or `correction_requested`.
-2. **Post-review NER**: accepted finalization schedules a background task that opens its own `SessionLocal`, extracts CV + Motivation Letter, anonymizes text, and caches it in `candidate_documents.anonymized_text`. Rejected finalization does not run NER.
-3. **Evaluation**: recruiter triggers `POST /api/recruiter/evaluate/batch`; the pipeline targets `verified` applications, checks NER cache, falls back to inline NER when needed, parses KHS, validates KTM, builds a rubric-augmented prompt, awaits the async DeepSeek client, persists `DimensionScore`, and updates `Candidate.composite_score`.
+2. **Post-review processing**: accepted finalization schedules a background task that opens its own `SessionLocal`, extracts CV + Motivation Letter, anonymizes text, caches SWOT raw text, redacts and LLM-parses text-based KHS, and stores the KHS structured payload in `candidate_documents.sections_json`. Rejected finalization does not run the background processor.
+3. **Evaluation**: recruiter triggers `POST /api/recruiter/evaluate/batch`; the pipeline targets `verified` applications, checks NER cache, falls back to inline NER when needed, resolves KHS cache with inline LLM parse fallback, validates KTM, gates KHS prompt usage by rubric academic keywords, awaits the async DeepSeek client, persists `DimensionScore`, and updates `Candidate.composite_score`.
 4. **Phase derivation**: `backend/utils/period_utils.py::get_current_phase` derives the active phase from calendar boundaries. No cron/scheduler is required.
 5. **Auth hardening**: password reset, admin reset-link completion, and authenticated profile password updates set `users.password_changed_at`; protected requests reject JWTs issued before that timestamp.
 6. **Announcements and notifications**: recruiter selects passing applications and calls `POST /api/announcements/bulk`; the backend updates pass/fail statuses atomically, writes `AuditLog` rows, and records non-blocking workflow email notification metadata.
@@ -209,7 +209,7 @@ screenai-lab/
 │   │   ├── extractor.py            — PyMuPDF PDF extraction + EPrT helper
 │   │   ├── normalizer.py           — text cleanup + section segmentation
 │   │   ├── anonymizer.py           — NER + regex anonymization
-│   │   ├── khs_parser.py           — KHS parser
+│   │   ├── khs_parser.py           — KHS LLM parser + PII redaction + validation
 │   │   ├── ktm_validator.py        — KTM validator
 │   │   ├── document_review_service.py — document verification/rejection/correction rules
 │   │   ├── notification_service.py   — non-blocking workflow notification logging/sending
@@ -304,7 +304,7 @@ screenai-lab/
 - **Endpoint:** `DEEPSEEK_BASE_URL`, default `https://api.deepseek.com/v1`.
 - **Auth:** `DEEPSEEK_API_KEY`.
 - **Client:** OpenAI-compatible SDK wrapper in `backend/utils/llm_client.py`; batch evaluation uses the `AsyncOpenAI` path.
-- **Used by:** `backend/services/rag_pipeline.py` for rubric-augmented JSON scoring.
+- **Used by:** `backend/services/rag_pipeline.py` for rubric-augmented JSON scoring and `backend/services/khs_parser.py` for redacted KHS structured parsing.
 
 ### HuggingFace Transformers
 
@@ -358,9 +358,9 @@ Phase 12 implementation note: `applications.py` now owns final submit and docume
 3. **Document uploads**: Six required document types are uploaded through `/api/documents/upload/{doc_type}` with size, MIME, and magic-byte validation.
 4. **Submit gate**: Submission requires a complete profile, an active period in `SUBMISSION`, and all required documents. Status flips to `document_review`, file mutations are locked, and an `application_submitted` notification is logged.
 5. **Document review**: Recruiter/super_admin verifies or rejects each required document. Candidate-facing document decisions are masked until review finalization.
-6. **Correction or accepted finalization**: Rejected finalization moves the application to `correction_requested` and logs/sends `document_rejected`; accepted finalization moves it to `verified` and queues NER.
-7. **Post-review NER**: BackgroundTask extracts/anonymizes CV + Motivation Letter and caches results for verified applications.
-8. **Recruiter evaluation**: Batch evaluation targets `verified` applications, checks cache, parses KHS, validates KTM, builds prompt, calls DeepSeek, stores scores, and moves application to `screening`. `force=true` can re-evaluate `screening`.
+6. **Correction or accepted finalization**: Rejected finalization moves the application to `correction_requested` and logs/sends `document_rejected`; accepted finalization moves it to `verified` and queues post-review processing.
+7. **Post-review processing**: BackgroundTask extracts/anonymizes CV + Motivation Letter, caches SWOT raw text, and redacts plus LLM-parses/caches KHS structured JSON for verified applications.
+8. **Recruiter evaluation**: Batch evaluation targets `verified` applications, checks cache, resolves KHS cache/fallback, validates KTM, builds a rubric-gated prompt, calls DeepSeek, stores scores, and moves application to `screening`. `force=true` can re-evaluate `screening`.
 9. **Bulk publish**: Backend updates pass/fail statuses atomically, writes audit logs, and logs/sends `announcement_published`.
 10. **Candidate result**: Candidate status/result page reads announcement status.
 
@@ -403,7 +403,7 @@ backend/vectorstore/      # ChromaDB directory
 
 - Formal `xai.py` implementation is still future work; current explanations come from stored LLM justifications.
 - Current scoring path is rubric-augmented prompting, not live vector retrieval.
-- OCR for scanned PDFs/images is not part of the main pipeline yet.
+- OCR for scanned PDFs/images is not part of the main pipeline yet; scanned KHS without text layer is stored as `machine_unreadable`.
 - JWT is stored in localStorage; HttpOnly cookie + CSRF is a security backlog.
 - Frontend forgot/reset password pages are not implemented yet; Phase 4 exposes backend endpoints only.
 - Horizontal scaling would require shared file storage and shared rate-limit state.

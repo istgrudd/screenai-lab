@@ -37,6 +37,7 @@ FINAL_DOCUMENT_STATUSES = {
 
 NER_CACHE_DOCUMENT_TYPES = {
     DocumentType.CV.value,
+    DocumentType.KHS.value,
     DocumentType.MOTIVATION_LETTER.value,
     DocumentType.SWOT.value,
 }

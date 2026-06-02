@@ -16,6 +16,11 @@ venv/
 # docs
 docs/archive/
 
+# Real candidate documents at repo root (local PII references — never commit)
+/*.pdf
+KHS_*.pdf
+*Nilai*.pdf
+
 # Data (local only — never commit)
 data/raw_pdfs/
 data/extracted/

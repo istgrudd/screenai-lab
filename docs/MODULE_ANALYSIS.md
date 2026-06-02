@@ -287,7 +287,7 @@ For endpoint-level detail see [API_REFERENCE.md](API_REFERENCE.md). For runtime 
 
 ## 6. Document Processing (Parsers)
 
-**Responsibility.** Deterministic, non-LLM parsers that extract structured or reviewable signal from candidate documents.
+**Responsibility.** Extract structured or reviewable signal from candidate documents. KHS uses an LLM-only structured parser after PII redaction; KTM remains a deterministic soft-warning validator.
 
 **Key files**
 
@@ -304,16 +304,19 @@ For endpoint-level detail see [API_REFERENCE.md](API_REFERENCE.md). For runtime 
 **Outputs**
 
 - Extractor: raw text, pages, metadata.
-- KHS parser: IPK, total SKS, relevant courses, optional parse error.
+- KHS parser: strict academic JSON containing IPK final, total SKS final, IPS history, courses, ongoing courses, parser status/error.
 - KTM validator: valid flag, warning/error.
 - EPrT helper: optional certificate detection and score extraction in legacy path.
 
 **Dependencies**
 
 - PyMuPDF.
+- DeepSeek V4 Flash for KHS text-based PDF parsing.
 
 **Business rules**
 
+- KHS text-based PDF is redacted for PII before DeepSeek V4 Flash parsing.
+- KHS JSON output is accepted only after validation of numeric ranges, grade/status consistency, and ongoing course subset.
 - KHS parse errors do not block evaluation; they surface as warnings.
 - KTM validation is soft-warning only; it never blocks evaluation.
 - SWOT is qualitative highlight only; it is not included in scoring.
@@ -321,6 +324,7 @@ For endpoint-level detail see [API_REFERENCE.md](API_REFERENCE.md). For runtime 
 **Notable edge cases**
 
 - JPG/PNG KTM support does not imply full OCR; image extraction may not find text unless the implementation explicitly supports it.
+- KHS scan/image-based PDFs without extractable text are marked `machine_unreadable` and do not call the LLM parser.
 - EPrT score range remains 310–677 in legacy helper logic.
 
 ---
@@ -344,7 +348,7 @@ For endpoint-level detail see [API_REFERENCE.md](API_REFERENCE.md). For runtime 
 **Outputs**
 
 - `{ anonymized_text, entities_found, entity_count }`.
-- `CandidateDocument` rows for `cv`, `motivation_letter`, and SWOT raw-text cache.
+- `CandidateDocument` rows for `cv`, `motivation_letter`, SWOT raw-text cache, and KHS parsed structured cache.
 
 **Dependencies**
 
@@ -361,10 +365,12 @@ For endpoint-level detail see [API_REFERENCE.md](API_REFERENCE.md). For runtime 
 - Background task must never raise to the user-facing submit request; failures are logged.
 - CV and Motivation Letter are anonymized.
 - SWOT is cached as raw text for recruiter highlight, but not anonymized and not scored.
+- KHS is extracted, redacted for PII, parsed into `sections_json.parsed_khs`, and not sent raw to AI scoring.
 
 **Notable edge cases**
 
 - If post-review anonymization has not finished or failed, evaluation falls back to inline NER for verified applications.
+- If post-review KHS parsing has not finished, is stale, or failed, evaluation falls back to inline KHS LLM parsing for text-based PDFs and records source/warning metadata.
 - Empty extracted text returns unchanged text with zero entities.
 
 ---
@@ -381,7 +387,7 @@ For endpoint-level detail see [API_REFERENCE.md](API_REFERENCE.md). For runtime 
 
 **Inputs**
 
-- `anonymized_cv: { anonymized_text }` containing merged CV + Motivation Letter + optional KHS block.
+- `anonymized_cv: { anonymized_text }` containing merged CV + Motivation Letter + optional structured KHS summary block.
 - `rubric_id`.
 - Optional certificate data, currently not used by the Lab evaluation path.
 
@@ -409,6 +415,8 @@ For endpoint-level detail see [API_REFERENCE.md](API_REFERENCE.md). For runtime 
 - `validate_rubric_weights` protects composite-score sanity.
 - The prompt includes multilingual fairness guardrails: Bahasa Indonesia, English, and mixed-language CVs must be evaluated by equivalent evidence, not by language choice.
 - The prompt maps equivalent terms such as Pembelajaran Mesin/Machine Learning, Visi Komputer/Computer Vision, Penambangan Data/Data Mining, Ketua Pelaksana/Chief Organizer, Asisten Riset/Research Assistant, and Magang Data Engineer/Data Engineer Intern.
+- KHS is included only when rubric dimensions/descriptions/indicators request academic evidence such as IPK, IPS, SKS, KHS, transcript, coursework, or relevant courses.
+- Raw KHS text is never sent to the scoring LLM; only structured academic summary is allowed. The KHS parser LLM receives redacted KHS text only.
 
 **Notable edge cases**
 
@@ -438,7 +446,7 @@ For endpoint-level detail see [API_REFERENCE.md](API_REFERENCE.md). For runtime 
 **Dependencies**
 
 - Application, User, Candidate, Document, Rubric.
-- KHS parser, KTM validator, anonymizer, LLM scoring, scoring persistence.
+- KHS LLM parser, KTM validator, anonymizer, LLM scoring, scoring persistence.
 - RecruitmentPeriod for soft warning.
 
 **Business rules**
@@ -458,15 +466,16 @@ For endpoint-level detail see [API_REFERENCE.md](API_REFERENCE.md). For runtime 
 **`_evaluate_one` step list**
 
 1. Validate KTM, soft warning only.
-2. Parse KHS, soft warning on parse error.
-3. Ensure Candidate row exists.
-4. Check cached anonymized CV; fallback to inline NER on miss.
-5. Append cached/anonymized Motivation Letter.
-6. Prepend KHS summary if available.
-7. Ensure/update CandidateDocument for CV bookkeeping.
-8. Call rubric-augmented LLM scoring.
-9. Store evaluation results.
-10. Extract SWOT best-effort for result payload/UI context.
+2. Ensure Candidate row exists.
+3. Resolve KHS cache; fallback to inline LLM parse if cache is missing/stale.
+4. Detect whether the rubric requires academic evidence.
+5. Check cached anonymized CV; fallback to inline NER on miss.
+6. Append cached/anonymized Motivation Letter.
+7. Prepend structured KHS summary only when the rubric requires academic evidence.
+8. Ensure/update CandidateDocument for CV bookkeeping.
+9. Call rubric-augmented LLM scoring.
+10. Store evaluation results.
+11. Extract SWOT best-effort for result payload/UI context.
 
 **Notable edge cases**
 

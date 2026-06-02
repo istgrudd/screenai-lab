@@ -1,9 +1,9 @@
-"""Post-verification NER anonymization.
+"""Post-verification candidate document processing.
 
-Background task that runs NER anonymization on CV and Motivation Letter
-after recruiter/admin document review is finalized as accepted. Results are
-cached in ``candidate_documents`` so the evaluation pipeline can skip the
-NER step later when the cache is still current.
+Background task that runs NER anonymization on CV and Motivation Letter,
+caches SWOT raw text, and parses KHS after recruiter/admin document review is
+finalized as accepted. Results are cached in ``candidate_documents`` so the
+evaluation pipeline can reuse them later when the cache is still current.
 
 Called via FastAPI BackgroundTasks; must never raise.
 """
@@ -22,6 +22,12 @@ from backend.models.application import Application, ApplicationStatus
 from backend.models.candidate import Candidate, CandidateDocument
 from backend.models.document import Document, DocumentType
 from backend.services.extractor import extract_text_from_pdf
+from backend.services.khs_parser import (
+    build_khs_cache_payload,
+    khs_parse_error,
+    khs_processing_status,
+    parse_khs,
+)
 from backend.services.normalizer import normalize_and_segment
 from backend.services.anonymizer import anonymize_text
 
@@ -43,12 +49,13 @@ def _generate_anon_id() -> str:
 def run_submit_anonymization(
     application_id: int, session_factory: sessionmaker
 ) -> None:
-    """Run NER anonymization on CV + Motivation Letter for a verified application.
+    """Run post-review processing for a verified application.
 
     Called as a FastAPI BackgroundTask after document review finalization
     commits with ``Application.status == verified``.
     Creates/updates Candidate (rubric_id=None) and CandidateDocument records
-    with anonymized text for later use by the evaluation pipeline.
+    with anonymized CV/ML text, raw SWOT text, and parsed KHS JSON for later
+    use by the evaluation pipeline.
 
     On any exception: logs the error but does NOT raise; background tasks
     must never crash the server.
@@ -167,11 +174,18 @@ def _run_anonymization(application_id: int, db: Session) -> None:
     if swot_processed:
         processed += 1
 
+    # 5. KHS: extract raw text + LLM structured parser result only. No NER.
+    #    The KHS parser redacts PII before calling the parser LLM, and raw KHS
+    #    is never sent to the scoring prompt.
+    khs_processed = _store_khs_parse(application_id, candidate, db)
+    if khs_processed:
+        processed += 1
+
     db.commit()
 
-    # 5. Log completion
+    # 6. Log completion
     logger.info(
-        "NER completed for application %d: %d documents processed",
+        "Post-review document processing completed for application %d: %d documents processed",
         application_id, processed,
     )
 
@@ -236,6 +250,109 @@ def _store_swot_text(
         file_path=swot_doc.file_path,
         document_type=DocumentType.SWOT.value,
         raw_text=raw_text,
+        page_count=page_count,
+        file_size_kb=file_size_kb,
+    )
+    db.add(cand_doc)
+    db.flush()
+    return True
+
+
+def _store_khs_parse(
+    application_id: int, candidate: Candidate, db: Session
+) -> bool:
+    """Extract and cache structured KHS data after document verification.
+
+    KHS is not anonymized and does not run through NER. The raw text is cached
+    for internal fallback/debugging, while the PII-redacted LLM parser result
+    is stored in sections_json for evaluation-time reuse.
+    """
+    khs_doc = (
+        db.query(Document)
+        .filter(
+            Document.application_id == application_id,
+            Document.doc_type == DocumentType.KHS,
+        )
+        .first()
+    )
+    if not khs_doc:
+        return False
+    if not os.path.exists(khs_doc.file_path):
+        logger.warning(
+            "KHS file missing for app %d: %s",
+            application_id,
+            khs_doc.file_path,
+        )
+        return False
+
+    try:
+        extraction = extract_text_from_pdf(khs_doc.file_path)
+        raw_text = (extraction.get("raw_text") or "").strip()
+        metadata = extraction.get("metadata") or {}
+        parsed = parse_khs(khs_doc.file_path)
+        status = khs_processing_status(parsed)
+        if status == "machine_unreadable":
+            logger.warning(
+                "KHS has no extractable text for app %d (machine_unreadable); "
+                "LLM parser not called",
+                application_id,
+            )
+        elif parsed.get("parse_error"):
+            logger.warning(
+                "KHS parse_error for app %d: %s",
+                application_id,
+                parsed.get("parse_error"),
+            )
+        else:
+            logger.info("KHS parse success for app %d", application_id)
+    except Exception as exc:  # noqa: BLE001 - background task must not raise
+        logger.warning(
+            "KHS extraction/parse failed for app %d: %s",
+            application_id,
+            exc,
+        )
+        raw_text = ""
+        metadata = {}
+        parsed = khs_parse_error(f"KHS extraction/parse failed: {exc}")
+        status = "parse_error"
+
+    existing = (
+        db.query(CandidateDocument)
+        .filter(
+            CandidateDocument.candidate_id == candidate.id,
+            CandidateDocument.document_type == DocumentType.KHS.value,
+        )
+        .first()
+    )
+    payload = build_khs_cache_payload(
+        parsed,
+        processing_status=status,
+        processing_error=parsed.get("parse_error"),
+        source="llm_parser",
+    )
+    page_count = metadata.get("page_count")
+    file_size_kb = metadata.get("file_size_kb")
+
+    if existing:
+        existing.raw_text = raw_text
+        existing.normalized_text = None
+        existing.sections_json = payload
+        existing.anonymized_text = None
+        existing.entities_json = None
+        existing.filename = khs_doc.file_name
+        existing.file_path = khs_doc.file_path
+        existing.page_count = page_count
+        existing.file_size_kb = file_size_kb
+        db.flush()
+        return True
+
+    cand_doc = CandidateDocument(
+        candidate_id=candidate.id,
+        filename=khs_doc.file_name,
+        file_path=khs_doc.file_path,
+        document_type=DocumentType.KHS.value,
+        raw_text=raw_text,
+        sections_json=payload,
         page_count=page_count,
         file_size_kb=file_size_kb,
     )
