@@ -1217,6 +1217,8 @@ Rate limit: `10/minute` per user/IP key.
 }
 ```
 
+`passed_application_ids` carries the ready-to-announce candidates the recruiter explicitly marked **Lolos** (pass). Every other in-scope candidate is published as **Tidak Lolos** (fail). The list **may be empty** — that is a valid "everyone in scope is Tidak Lolos" publish (see zero-pass behavior below).
+
 **Response 200**
 
 ```json
@@ -1225,19 +1227,23 @@ Rate limit: `10/minute` per user/IP key.
 
 **Rules**
 
-- Scope is applications in `(division, period_id)` with evaluated statuses: `screening`, `announced_pass`, `announced_fail`.
-- `submitted` but unevaluated applications are not touched.
-- Every ID in `passed_application_ids` must belong to scope.
+- Scope is applications in `(division, period_id)` with status **`screening` only** (ready to announce).
+- Not-yet-evaluated applications (`submitted` / `document_review` / `correction_requested`) are not touched.
+- **Already-announced applications (`announced_pass` / `announced_fail`) are not touched** by bulk publish. Re-running bulk for the same division/period leaves them unchanged; correcting an already-announced result uses the single-announcement path `POST /api/announcements` instead.
+- Every ID in `passed_application_ids` must belong to the screening scope; passing a non-screening id (already announced, submitted, or another division) returns `400`.
 - Within scope: passed IDs become `announced_pass`; others become `announced_fail`.
+- **Zero-pass is allowed:** an empty `passed_application_ids` publishes every ready candidate in scope as `announced_fail` (returns `announced_pass: 0`). This supports the "all candidates Tidak Lolos" and "single candidate Tidak Lolos" cases.
 - One `AuditLog(action_type="bulk_announcement")` is written per actual status change.
 - Non-super-admin users can only bulk announce during `ANNOUNCEMENT` phase.
 - Super Admin bypasses the phase gate for correction.
+
+> The recruiter Announcements UI drives this endpoint from an **explicit per-candidate decision** (Lolos / Tidak Lolos / Belum Diputuskan) over the **ready-to-announce (screening)** list only. Already-announced candidates are shown in a read-only Published view and never enter the payload. The UI blocks publishing while any ready candidate is still *Belum Diputuskan*, sends the *Lolos* set as `passed_application_ids`, and relies on the backend to fail the rest. The payload contract is unchanged and backward compatible.
 
 **Errors**
 
 - `404` period not found.
 - `403` phase is not `ANNOUNCEMENT` for recruiter.
-- `400` invalid passed application IDs.
+- `400` an id in `passed_application_ids` is not ready to announce (not in screening scope for this division/period).
 
 ### 👤 `GET /api/announcements/my`
 

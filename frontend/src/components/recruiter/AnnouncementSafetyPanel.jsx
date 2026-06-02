@@ -22,14 +22,16 @@ function CheckItem({ ready, label, description }) {
 export default function AnnouncementSafetyPanel({
   activePeriod,
   divisionFilter,
-  checkedCount,
+  passCount = 0,
+  failCount = 0,
+  undecidedCount = 0,
   evaluatedCount,
   phaseAllowsPublish,
   isSuperAdmin,
 }) {
   const hasDivision = divisionFilter && divisionFilter !== "all";
   const hasPeriod = Boolean(activePeriod);
-  const hasSelection = checkedCount > 0;
+  const allDecided = evaluatedCount > 0 && undecidedCount === 0;
 
   return (
     <Card className="brand-card">
@@ -64,9 +66,13 @@ export default function AnnouncementSafetyPanel({
           description={`${evaluatedCount} evaluated candidates in current view.`}
         />
         <CheckItem
-          ready={hasSelection}
-          label="Pass candidates selected"
-          description={`${checkedCount} candidates selected as pass; others evaluated in scope become fail.`}
+          ready={allDecided}
+          label="Semua kandidat sudah diputuskan"
+          description={
+            undecidedCount > 0
+              ? `${undecidedCount} kandidat masih Belum Diputuskan.`
+              : `${passCount} Lolos · ${failCount} Tidak Lolos siap dipublikasikan.`
+          }
         />
         <CheckItem
           ready={phaseAllowsPublish}

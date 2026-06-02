@@ -29,11 +29,11 @@ router = APIRouter(prefix="/api/announcements", tags=["announcements"])
 _recruiter_or_admin = require_role(UserRole.RECRUITER, UserRole.SUPER_ADMIN)
 _candidate_only = require_role(UserRole.CANDIDATE)
 
-# Statuses that count as "evaluated" — only these are touched by bulk announce.
-_EVALUATED_STATUSES = (
+# Only first-time, ready-to-announce applications are touched by bulk publish.
+# Already-announced applications (announced_pass / announced_fail) are left
+# untouched; correcting them is the single-announcement path's job.
+_BULK_ANNOUNCE_READY_STATUSES = (
     ApplicationStatus.SCREENING,
-    ApplicationStatus.ANNOUNCED_PASS,
-    ApplicationStatus.ANNOUNCED_FAIL,
 )
 
 
@@ -165,15 +165,18 @@ def bulk_announce(
     db: Session = Depends(get_db),
     current_user: User = Depends(_recruiter_or_admin),
 ):
-    """Bulk-publish pass/fail for an entire (division, period) cohort.
+    """Bulk-publish pass/fail for the ready-to-announce (division, period) cohort.
 
     Logic:
-      * Scope = applications WHERE division = X AND period_id = Y AND status
-        in (screening, announced_pass, announced_fail). SUBMITTED is never
-        touched (those still need evaluation).
+      * Scope = applications WHERE division = X AND period_id = Y AND status =
+        ``screening`` only. Applications still awaiting evaluation (submitted /
+        document_review / correction) and applications already announced
+        (announced_pass / announced_fail) are never touched here.
       * Every id in ``passed_application_ids`` must belong to that scope —
         otherwise 400.
       * Within scope: id ∈ passed → announced_pass; else → announced_fail.
+        An empty ``passed_application_ids`` is valid: every ready candidate in
+        scope becomes announced_fail.
       * One audit_log entry per *actual* status change.
       * Single ``db.commit()`` at the end (transactional).
     """
@@ -204,7 +207,7 @@ def bulk_announce(
         .filter(
             Application.division == payload.division,
             Application.period_id == payload.period_id,
-            Application.status.in_(_EVALUATED_STATUSES),
+            Application.status.in_(_BULK_ANNOUNCE_READY_STATUSES),
         )
         .all()
     )
@@ -215,9 +218,10 @@ def bulk_announce(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=(
-                f"Application(s) {invalid_ids} do not belong to division "
-                f"'{payload.division.value}' / period {payload.period_id} or are "
-                f"not yet evaluated"
+                f"Application(s) {invalid_ids} are not ready to announce for "
+                f"division '{payload.division.value}' / period "
+                f"{payload.period_id}. Only candidates in screening status can "
+                f"be published by bulk announce."
             ),
         )
 

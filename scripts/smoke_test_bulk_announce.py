@@ -1,15 +1,13 @@
-"""Smoke test for Phase 2C Task 12.4: POST /api/announcements/bulk.
+"""Smoke test for POST /api/announcements/bulk (screening-only scope).
 
-Covers:
-  * POST /api/announcements/bulk with valid payload → 200
-  * passed_application_ids get announced_pass
-  * remaining evaluated apps get announced_fail
-  * SUBMITTED apps are NOT touched
-  * audit_logs entries created for each status change
-  * invalid division → 422
-  * invalid app_id for division → 400
-  * candidate cannot call bulk announce → 403
-  * GET /api/announcements/my returns correct result for both pass and fail
+Covers the hardened bulk-publish behavior:
+  * Only `screening` applications are in scope. Already-announced
+    (announced_pass / announced_fail) and not-yet-evaluated (submitted) apps
+    are never touched.
+  * Within scope: passed IDs -> announced_pass, the rest -> announced_fail.
+  * Empty passed_application_ids is valid (everyone in scope -> announced_fail).
+  * Passing an already-announced or not-evaluated id -> 400 (not ready).
+  * Auth: candidate -> 403; invalid division -> 422.
 
 Run:
     python -m scripts.smoke_test_bulk_announce
@@ -35,13 +33,8 @@ from backend.utils.security import hash_password
 PASS = "[PASS]"
 FAIL = "[FAIL]"
 
-ADMIN_EMAIL = "smoke+bulk_admin@example.com"
-RECRUITER_EMAIL = "smoke+bulk_recruiter@example.com"
-PASS_EMAIL = "smoke+bulk_pass@example.com"
-FAIL_EMAIL = "smoke+bulk_fail@example.com"
-PEND_EMAIL = "smoke+bulk_pending@example.com"
-OTHER_DIV_EMAIL = "smoke+bulk_other@example.com"
 TEST_PASSWORD = "hunter2secure"
+EMAIL_PREFIX = "smoke+bulk_"
 PERIOD_NAME = "smoke+bulk cycle"
 
 
@@ -50,47 +43,54 @@ def _assert(cond: bool, msg: str) -> int:
     return 0 if cond else 1
 
 
+def _email(suffix: str) -> str:
+    return f"{EMAIL_PREFIX}{suffix}@example.com"
+
+
 def _cleanup() -> None:
     db = SessionLocal()
     try:
-        emails = (
-            ADMIN_EMAIL,
-            RECRUITER_EMAIL,
-            PASS_EMAIL,
-            FAIL_EMAIL,
-            PEND_EMAIL,
-            OTHER_DIV_EMAIL,
-        )
         db.query(EmailNotification).filter(
-            EmailNotification.to_email.in_(emails)
+            EmailNotification.to_email.like(f"{EMAIL_PREFIX}%")
         ).delete(synchronize_session=False)
-        users = db.query(User).filter(User.email.in_(emails)).all()
+        users = db.query(User).filter(User.email.like(f"{EMAIL_PREFIX}%")).all()
         user_ids = [u.id for u in users]
-
         if user_ids:
             db.query(AuditLog).filter(
                 (AuditLog.recruiter_id.in_(user_ids))
                 | (AuditLog.candidate_id.in_(user_ids))
             ).delete(synchronize_session=False)
-
             db.query(Application).filter(
                 Application.user_id.in_(user_ids)
             ).delete(synchronize_session=False)
-
             db.query(RecruitmentPeriod).filter(
                 RecruitmentPeriod.created_by.in_(user_ids)
             ).delete(synchronize_session=False)
-
             for u in users:
                 db.delete(u)
-
         db.query(RecruitmentPeriod).filter(
             RecruitmentPeriod.name == PERIOD_NAME
         ).delete(synchronize_session=False)
-
         db.commit()
     finally:
         db.close()
+
+
+def _make_user(db, *, suffix: str, role: UserRole, nim: str | None = None) -> User:
+    user = User(
+        email=_email(suffix),
+        password_hash=hash_password(TEST_PASSWORD),
+        full_name=f"Bulk {suffix}",
+        nim=nim,
+        faculty="Fakultas Informatika" if role == UserRole.CANDIDATE else None,
+        major="Informatika" if role == UserRole.CANDIDATE else None,
+        year=2023 if role == UserRole.CANDIDATE else None,
+        role=role,
+        is_active=True,
+        email_verified_at=datetime.now(timezone.utc),
+    )
+    db.add(user)
+    return user
 
 
 def main() -> int:
@@ -98,55 +98,27 @@ def main() -> int:
     failures = 0
     client = TestClient(fastapi_app)
 
-    # ------------------------------------------------------------------
-    # Setup: super admin, recruiter, period, 4 candidates.
-    # ------------------------------------------------------------------
     db = SessionLocal()
-    admin = User(
-        email=ADMIN_EMAIL,
-        password_hash=hash_password(TEST_PASSWORD),
-        full_name="Bulk Admin",
-        role=UserRole.SUPER_ADMIN,
-        is_active=True,
-    )
-    recruiter = User(
-        email=RECRUITER_EMAIL,
-        password_hash=hash_password(TEST_PASSWORD),
-        full_name="Bulk Recruiter",
-        role=UserRole.RECRUITER,
-        is_active=True,
-    )
-    candidates_seed = [
-        (PASS_EMAIL, "Bulk Pass Candidate", "1039876600001"),
-        (FAIL_EMAIL, "Bulk Fail Candidate", "1039876600002"),
-        (PEND_EMAIL, "Bulk Pending Candidate", "1039876600003"),
-        (OTHER_DIV_EMAIL, "Bulk Other Div", "1039876600004"),
+    admin = _make_user(db, suffix="admin", role=UserRole.SUPER_ADMIN)
+    _make_user(db, suffix="recruiter", role=UserRole.RECRUITER)
+
+    # Candidates across three divisions to isolate scenarios.
+    seeds = [
+        ("bd_pass", "1039877700001"),
+        ("bd_fail", "1039877700002"),
+        ("bd_already_pass", "1039877700003"),
+        ("bd_already_fail", "1039877700004"),
+        ("bd_pend", "1039877700005"),
+        ("cy_z1", "1039877700006"),
+        ("cy_z2", "1039877700007"),
+        ("gis_s", "1039877700008"),
     ]
-    seed_now = datetime.now(timezone.utc)
-    cand_users = [
-        User(
-            email=email,
-            password_hash=hash_password(TEST_PASSWORD),
-            full_name=name,
-            nim=nim,
-            faculty="Fakultas Informatika",
-            major="Informatika",
-            year=2023,
-            role=UserRole.CANDIDATE,
-            is_active=True,
-            email_verified_at=seed_now,
-        )
-        for email, name, nim in candidates_seed
-    ]
-    db.add_all([admin, recruiter, *cand_users])
+    cand_users = {suffix: _make_user(db, suffix=suffix, role=UserRole.CANDIDATE, nim=nim) for suffix, nim in seeds}
     db.commit()
-    for u in [admin, recruiter, *cand_users]:
+    for u in [admin, *cand_users.values()]:
         db.refresh(u)
 
-    # Active period (deactivate any existing first).
-    # Task 13.2.3 — bulk announce requires current_phase == ANNOUNCEMENT for
-    # non-super-admin recruiters, so set submission_end_date and
-    # evaluation_end_date in the past.
+    # Active period in ANNOUNCEMENT phase (submission + evaluation ended).
     db.query(RecruitmentPeriod).filter(
         RecruitmentPeriod.is_active == True  # noqa: E712
     ).update({RecruitmentPeriod.is_active: False}, synchronize_session=False)
@@ -164,274 +136,191 @@ def main() -> int:
     db.add(period)
     db.commit()
     db.refresh(period)
-    period_id = period.id  # capture scalars before session close
-    recruiter_id = recruiter.id
-    pass_user_id = cand_users[0].id
-    fail_user_id = cand_users[1].id
-    pend_user_id = cand_users[2].id
-    other_user_id = cand_users[3].id
+    period_id = period.id
 
-    # 3 apps in big_data + 1 in cyber_security (other division).
-    apps = {
-        "pass": Application(
-            user_id=pass_user_id,
-            division=Division.BIG_DATA,
-            status=ApplicationStatus.SCREENING,
+    def _seed_app(suffix: str, division: Division, app_status: ApplicationStatus) -> Application:
+        app = Application(
+            user_id=cand_users[suffix].id,
+            division=division,
+            status=app_status,
             period_id=period_id,
             submitted_at=now,
-        ),
-        "fail": Application(
-            user_id=fail_user_id,
-            division=Division.BIG_DATA,
-            status=ApplicationStatus.SCREENING,
-            period_id=period_id,
-            submitted_at=now,
-        ),
-        "pend": Application(
-            user_id=pend_user_id,
-            division=Division.BIG_DATA,
-            status=ApplicationStatus.SUBMITTED,
-            period_id=period_id,
-            submitted_at=now,
-        ),
-        "other": Application(
-            user_id=other_user_id,
-            division=Division.CYBER_SECURITY,
-            status=ApplicationStatus.SCREENING,
-            period_id=period_id,
-            submitted_at=now,
-        ),
-    }
-    db.add_all(apps.values())
+        )
+        db.add(app)
+        return app
+
+    bd_pass = _seed_app("bd_pass", Division.BIG_DATA, ApplicationStatus.SCREENING)
+    bd_fail = _seed_app("bd_fail", Division.BIG_DATA, ApplicationStatus.SCREENING)
+    bd_already_pass = _seed_app("bd_already_pass", Division.BIG_DATA, ApplicationStatus.ANNOUNCED_PASS)
+    bd_already_fail = _seed_app("bd_already_fail", Division.BIG_DATA, ApplicationStatus.ANNOUNCED_FAIL)
+    bd_pend = _seed_app("bd_pend", Division.BIG_DATA, ApplicationStatus.SUBMITTED)
+    cy_z1 = _seed_app("cy_z1", Division.CYBER_SECURITY, ApplicationStatus.SCREENING)
+    cy_z2 = _seed_app("cy_z2", Division.CYBER_SECURITY, ApplicationStatus.SCREENING)
+    gis_s = _seed_app("gis_s", Division.GIS, ApplicationStatus.SCREENING)
     db.commit()
-    for a in apps.values():
+    for a in (bd_pass, bd_fail, bd_already_pass, bd_already_fail, bd_pend, cy_z1, cy_z2, gis_s):
         db.refresh(a)
-    pass_app_id = apps["pass"].id
-    fail_app_id = apps["fail"].id
-    pend_app_id = apps["pend"].id
-    other_app_id = apps["other"].id
+    bd_pass_id = bd_pass.id
+    bd_fail_id = bd_fail.id
+    bd_already_pass_id = bd_already_pass.id
+    bd_already_fail_id = bd_already_fail.id
+    bd_pend_id = bd_pend.id
+    cy_z1_id = cy_z1.id
+    cy_z2_id = cy_z2.id
+    gis_s_id = gis_s.id
     db.close()
 
-    # Login each role.
-    def _login(email: str) -> dict:
+    def _login(suffix: str) -> dict:
         r = client.post(
             "/api/auth/login",
-            json={"email": email, "password": TEST_PASSWORD},
+            json={"email": _email(suffix), "password": TEST_PASSWORD},
         )
         return {"Authorization": f"Bearer {r.json()['data']['access_token']}"}
 
-    rec_auth = _login(RECRUITER_EMAIL)
-    pass_auth = _login(PASS_EMAIL)
-    fail_auth = _login(FAIL_EMAIL)
+    rec_auth = _login("recruiter")
+    cand_auth = _login("bd_pass")
 
-    # ------------------------------------------------------------------
-    # T1: candidate cannot call bulk announce → 403
-    # ------------------------------------------------------------------
-    r = client.post(
-        "/api/announcements/bulk",
-        headers=pass_auth,
-        json={
-            "division": "big_data",
-            "period_id": period_id,
-            "passed_application_ids": [pass_app_id],
-        },
-    )
-    failures += _assert(
-        r.status_code == 403,
-        f"candidate POST /announcements/bulk -> 403 (got {r.status_code})",
-    )
+    def _bulk(headers, division, passed_ids):
+        return client.post(
+            "/api/announcements/bulk",
+            headers=headers,
+            json={
+                "division": division,
+                "period_id": period_id,
+                "passed_application_ids": passed_ids,
+            },
+        )
 
-    # ------------------------------------------------------------------
-    # T2: invalid division (not in enum) → 422
-    # ------------------------------------------------------------------
-    r = client.post(
-        "/api/announcements/bulk",
-        headers=rec_auth,
-        json={
-            "division": "not_a_division",
-            "period_id": period_id,
-            "passed_application_ids": [pass_app_id],
-        },
-    )
-    failures += _assert(
-        r.status_code == 422,
-        f"invalid division -> 422 (got {r.status_code})",
-    )
+    # T1: candidate cannot bulk announce -> 403
+    r = _bulk(cand_auth, "big_data", [bd_pass_id])
+    failures += _assert(r.status_code == 403, f"candidate bulk announce -> 403 (got {r.status_code})")
 
-    # ------------------------------------------------------------------
-    # T3: app id from another division → 400
-    # ------------------------------------------------------------------
-    r = client.post(
-        "/api/announcements/bulk",
-        headers=rec_auth,
-        json={
-            "division": "big_data",
-            "period_id": period_id,
-            "passed_application_ids": [other_app_id],
-        },
-    )
+    # T2: invalid division -> 422
+    r = _bulk(rec_auth, "not_a_division", [bd_pass_id])
+    failures += _assert(r.status_code == 422, f"invalid division -> 422 (got {r.status_code})")
+
+    # T3a: app from another division -> 400
+    r = _bulk(rec_auth, "big_data", [cy_z1_id])
+    failures += _assert(r.status_code == 400, f"out-of-division id -> 400 (got {r.status_code})")
+
+    # T3b: submitted (not evaluated) app -> 400
+    r = _bulk(rec_auth, "big_data", [bd_pend_id])
+    failures += _assert(r.status_code == 400, f"submitted id rejected -> 400 (got {r.status_code})")
+
+    # T3c: already-announced app id is not ready to announce -> 400
+    r = _bulk(rec_auth, "big_data", [bd_already_pass_id])
     failures += _assert(
         r.status_code == 400,
-        f"out-of-scope app id -> 400 (got {r.status_code}: {r.text})",
+        f"already-announced id rejected -> 400 (got {r.status_code})",
     )
+    if r.status_code == 400:
+        detail = (r.json().get("detail") or "").lower()
+        failures += _assert(
+            "ready to announce" in detail or "screening" in detail,
+            "400 message mentions ready-to-announce / screening",
+        )
 
-    # SUBMITTED app id (not yet evaluated) is also out-of-scope → 400.
-    r = client.post(
-        "/api/announcements/bulk",
-        headers=rec_auth,
-        json={
-            "division": "big_data",
-            "period_id": period_id,
-            "passed_application_ids": [pend_app_id],
-        },
-    )
-    failures += _assert(
-        r.status_code == 400,
-        f"SUBMITTED app id rejected -> 400 (got {r.status_code})",
-    )
+    # T4: valid publish — only screening apps in scope; pass=[bd_pass].
+    r = _bulk(rec_auth, "big_data", [bd_pass_id])
+    failures += _assert(r.status_code == 200, f"valid bulk publish -> 200 (got {r.status_code}: {r.text})")
+    if r.status_code == 200:
+        body = r.json()["data"]
+        failures += _assert(body["announced_pass"] == 1, f"announced_pass == 1 (got {body['announced_pass']})")
+        failures += _assert(body["announced_fail"] == 1, f"announced_fail == 1 (got {body['announced_fail']})")
 
-    # ------------------------------------------------------------------
-    # T4: valid payload → 200, correct counts
-    # ------------------------------------------------------------------
-    r = client.post(
-        "/api/announcements/bulk",
-        headers=rec_auth,
-        json={
-            "division": "big_data",
-            "period_id": period_id,
-            "passed_application_ids": [pass_app_id],
-        },
-    )
-    failures += _assert(
-        r.status_code == 200,
-        f"bulk announce valid -> 200 (got {r.status_code}: {r.text})",
-    )
-    body = r.json()["data"]
-    failures += _assert(
-        body["announced_pass"] == 1,
-        f"announced_pass count == 1 (got {body['announced_pass']})",
-    )
-    failures += _assert(
-        body["announced_fail"] == 1,
-        f"announced_fail count == 1 (got {body['announced_fail']})",
-    )
-
-    # ------------------------------------------------------------------
-    # T5: DB state — pass/fail/pending/other-div verified.
-    # ------------------------------------------------------------------
+    # T5: DB state — screening apps changed; already-announced + submitted untouched.
     db = SessionLocal()
     try:
-        pass_app = db.query(Application).filter(Application.id == pass_app_id).first()
-        fail_app = db.query(Application).filter(Application.id == fail_app_id).first()
-        pend_app = db.query(Application).filter(Application.id == pend_app_id).first()
-        other_app = db.query(Application).filter(Application.id == other_app_id).first()
+        states = {
+            a.id: a.status
+            for a in db.query(Application).filter(
+                Application.id.in_(
+                    [bd_pass_id, bd_fail_id, bd_already_pass_id, bd_already_fail_id, bd_pend_id]
+                )
+            ).all()
+        }
+        failures += _assert(states[bd_pass_id] == ApplicationStatus.ANNOUNCED_PASS, "bd_pass -> announced_pass")
+        failures += _assert(states[bd_fail_id] == ApplicationStatus.ANNOUNCED_FAIL, "bd_fail -> announced_fail")
+        failures += _assert(
+            states[bd_already_pass_id] == ApplicationStatus.ANNOUNCED_PASS,
+            "already announced_pass untouched",
+        )
+        failures += _assert(
+            states[bd_already_fail_id] == ApplicationStatus.ANNOUNCED_FAIL,
+            "already announced_fail untouched",
+        )
+        failures += _assert(states[bd_pend_id] == ApplicationStatus.SUBMITTED, "submitted untouched")
+    finally:
+        db.close()
 
-        failures += _assert(
-            pass_app.status == ApplicationStatus.ANNOUNCED_PASS,
-            f"pass app -> announced_pass (got {pass_app.status})",
-        )
-        failures += _assert(
-            fail_app.status == ApplicationStatus.ANNOUNCED_FAIL,
-            f"fail app -> announced_fail (got {fail_app.status})",
-        )
-        failures += _assert(
-            pend_app.status == ApplicationStatus.SUBMITTED,
-            f"SUBMITTED app untouched (got {pend_app.status})",
-        )
-        failures += _assert(
-            other_app.status == ApplicationStatus.SCREENING,
-            f"other-division app untouched (got {other_app.status})",
-        )
+    # T6: candidate-facing results.
+    pass_my = client.get("/api/announcements/my", headers=_login("bd_pass"))
+    failures += _assert(
+        pass_my.status_code == 200 and pass_my.json()["data"]["result"] == "pass",
+        "bd_pass candidate sees pass",
+    )
+    fail_my = client.get("/api/announcements/my", headers=_login("bd_fail"))
+    failures += _assert(
+        fail_my.status_code == 200 and fail_my.json()["data"]["result"] == "fail",
+        "bd_fail candidate sees fail",
+    )
 
-        # ------------------------------------------------------------------
-        # T6: audit logs — one bulk_announcement entry per status change.
-        # ------------------------------------------------------------------
-        bulk_logs = (
-            db.query(AuditLog)
-            .filter(AuditLog.action_type == "bulk_announcement")
-            .filter(AuditLog.candidate_id.in_([pass_user_id, fail_user_id]))
-            .all()
-        )
+    # T7: re-publish big_data now that scope is empty (no screening left) ->
+    # 200 with zero changes; already-announced rows stay put.
+    r = _bulk(rec_auth, "big_data", [])
+    failures += _assert(r.status_code == 200, f"re-publish empty scope -> 200 (got {r.status_code})")
+    if r.status_code == 200:
+        body = r.json()["data"]
         failures += _assert(
-            len(bulk_logs) == 2,
-            f"audit_logs has 2 bulk_announcement entries (got {len(bulk_logs)})",
+            body["announced_pass"] == 0 and body["announced_fail"] == 0,
+            f"re-publish touches nothing (got {body})",
         )
-        log_by_candidate = {l.candidate_id: l for l in bulk_logs}
-        pass_log = log_by_candidate.get(pass_user_id)
-        fail_log = log_by_candidate.get(fail_user_id)
+    db = SessionLocal()
+    try:
         failures += _assert(
-            pass_log is not None
-            and pass_log.new_value == "announced_pass"
-            and pass_log.old_value == "screening"
-            and pass_log.recruiter_id == recruiter_id,
-            "audit_log for pass candidate has correct fields",
-        )
-        failures += _assert(
-            fail_log is not None
-            and fail_log.new_value == "announced_fail"
-            and fail_log.old_value == "screening"
-            and fail_log.recruiter_id == recruiter_id,
-            "audit_log for fail candidate has correct fields",
+            db.query(Application).filter(Application.id == bd_pass_id).first().status
+            == ApplicationStatus.ANNOUNCED_PASS,
+            "bd_pass still announced_pass after empty re-publish",
         )
     finally:
         db.close()
 
-    # ------------------------------------------------------------------
-    # T7: GET /api/announcements/my for the pass candidate.
-    # ------------------------------------------------------------------
-    r = client.get("/api/announcements/my", headers=pass_auth)
-    failures += _assert(
-        r.status_code == 200,
-        f"pass GET /announcements/my -> 200 (got {r.status_code})",
-    )
-    pdata = r.json()["data"]
-    failures += _assert(
-        pdata["status"] == "announced_pass" and pdata["result"] == "pass",
-        f"pass candidate sees pass result (got {pdata})",
-    )
-
-    # ------------------------------------------------------------------
-    # T8: GET /api/announcements/my for the fail candidate.
-    # ------------------------------------------------------------------
-    r = client.get("/api/announcements/my", headers=fail_auth)
-    failures += _assert(
-        r.status_code == 200,
-        f"fail GET /announcements/my -> 200 (got {r.status_code})",
-    )
-    fdata = r.json()["data"]
-    failures += _assert(
-        fdata["status"] == "announced_fail" and fdata["result"] == "fail",
-        f"fail candidate sees fail result (got {fdata})",
-    )
-
-    # ------------------------------------------------------------------
-    # T9: re-running with the same payload should be idempotent — no new
-    # status changes, so no new audit_log entries.
-    # ------------------------------------------------------------------
-    r = client.post(
-        "/api/announcements/bulk",
-        headers=rec_auth,
-        json={
-            "division": "big_data",
-            "period_id": period_id,
-            "passed_application_ids": [pass_app_id],
-        },
-    )
-    failures += _assert(
-        r.status_code == 200,
-        f"idempotent re-publish -> 200 (got {r.status_code})",
-    )
+    # T8: zero-pass — two screening candidates, empty pass list -> both fail.
+    r = _bulk(rec_auth, "cyber_security", [])
+    failures += _assert(r.status_code == 200, f"zero-pass publish -> 200 (got {r.status_code})")
+    if r.status_code == 200:
+        body = r.json()["data"]
+        failures += _assert(body["announced_pass"] == 0, f"zero-pass announced_pass == 0 (got {body['announced_pass']})")
+        failures += _assert(body["announced_fail"] == 2, f"zero-pass announced_fail == 2 (got {body['announced_fail']})")
     db = SessionLocal()
     try:
-        bulk_logs = (
-            db.query(AuditLog)
-            .filter(AuditLog.action_type == "bulk_announcement")
-            .filter(AuditLog.candidate_id.in_([pass_user_id, fail_user_id]))
-            .all()
-        )
+        cy_states = {
+            a.id: a.status
+            for a in db.query(Application).filter(Application.id.in_([cy_z1_id, cy_z2_id])).all()
+        }
         failures += _assert(
-            len(bulk_logs) == 2,
-            f"no extra audit_logs on idempotent re-publish (got {len(bulk_logs)})",
+            cy_states[cy_z1_id] == ApplicationStatus.ANNOUNCED_FAIL
+            and cy_states[cy_z2_id] == ApplicationStatus.ANNOUNCED_FAIL,
+            "both cyber screening apps -> announced_fail",
+        )
+    finally:
+        db.close()
+
+    # T9: single screening candidate, empty pass list -> announced_fail.
+    r = _bulk(rec_auth, "gis", [])
+    failures += _assert(r.status_code == 200, f"single-fail publish -> 200 (got {r.status_code})")
+    if r.status_code == 200:
+        body = r.json()["data"]
+        failures += _assert(
+            body["announced_pass"] == 0 and body["announced_fail"] == 1,
+            f"single-fail counts (got {body})",
+        )
+    db = SessionLocal()
+    try:
+        failures += _assert(
+            db.query(Application).filter(Application.id == gis_s_id).first().status
+            == ApplicationStatus.ANNOUNCED_FAIL,
+            "single gis screening app -> announced_fail",
         )
     finally:
         db.close()

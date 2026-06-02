@@ -1,15 +1,20 @@
 import { useEffect, useMemo, useState } from "react";
-import { BarChart3, ClipboardList, Search, Sparkles, Users } from "lucide-react";
+import {
+  AlertTriangle,
+  CheckCircle2,
+  FileText,
+  Search,
+  Users,
+} from "lucide-react";
 import { toast } from "sonner";
 
 import MetricCard from "@/components/common/MetricCard";
 import PageHeader from "@/components/layout/PageHeader";
 import ApplicationFilters from "@/components/recruiter/ApplicationFilters";
-import ApplicationsTable from "@/components/recruiter/ApplicationsTable";
+import ApplicationAdminTable from "@/components/recruiter/ApplicationAdminTable";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { listRecruiterApplications } from "@/lib/api";
-import { summarizeApplications } from "@/lib/recruiterWorkspace";
 
 const QUICK_FILTERS = [
   { id: "all", label: "All" },
@@ -18,7 +23,6 @@ const QUICK_FILTERS = [
   { id: "correction_requested", label: "Correction Requested" },
   { id: "verified", label: "Verified" },
   { id: "screening", label: "Evaluated" },
-  { id: "recommended", label: "Recommended" },
 ];
 
 function matchesSearch(application, query) {
@@ -45,7 +49,7 @@ export default function RecruiterApplicationsPage() {
       setLoading(true);
       try {
         const effectiveStatus =
-          quickFilter !== "all" && quickFilter !== "recommended"
+          quickFilter !== "all"
             ? quickFilter
             : statusFilter !== "all"
             ? statusFilter
@@ -69,45 +73,64 @@ export default function RecruiterApplicationsPage() {
   }, [divisionFilter, statusFilter, quickFilter]);
 
   const filteredApplications = useMemo(
-    () =>
-      applications.filter((application) => {
-        if (quickFilter === "recommended" && application.is_recommended !== true) {
-          return false;
-        }
-        return matchesSearch(application, search);
-      }),
-    [applications, quickFilter, search]
+    () => applications.filter((application) => matchesSearch(application, search)),
+    [applications, search]
   );
-  const summary = useMemo(
-    () => summarizeApplications(filteredApplications),
-    [filteredApplications]
-  );
+  const adminSummary = useMemo(() => {
+    let inReview = 0;
+    let correction = 0;
+    let verified = 0;
+    for (const application of filteredApplications) {
+      if (
+        application.status === "submitted" ||
+        application.status === "document_review"
+      ) {
+        inReview += 1;
+      } else if (application.status === "correction_requested") {
+        correction += 1;
+      } else if (application.status === "verified") {
+        verified += 1;
+      }
+    }
+    return {
+      total: filteredApplications.length,
+      inReview,
+      correction,
+      verified,
+    };
+  }, [filteredApplications]);
 
   return (
     <div className="space-y-6">
       <PageHeader
         eyebrow="Recruiter / Applications"
         title="Applications"
-        description="Search, filter, and open evaluated candidate detail with safe return context."
+        description="Track submitted applications, document readiness, and administrative status."
       />
 
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
         <MetricCard
           icon={Users}
           label="Applications in view"
-          value={loading ? "..." : summary.applicationCount}
+          value={loading ? "..." : adminSummary.total}
         />
         <MetricCard
-          icon={BarChart3}
-          label="Evaluated in view"
-          value={loading ? "..." : summary.scoredCount}
-          tone="success"
+          icon={FileText}
+          label="In document review"
+          value={loading ? "..." : adminSummary.inReview}
+          tone="info"
         />
         <MetricCard
-          icon={Sparkles}
-          label="Pending evaluation"
-          value={loading ? "..." : summary.pendingEvaluationCount}
+          icon={AlertTriangle}
+          label="Needs correction"
+          value={loading ? "..." : adminSummary.correction}
           tone="warning"
+        />
+        <MetricCard
+          icon={CheckCircle2}
+          label="Verified"
+          value={loading ? "..." : adminSummary.verified}
+          tone="success"
         />
       </div>
 
@@ -145,7 +168,7 @@ export default function RecruiterApplicationsPage() {
         onStatusChange={setStatusFilter}
       />
 
-      <ApplicationsTable
+      <ApplicationAdminTable
         applications={filteredApplications}
         loading={loading}
         emptyTitle="No applications match this view"

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Bell, Megaphone, Sparkles } from "lucide-react";
+import { CheckCircle2, HelpCircle, Megaphone, Sparkles, XCircle } from "lucide-react";
 import { toast } from "sonner";
 
 import ConfirmActionDialog from "@/components/common/ConfirmActionDialog";
@@ -7,9 +7,8 @@ import MetricCard from "@/components/common/MetricCard";
 import PageHeader from "@/components/layout/PageHeader";
 import AnnouncementSafetyPanel from "@/components/recruiter/AnnouncementSafetyPanel";
 import ApplicationFilters from "@/components/recruiter/ApplicationFilters";
-import ApplicationsTable from "@/components/recruiter/ApplicationsTable";
+import CandidateCompactTable from "@/components/recruiter/CandidateCompactTable";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import {
   bulkAnnounce,
   getActivePeriod,
@@ -17,16 +16,32 @@ import {
 } from "@/lib/api";
 import { getCurrentUser, ROLES } from "@/lib/auth";
 import {
-  EVALUATED_STATUSES,
+  ANNOUNCE_DECISIONS,
+  defaultAnnouncementDecision,
   formatDivision,
-  summarizeApplications,
+  isAnnouncedApplication,
+  isReadyToAnnounce,
 } from "@/lib/recruiterWorkspace";
+
+function SectionHeader({ title, hint, count }) {
+  return (
+    <div className="flex items-baseline gap-2">
+      <h2 className="font-heading text-lg font-bold tracking-normal">{title}</h2>
+      {count != null && (
+        <span className="rounded-full bg-surface-container-highest px-2 py-0.5 text-xs font-semibold tabular-nums text-muted-foreground">
+          {count}
+        </span>
+      )}
+      {hint && <span className="text-xs text-muted-foreground">{hint}</span>}
+    </div>
+  );
+}
 
 export default function RecruiterAnnouncementsPage() {
   const [applications, setApplications] = useState([]);
   const [divisionFilter, setDivisionFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
-  const [checked, setChecked] = useState({});
+  const [decisionOverrides, setDecisionOverrides] = useState({});
   const [activePeriod, setActivePeriod] = useState(null);
   const [loading, setLoading] = useState(true);
   const [periodLoading, setPeriodLoading] = useState(true);
@@ -37,6 +52,9 @@ export default function RecruiterAnnouncementsPage() {
   const isSuperAdmin = currentUser?.role === ROLES.SUPER_ADMIN;
   const phase = activePeriod?.current_phase || null;
   const phaseAllowsPublish = phase === "ANNOUNCEMENT" || isSuperAdmin;
+  const recommendationAvailable = Boolean(
+    activePeriod && activePeriod.threshold_n != null
+  );
 
   const loadApplications = useCallback(async () => {
     setLoading(true);
@@ -46,13 +64,8 @@ export default function RecruiterAnnouncementsPage() {
         status: statusFilter !== "all" ? statusFilter : undefined,
       });
       setApplications(apps || []);
-      const initial = {};
-      for (const application of apps || []) {
-        if (application.status === "announced_pass") {
-          initial[application.id] = true;
-        }
-      }
-      setChecked(initial);
+      // A fresh cohort invalidates any in-progress manual decisions.
+      setDecisionOverrides({});
     } catch (error) {
       toast.error(error.message || "Failed to load applications");
     } finally {
@@ -80,38 +93,95 @@ export default function RecruiterAnnouncementsPage() {
     Promise.resolve().then(loadApplications);
   }, [loadApplications]);
 
-  const checkedIds = useMemo(
-    () =>
-      applications
-        .filter(
-          (application) =>
-            checked[application.id] && EVALUATED_STATUSES.has(application.status)
-        )
-        .map((application) => application.id),
-    [applications, checked]
-  );
-  const checkedCount = checkedIds.length;
-  const evaluatedInView = useMemo(
-    () =>
-      applications.filter((application) =>
-        EVALUATED_STATUSES.has(application.status)
-      ),
+  // Bulk publish only touches ready-to-announce (screening) candidates.
+  const readyApplications = useMemo(
+    () => applications.filter(isReadyToAnnounce),
     [applications]
   );
-  const failCount = Math.max(evaluatedInView.length - checkedCount, 0);
-  const canPublish =
-    checkedCount > 0 &&
-    divisionFilter !== "all" &&
-    activePeriod != null &&
-    phaseAllowsPublish;
-  const summary = useMemo(
-    () => summarizeApplications(applications),
+  // Already-announced candidates are monitoring-only; never in the payload.
+  const publishedApplications = useMemo(
+    () => applications.filter(isAnnouncedApplication),
     [applications]
   );
 
-  const handleToggleChecked = useCallback((id, value) => {
-    setChecked((previous) => ({ ...previous, [id]: Boolean(value) }));
+  // Baseline decisions are derived from AI recommendation; manual edits live in
+  // decisionOverrides and win. This keeps decisions a pure derivation (no
+  // setState-in-effect) while still allowing user changes.
+  const baselineDecisions = useMemo(() => {
+    const baseline = {};
+    for (const application of readyApplications) {
+      baseline[application.id] = defaultAnnouncementDecision(application, {
+        recommendationAvailable,
+      });
+    }
+    return baseline;
+  }, [readyApplications, recommendationAvailable]);
+
+  const decisions = useMemo(
+    () => ({ ...baselineDecisions, ...decisionOverrides }),
+    [baselineDecisions, decisionOverrides]
+  );
+  const decisionCounts = useMemo(() => {
+    let pass = 0;
+    let fail = 0;
+    let undecided = 0;
+    for (const application of readyApplications) {
+      const decision = decisions[application.id] || ANNOUNCE_DECISIONS.UNDECIDED;
+      if (decision === ANNOUNCE_DECISIONS.PASS) pass += 1;
+      else if (decision === ANNOUNCE_DECISIONS.FAIL) fail += 1;
+      else undecided += 1;
+    }
+    return { pass, fail, undecided };
+  }, [readyApplications, decisions]);
+
+  const passIds = useMemo(
+    () =>
+      readyApplications
+        .filter(
+          (application) => decisions[application.id] === ANNOUNCE_DECISIONS.PASS
+        )
+        .map((application) => application.id),
+    [readyApplications, decisions]
+  );
+
+  const handleDecisionChange = useCallback((id, decision) => {
+    setDecisionOverrides((previous) => ({ ...previous, [id]: decision }));
   }, []);
+
+  const handleApplyRecommendation = useCallback(() => {
+    setDecisionOverrides((previous) => {
+      const next = { ...previous };
+      for (const application of readyApplications) {
+        next[application.id] = application.is_recommended
+          ? ANNOUNCE_DECISIONS.PASS
+          : ANNOUNCE_DECISIONS.FAIL;
+      }
+      return next;
+    });
+  }, [readyApplications]);
+
+  const handleMarkUndecidedAsFail = useCallback(() => {
+    setDecisionOverrides((previous) => {
+      const next = { ...previous };
+      for (const application of readyApplications) {
+        const effective =
+          next[application.id] ||
+          baselineDecisions[application.id] ||
+          ANNOUNCE_DECISIONS.UNDECIDED;
+        if (effective === ANNOUNCE_DECISIONS.UNDECIDED) {
+          next[application.id] = ANNOUNCE_DECISIONS.FAIL;
+        }
+      }
+      return next;
+    });
+  }, [readyApplications, baselineDecisions]);
+
+  const canPublish =
+    divisionFilter !== "all" &&
+    activePeriod != null &&
+    phaseAllowsPublish &&
+    readyApplications.length > 0 &&
+    decisionCounts.undecided === 0;
 
   const handleConfirmPublish = async () => {
     if (!canPublish) return;
@@ -120,10 +190,10 @@ export default function RecruiterAnnouncementsPage() {
       const result = await bulkAnnounce({
         division: divisionFilter,
         periodId: activePeriod.id,
-        passedApplicationIds: checkedIds,
+        passedApplicationIds: passIds,
       });
       toast.success(
-        `Published results: ${result.announced_pass} passed, ${result.announced_fail} did not pass.`
+        `Published results: ${result.announced_pass} Lolos, ${result.announced_fail} Tidak Lolos.`
       );
       setConfirmOpen(false);
       await loadApplications();
@@ -140,44 +210,53 @@ export default function RecruiterAnnouncementsPage() {
     ? "Select one division before publishing."
     : !phaseAllowsPublish
     ? "Announcements can only be published during announcement phase."
-    : checkedCount === 0
-    ? "Select at least one pass candidate."
+    : readyApplications.length === 0
+    ? "No ready-to-announce candidates to publish."
+    : decisionCounts.undecided > 0
+    ? `Masih ada ${decisionCounts.undecided} kandidat Belum Diputuskan.`
     : null;
+
+  const confirmDescription =
+    decisionCounts.pass === 0
+      ? `Tidak ada kandidat yang dipilih lolos. Semua ${decisionCounts.fail} kandidat dalam scope ${formatDivision(divisionFilter)} akan diumumkan Tidak Lolos. Lanjutkan?`
+      : `Publish ${decisionCounts.pass} Lolos dan ${decisionCounts.fail} Tidak Lolos untuk ${formatDivision(divisionFilter)}. Tindakan ini tidak dapat dibatalkan.`;
 
   return (
     <div className="space-y-6">
       <PageHeader
         eyebrow="Recruiter / Announcements"
         title="Announcements"
-        description="Prepare pass/fail results by division with safety checks before publishing."
+        description="Select final pass/fail decisions before publishing. Only ready-to-announce candidates are part of the publish decision; already-announced candidates are shown read-only. AI recommendations are decision support and can be adjusted."
       />
 
       <AnnouncementSafetyPanel
         activePeriod={activePeriod}
         divisionFilter={divisionFilter}
-        checkedCount={checkedCount}
-        evaluatedCount={evaluatedInView.length}
+        passCount={decisionCounts.pass}
+        failCount={decisionCounts.fail}
+        undecidedCount={decisionCounts.undecided}
+        evaluatedCount={readyApplications.length}
         phaseAllowsPublish={phaseAllowsPublish}
         isSuperAdmin={isSuperAdmin}
       />
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
         <MetricCard
-          icon={Sparkles}
-          label="Evaluated in view"
-          value={loading ? "..." : evaluatedInView.length}
+          icon={CheckCircle2}
+          label="Lolos"
+          value={loading ? "..." : decisionCounts.pass}
           tone="success"
         />
         <MetricCard
-          icon={Megaphone}
-          label="Selected pass"
-          value={checkedCount}
-          tone="success"
+          icon={XCircle}
+          label="Tidak Lolos"
+          value={loading ? "..." : decisionCounts.fail}
+          tone="destructive"
         />
         <MetricCard
-          icon={Bell}
-          label="Already announced"
-          value={loading ? "..." : summary.announcedCount}
+          icon={HelpCircle}
+          label="Belum Diputuskan"
+          value={loading ? "..." : decisionCounts.undecided}
           tone="warning"
         />
       </div>
@@ -199,54 +278,84 @@ export default function RecruiterAnnouncementsPage() {
             className="gap-2"
           >
             <Megaphone className="h-4 w-4" />
-            Publish Results ({checkedCount})
+            Publish Results
           </Button>
         </div>
       </ApplicationFilters>
 
-      {divisionFilter !== "all" && (
-        <Card className="brand-card">
-          <CardContent className="grid grid-cols-1 gap-3 p-5 sm:grid-cols-3">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-                Division
-              </p>
-              <p className="mt-1 font-medium">{formatDivision(divisionFilter)}</p>
-            </div>
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-                Candidate-facing pass
-              </p>
-              <p className="mt-1 font-medium">{checkedCount} candidates</p>
-            </div>
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-                Candidate-facing fail
-              </p>
-              <p className="mt-1 font-medium">{failCount} candidates</p>
-            </div>
-          </CardContent>
-        </Card>
+      {divisionFilter !== "all" && readyApplications.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2">
+          {recommendationAvailable && (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="gap-2"
+              onClick={handleApplyRecommendation}
+            >
+              <Sparkles className="h-4 w-4" />
+              Apply AI Recommendation
+            </Button>
+          )}
+          {decisionCounts.undecided > 0 && (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={handleMarkUndecidedAsFail}
+            >
+              Tandai semua Belum Diputuskan → Tidak Lolos
+            </Button>
+          )}
+        </div>
       )}
 
-      <ApplicationsTable
-        applications={applications}
-        loading={loading}
-        selectable
-        checked={checked}
-        onToggleChecked={handleToggleChecked}
-        emptyTitle="No evaluated applications"
-        emptyDescription="Run evaluation before publishing pass/fail announcements."
-        detailFrom="/recruiter/announcements"
-        detailFromLabel="Announcements"
-        detailReturnLabel="Kembali ke Announcements"
-      />
+      <section className="space-y-3">
+        <SectionHeader
+          title="Ready to Announce"
+          hint="Menampilkan kandidat yang sudah selesai Evaluasi AI dan belum diumumkan."
+          count={loading ? null : readyApplications.length}
+        />
+        <CandidateCompactTable
+          applications={readyApplications}
+          loading={loading}
+          decisions={decisions}
+          onDecisionChange={handleDecisionChange}
+          emptyTitle="No ready-to-announce candidates"
+          emptyDescription="Candidates appear here once their AI evaluation is complete and before they are announced."
+          detailFrom="/recruiter/announcements"
+          detailFromLabel="Announcements"
+          detailReturnLabel="Kembali ke Announcements"
+        />
+      </section>
+
+      {!loading && publishedApplications.length > 0 && (
+        <section className="space-y-3">
+          <SectionHeader
+            title="Published"
+            hint="Sudah diumumkan; read-only dan tidak ikut bulk publish."
+            count={publishedApplications.length}
+          />
+          <CandidateCompactTable
+            applications={publishedApplications}
+            loading={false}
+            readOnly
+            detailFrom="/recruiter/announcements"
+            detailFromLabel="Announcements"
+            detailReturnLabel="Kembali ke Announcements"
+          />
+        </section>
+      )}
 
       <ConfirmActionDialog
         open={confirmOpen}
         onOpenChange={setConfirmOpen}
-        title="Confirm result publication"
-        description={`Publish ${checkedCount} pass and ${failCount} fail result(s) for ${formatDivision(divisionFilter)}. This action cannot be undone.`}
+        title={
+          decisionCounts.pass === 0
+            ? "Publikasikan semua sebagai Tidak Lolos?"
+            : "Confirm result publication"
+        }
+        description={confirmDescription}
         confirmLabel={publishing ? "Publishing..." : "Publish Results"}
         cancelLabel="Cancel"
         loading={publishing}

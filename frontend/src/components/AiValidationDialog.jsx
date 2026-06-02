@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -21,9 +21,12 @@ export default function AiValidationDialog({ open, mode, onOpenChange, onSubmit 
 
   const needsDiscussion = mode === "needs_discussion";
 
-  useEffect(() => {
-    if (open) setNote("");
-  }, [open, mode]);
+  // Clear the note as the dialog closes so the next open (any mode) starts
+  // blank — avoids resetting state inside an effect.
+  const handleOpenChange = (next) => {
+    if (!next) setNote("");
+    onOpenChange(next);
+  };
 
   const noteValid = !needsDiscussion || note.trim().length > 0;
 
@@ -38,7 +41,7 @@ export default function AiValidationDialog({ open, mode, onOpenChange, onSubmit 
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>
@@ -73,7 +76,7 @@ export default function AiValidationDialog({ open, mode, onOpenChange, onSubmit 
         <DialogFooter>
           <Button
             variant="outline"
-            onClick={() => onOpenChange(false)}
+            onClick={() => handleOpenChange(false)}
             disabled={submitting}
           >
             Batal

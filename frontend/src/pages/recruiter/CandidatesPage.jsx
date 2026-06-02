@@ -1,15 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
-import { BarChart3, Sparkles, Trophy, Users } from "lucide-react";
+import { BarChart3, CheckCircle2, Inbox, Loader2, Trophy, Users } from "lucide-react";
 import { toast } from "sonner";
 
 import MetricCard from "@/components/common/MetricCard";
 import PageHeader from "@/components/layout/PageHeader";
 import ApplicationFilters from "@/components/recruiter/ApplicationFilters";
-import ApplicationsTable from "@/components/recruiter/ApplicationsTable";
-import CandidateReviewCard from "@/components/recruiter/CandidateReviewCard";
+import CandidateResultCard from "@/components/recruiter/CandidateResultCard";
+import { Card, CardContent } from "@/components/ui/card";
 import { listRecruiterApplications } from "@/lib/api";
 import {
   candidateEvaluationId,
+  getAiValidationStatus,
   sortRankedApplications,
   summarizeApplications,
 } from "@/lib/recruiterWorkspace";
@@ -55,17 +56,20 @@ export default function RecruiterCandidatesPage() {
     () => summarizeApplications(rankedApplications),
     [rankedApplications]
   );
-  const recommendedCount = rankedApplications.filter(
-    (application) => application.is_recommended
-  ).length;
-  const topThree = rankedApplications.slice(0, 3);
+  const validatedCount = useMemo(
+    () =>
+      rankedApplications.filter(
+        (application) => getAiValidationStatus(application) === "validated"
+      ).length,
+    [rankedApplications]
+  );
 
   return (
     <div className="space-y-6">
       <PageHeader
         eyebrow="Recruiter / Candidates"
         title="Candidates"
-        description="Ranked candidate review list with recommendation, score, and evidence detail. AI scoring uses anonymized document content; recruiter-facing candidate data remains visible for operational review."
+        description="Ranked candidate review list with score, validation status, and detail access. AI scoring uses anonymized document content; recruiter-facing candidate data remains visible for operational review."
       />
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
@@ -75,9 +79,9 @@ export default function RecruiterCandidatesPage() {
           value={loading ? "..." : rankedApplications.length}
         />
         <MetricCard
-          icon={Sparkles}
-          label="Recommended"
-          value={loading ? "..." : recommendedCount}
+          icon={CheckCircle2}
+          label="Tervalidasi"
+          value={loading ? "..." : validatedCount}
           tone="success"
         />
         <MetricCard
@@ -100,30 +104,6 @@ export default function RecruiterCandidatesPage() {
         />
       </div>
 
-      {topThree.length > 0 && (
-        <section className="space-y-3">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.08em] text-primary">
-              Ranking Preview
-            </p>
-            <h2 className="mt-1 font-heading text-xl font-bold tracking-normal">
-              Top candidates in current view
-            </h2>
-          </div>
-          <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
-            {topThree.map((application) => (
-              <CandidateReviewCard
-                key={application.id}
-                application={application}
-                from="/recruiter/candidates"
-                fromLabel="Candidates"
-                returnLabel="Kembali ke Candidates"
-              />
-            ))}
-          </div>
-        </section>
-      )}
-
       <ApplicationFilters
         divisionFilter={divisionFilter}
         statusFilter={statusFilter}
@@ -131,15 +111,40 @@ export default function RecruiterCandidatesPage() {
         onStatusChange={setStatusFilter}
       />
 
-      <ApplicationsTable
-        applications={rankedApplications}
-        loading={loading}
-        emptyTitle="No scored candidates"
-        emptyDescription="Run evaluation before opening the ranked candidate review list."
-        detailFrom="/recruiter/candidates"
-        detailFromLabel="Candidates"
-        detailReturnLabel="Kembali ke Candidates"
-      />
+      {loading ? (
+        <Card>
+          <CardContent className="flex items-center justify-center gap-3 py-16">
+            <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+            <span className="text-sm text-muted-foreground">
+              Loading candidates...
+            </span>
+          </CardContent>
+        </Card>
+      ) : rankedApplications.length === 0 ? (
+        <Card className="border-dashed">
+          <CardContent className="py-16 text-center">
+            <Inbox className="mx-auto mb-4 h-12 w-12 text-muted-foreground/40" />
+            <p className="mb-1 text-sm font-medium">No scored candidates</p>
+            <p className="text-sm text-muted-foreground">
+              Run evaluation before opening the ranked candidate review list.
+            </p>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="space-y-3">
+          {rankedApplications.map((application) => (
+            <CandidateResultCard
+              key={application.id}
+              application={application}
+              variant="ranking"
+              from="/recruiter/candidates"
+              fromLabel="Candidates"
+              returnLabel="Kembali ke Candidates"
+              showAcademicMeta
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 }

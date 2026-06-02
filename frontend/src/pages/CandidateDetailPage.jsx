@@ -44,7 +44,7 @@ import {
 import OverrideDialog from "@/components/OverrideDialog";
 import JustificationCard from "@/components/JustificationCard";
 import DocumentPreviewDialog from "@/components/DocumentPreviewDialog";
-import AiValidationBadge from "@/components/AiValidationBadge";
+import AiValidationBadge from "@/components/common/AiValidationBadge";
 import AiValidationDialog from "@/components/AiValidationDialog";
 import { defaultPathForRole, getCurrentUser } from "@/lib/auth";
 import { formatIpk } from "@/lib/candidateApplication";

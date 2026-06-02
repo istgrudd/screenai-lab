@@ -1,11 +1,19 @@
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, BarChart3, FileWarning, Sparkles, Users } from "lucide-react";
+import {
+  AlertTriangle,
+  BarChart3,
+  FileWarning,
+  Inbox,
+  Loader2,
+  Sparkles,
+  Users,
+} from "lucide-react";
 import { toast } from "sonner";
 
 import ConfirmActionDialog from "@/components/common/ConfirmActionDialog";
 import MetricCard from "@/components/common/MetricCard";
 import PageHeader from "@/components/layout/PageHeader";
-import ApplicationsTable from "@/components/recruiter/ApplicationsTable";
+import CandidateResultCard from "@/components/recruiter/CandidateResultCard";
 import EvaluationActionPanel from "@/components/recruiter/EvaluationActionPanel";
 import EvaluationRunningOverlay from "@/components/recruiter/EvaluationRunningOverlay";
 import { Card, CardContent } from "@/components/ui/card";
@@ -15,8 +23,33 @@ import {
   listRecruiterApplications,
 } from "@/lib/api";
 import {
+  getAiValidationStatus,
+  isScoredApplication,
   summarizeApplications,
 } from "@/lib/recruiterWorkspace";
+
+const EVALUATION_QUEUE_GROUPS = [
+  {
+    key: "pending_eval",
+    title: "Pending Evaluation",
+    hint: "Belum memiliki skor AI.",
+  },
+  {
+    key: "pending_validation",
+    title: "Pending AI Validation",
+    hint: "Sudah dinilai AI, menunggu validasi recruiter.",
+  },
+  {
+    key: "needs_discussion",
+    title: "Needs Discussion",
+    hint: "Ditandai perlu dibahas lebih lanjut.",
+  },
+  {
+    key: "validated",
+    title: "Validated",
+    hint: "Sudah divalidasi recruiter.",
+  },
+];
 
 export default function RecruiterEvaluationPage() {
   const [applications, setApplications] = useState([]);
@@ -90,6 +123,26 @@ export default function RecruiterEvaluationPage() {
   );
   const canReEvaluate = lastSkippedCount > 0 || evaluatedInSelectedDivision > 0;
 
+  const queueGroups = useMemo(() => {
+    const groups = {
+      pending_eval: [],
+      pending_validation: [],
+      needs_discussion: [],
+      validated: [],
+    };
+    for (const application of applications) {
+      if (!isScoredApplication(application)) {
+        groups.pending_eval.push(application);
+        continue;
+      }
+      const validation = getAiValidationStatus(application);
+      if (validation === "needs_discussion") groups.needs_discussion.push(application);
+      else if (validation === "validated") groups.validated.push(application);
+      else groups.pending_validation.push(application);
+    }
+    return groups;
+  }, [applications]);
+
   const runEvaluate = async ({ force = false } = {}) => {
     if (evaluating) return;
     if (!selectedDivision) {
@@ -159,7 +212,7 @@ export default function RecruiterEvaluationPage() {
       <PageHeader
         eyebrow="Recruiter / Evaluation"
         title="Evaluation"
-        description="Run AI-anonymized evaluation per division. Personal identifiers are excluded from AI evaluation input, while recruiter-facing candidate data stays visible. Controls are locked while evaluation is running to prevent duplicate or inconsistent processing."
+        description="Run AI-anonymized evaluation and validate AI results per division. Personal identifiers are excluded from AI evaluation input, while recruiter-facing candidate data stays visible. Controls are locked while evaluation is running to prevent duplicate or inconsistent processing."
       />
 
       <EvaluationRunningOverlay running={evaluating} />
@@ -254,15 +307,60 @@ export default function RecruiterEvaluationPage() {
         />
       </div>
 
-      <ApplicationsTable
-        applications={applications}
-        loading={loading}
-        emptyTitle="No applications in this division"
-        emptyDescription="Submitted applications for the selected division will appear here."
-        detailFrom="/recruiter/evaluation"
-        detailFromLabel="Evaluation"
-        detailReturnLabel="Kembali ke Evaluation"
-      />
+      {loading ? (
+        <Card>
+          <CardContent className="flex items-center justify-center gap-3 py-16">
+            <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+            <span className="text-sm text-muted-foreground">
+              Loading work queue...
+            </span>
+          </CardContent>
+        </Card>
+      ) : applications.length === 0 ? (
+        <Card className="border-dashed">
+          <CardContent className="py-16 text-center">
+            <Inbox className="mx-auto mb-4 h-12 w-12 text-muted-foreground/40" />
+            <p className="mb-1 text-sm font-medium">
+              No applications in this division
+            </p>
+            <p className="text-sm text-muted-foreground">
+              Submitted applications for the selected division will appear here.
+            </p>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="space-y-6">
+          {EVALUATION_QUEUE_GROUPS.map((group) => {
+            const items = queueGroups[group.key];
+            if (!items.length) return null;
+            return (
+              <section key={group.key} className="space-y-3">
+                <div className="flex items-baseline gap-2">
+                  <h2 className="font-heading text-lg font-bold tracking-normal">
+                    {group.title}
+                  </h2>
+                  <span className="rounded-full bg-surface-container-highest px-2 py-0.5 text-xs font-semibold tabular-nums text-muted-foreground">
+                    {items.length}
+                  </span>
+                  <span className="text-xs text-muted-foreground">{group.hint}</span>
+                </div>
+                <div className="space-y-3">
+                  {items.map((application) => (
+                    <CandidateResultCard
+                      key={application.id}
+                      application={application}
+                      variant="evaluation"
+                      from="/recruiter/evaluation"
+                      fromLabel="Evaluation"
+                      returnLabel="Kembali ke Evaluation"
+                    />
+                  ))}
+                </div>
+              </section>
+            );
+          })}
+        </div>
+      )}
 
       <ConfirmActionDialog
         open={reEvaluateOpen}

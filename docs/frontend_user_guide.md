@@ -413,19 +413,21 @@ Tombol utama:
 
 ### Applications
 
-Halaman ini menampilkan daftar aplikasi kandidat.
+Halaman administratif untuk tracking pendaftaran dan kesiapan dokumen (bukan halaman evaluasi AI).
 
 Fitur utama:
 
-- Filter berdasarkan divisi.
-- Filter berdasarkan status.
-- Melihat nama kandidat, NIM, divisi, status, kelengkapan dokumen, skor, dan tanggal submit.
+- Search berdasarkan nama, email, atau NIM.
+- Quick filter status + filter divisi/status.
+- Tabel administratif ringkas: Candidate (nama + email/NIM), Division, Application Status, Documents, Submitted, action.
+- Tidak menampilkan composite score, Validasi AI, AI Recommendation, atau IPK sebagai kolom utama; detail lengkap tetap ada di Candidate Detail.
 - Membuka detail kandidat jika kandidat sudah memiliki data evaluasi.
 
 Tombol utama:
 
-- Dropdown division.
-- Dropdown status.
+- Input search.
+- Quick filter status.
+- Dropdown division/status.
 - `Reset`: menghapus filter.
 - Klik row kandidat: membuka detail kandidat jika tersedia.
 
@@ -482,20 +484,20 @@ Tombol utama:
 
 ### Candidates
 
-Halaman ini menampilkan kandidat yang sudah memiliki hasil evaluasi.
+Halaman ini menampilkan kandidat yang sudah memiliki hasil evaluasi sebagai ranked compact card/list.
 
 Fitur utama:
 
-- Menampilkan kandidat dengan ranking/skor.
-- Menampilkan badge recommended.
+- Menampilkan kandidat sebagai compact ranked row: rank, nama, email/metadata kecil, divisi, status, badge Validasi AI, dan composite score.
+- Tidak menampilkan badge AI Recommended (rekomendasi AI hanya tampil di Announcements).
 - Filter berdasarkan divisi dan status.
-- Membuka detail kandidat.
+- Membuka detail kandidat via `Open Detail`.
 
 Tombol utama:
 
 - Dropdown division/status filter.
 - `Reset`.
-- Klik row kandidat untuk membuka detail.
+- `Open Detail` pada tiap kandidat.
 
 ### Candidate Detail
 
@@ -533,28 +535,35 @@ Catatan: catatan validasi terpisah dari alasan override skor. Override skor tida
 
 ### Announcements
 
-Halaman ini digunakan untuk mempublikasikan hasil seleksi.
+Halaman ini adalah workspace keputusan akhir untuk mempublikasikan hasil seleksi.
 
 Fitur utama:
 
-- Menampilkan kandidat yang sudah dievaluasi.
-- Memilih kandidat yang lolos.
-- Kandidat yang tidak dipilih sebagai lolos akan dipublish sebagai tidak lolos.
-- Publish hasil berdasarkan divisi.
-- Menampilkan jumlah yang sudah diumumkan.
+- **Ready to Announce**: tabel keputusan untuk kandidat yang sudah selesai Evaluasi AI dan **belum** diumumkan (status `screening`). Hanya kandidat ini yang ikut keputusan publish.
+- **Published**: daftar read-only kandidat yang sudah diumumkan (`announced_pass` → "Lolos", `announced_fail` → "Tidak Lolos"). Tidak editable dan tidak ikut bulk publish.
+- Keputusan eksplisit per kandidat: **Lolos**, **Tidak Lolos**, atau **Belum Diputuskan** (dropdown decision), bukan lagi checkbox.
+- Kandidat rekomendasi AI ditandai dengan row highlight hijau pudar + badge kecil "AI Recommended" (decision support saja, hanya pada Ready to Announce). Tidak ada kolom AI Recommendation terpisah.
+- Default decision mengikuti rekomendasi AI bila threshold tersedia (recommended → Lolos, lainnya → Tidak Lolos); bila tidak tersedia, default Belum Diputuskan.
+- Helper: `Apply AI Recommendation` dan `Tandai semua Belum Diputuskan → Tidak Lolos`.
+- Publish hasil berdasarkan divisi; menampilkan ringkasan Lolos/Tidak Lolos/Belum Diputuskan.
 - Super admin dapat publish di luar fase announcement.
 
 Tombol utama:
 
 - Dropdown division/status filter.
-- Checkbox kandidat.
-- `Publish Results`: membuka dialog publikasi.
+- Decision dropdown per kandidat (Lolos / Tidak Lolos / Belum Diputuskan).
+- `Apply AI Recommendation`, `Tandai semua Belum Diputuskan → Tidak Lolos`.
+- `Publish Results`: membuka dialog konfirmasi.
 - `Publish`: mempublikasikan hasil.
 - `Cancel`: membatalkan publikasi.
 
 Catatan penting:
 
 - Publish membutuhkan satu divisi spesifik, bukan `All divisions`.
+- Bulk publish hanya menyentuh kandidat **Ready to Announce** (status `screening`); kandidat yang sudah diumumkan tidak berubah.
+- Publish diblokir jika masih ada kandidat **Belum Diputuskan**.
+- Publish boleh dilakukan walaupun **tidak ada kandidat Lolos** (semua Tidak Lolos), selama semua kandidat Ready to Announce sudah diputuskan; muncul konfirmasi khusus.
+- Koreksi hasil yang sudah diumumkan tidak lewat bulk publish (gunakan jalur single announcement bila diperlukan).
 - Publish adalah action sensitif karena hasil diumumkan ke kandidat.
 
 ### Analytics
