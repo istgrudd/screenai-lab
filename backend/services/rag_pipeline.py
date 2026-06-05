@@ -175,8 +175,8 @@ async def evaluate_candidate(
     llm_response = await call_llm_json_async(
         system_prompt=SYSTEM_PROMPT,
         user_prompt=user_prompt,
-        temperature=0.1,
-        max_tokens=4096,
+        temperature=0.0,
+        max_tokens=8192,
     )
 
     # --- 4. Process and validate response ---
