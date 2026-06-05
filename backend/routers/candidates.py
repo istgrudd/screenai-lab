@@ -88,6 +88,24 @@ def _candidate_has_ai_evaluation(candidate: Candidate, db: Session) -> bool:
         is not None
     )
 
+def _sections_detected_for_document(document: CandidateDocument) -> list[str]:
+    """Return detected text sections only for CV-like documents.
+
+    KHS stores structured parser payload in sections_json, so it must not be
+    treated as normalized text sections.
+    """
+    if document.document_type not in {"cv", "motivation_letter"}:
+        return []
+
+    sections = document.sections_json
+    if not isinstance(sections, dict):
+        return []
+
+    return [
+        key
+        for key, value in sections.items()
+        if isinstance(value, str) and value.strip()
+    ]
 
 # ---------------------------------------------------------------------------
 # Endpoints
@@ -273,10 +291,7 @@ def get_candidate(candidate_id: int, db: Session = Depends(get_db)):
                     "document_type": d.document_type,
                     "page_count": d.page_count,
                     "file_size_kb": d.file_size_kb,
-                    "sections_detected": (
-                        [k for k, v in d.sections_json.items() if v.strip()]
-                        if d.sections_json else []
-                    ),
+                    "sections_detected": _sections_detected_for_document(d),
                     "entities": d.entities_json or [],
                 }
                 for d in documents
