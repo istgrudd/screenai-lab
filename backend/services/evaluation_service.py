@@ -13,12 +13,13 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import traceback
+import time
 import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 
+from backend.database import SessionLocal, engine
 from backend.models.application import Application, ApplicationStatus, Division
 from backend.models.candidate import Candidate, CandidateDocument
 from backend.models.document import Document, DocumentType
@@ -48,6 +49,20 @@ logger = logging.getLogger(__name__)
 # Keep this small enough to stay under DeepSeek rate limits but large enough
 # that batch wall-clock scales sub-linearly with N.
 _LLM_CONCURRENCY = 5
+
+
+def _effective_concurrency() -> int:
+    """Per-batch candidate concurrency, adjusted for the DB backend.
+
+    Each candidate evaluation holds its own write transaction for the whole
+    candidate duration (per-candidate sessions). SQLite allows a single
+    writer, so concurrent candidates would spin in sqlite3's busy-wait —
+    on the event loop — until "database is locked". Serialize on SQLite
+    (dev); Postgres (production) keeps the concurrent LLM overlap.
+    """
+    if engine.dialect.name == "sqlite":
+        return 1
+    return _LLM_CONCURRENCY
 
 _ACADEMIC_EVIDENCE_KEYWORDS = (
     "ipk",
@@ -203,28 +218,91 @@ async def run_evaluation_pipeline(
     }
 
     if not applications:
+        logger.info(
+            "Evaluation batch skipped: division=%s force=%s — no eligible "
+            "applications (skipped_already_scored=%d, skipped_unverified=%d, "
+            "skipped_correction=%d)",
+            division,
+            force,
+            skipped_already_scored_count,
+            skipped_unverified_count,
+            skipped_correction_count,
+        )
         return {"queued": 0, "results": [], "errors": [], **counters}
 
-    # Bounded-concurrency evaluation. The SQLAlchemy Session is sync and DB
-    # work happens between awaits; the DeepSeek request itself is awaitable,
-    # so up to _LLM_CONCURRENCY LLM round-trips can overlap inside this batch.
-    semaphore = asyncio.Semaphore(_LLM_CONCURRENCY)
+    # The request-scoped `db` is used only for the selection/validation work
+    # above. Each candidate coroutine opens its own short-lived session from
+    # SessionLocal and commits (or rolls back) independently, so a failed
+    # candidate can never poison the others' transactions and no partial
+    # rows survive for a candidate that is reported as failed. Only plain
+    # IDs cross the session boundary — never ORM instances.
+    application_ids_to_run = [app.id for app in applications]
+    rubric_id = rubric.id
 
-    async def _bounded(app: Application) -> tuple[str, dict]:
+    logger.info(
+        "Evaluation batch started: division=%s force=%s selected=%d "
+        "(skipped_already_scored=%d, skipped_unverified=%d, skipped_correction=%d)",
+        division,
+        force,
+        len(application_ids_to_run),
+        skipped_already_scored_count,
+        skipped_unverified_count,
+        skipped_correction_count,
+    )
+    batch_started = time.monotonic()
+
+    # Bounded-concurrency evaluation. The DeepSeek request is awaitable, so up
+    # to _effective_concurrency() round-trips can overlap; sync CPU-bound
+    # stages run via asyncio.to_thread inside _evaluate_one. The per-candidate
+    # session is opened inside the semaphore so at most that many extra DB
+    # connections are held at once.
+    semaphore = asyncio.Semaphore(_effective_concurrency())
+
+    async def _bounded(app_id: int) -> tuple[str, dict]:
         async with semaphore:
+            started = time.monotonic()
+            logger.info(
+                "Evaluating application %d (division=%s)", app_id, division
+            )
+            session = SessionLocal()
             try:
-                result = await _evaluate_one(app, rubric, db)
+                app = session.get(Application, app_id)
+                if app is None:
+                    raise ValueError(f"Application {app_id} not found")
+                rubric_row = session.get(Rubric, rubric_id)
+                if rubric_row is None:
+                    raise ValueError(f"Rubric {rubric_id} not found")
+                result = await _evaluate_one(app, rubric_row, session)
                 app.status = ApplicationStatus.SCREENING
-                db.flush()
+                session.commit()
+                logger.info(
+                    "Application %d evaluated successfully in %.1fs",
+                    app_id,
+                    time.monotonic() - started,
+                )
                 return ("ok", result)
             except Exception as exc:
-                traceback.print_exc()
+                try:
+                    session.rollback()
+                except Exception:
+                    logger.exception(
+                        "Rollback failed for application %d", app_id
+                    )
+                logger.exception(
+                    "Evaluation failed for application %d after %.1fs",
+                    app_id,
+                    time.monotonic() - started,
+                )
                 return (
                     "err",
-                    {"application_id": app.id, "error": str(exc)},
+                    {"application_id": app_id, "error": str(exc)},
                 )
+            finally:
+                session.close()
 
-    outcomes = await asyncio.gather(*[_bounded(a) for a in applications])
+    outcomes = await asyncio.gather(
+        *[_bounded(app_id) for app_id in application_ids_to_run]
+    )
 
     results: list[dict] = []
     errors: list[dict] = []
@@ -234,7 +312,13 @@ async def run_evaluation_pipeline(
         else:
             errors.append(item)
 
-    db.commit()
+    logger.info(
+        "Evaluation batch finished: division=%s ok=%d failed=%d duration=%.1fs",
+        division,
+        len(results),
+        len(errors),
+        time.monotonic() - batch_started,
+    )
 
     return {
         "queued": len(applications),
@@ -268,7 +352,7 @@ async def _evaluate_one(
     }
 
     # --- KTM validation ---
-    ktm_result = _run_ktm(app, user, db)
+    ktm_result = await _run_ktm(app, user, db)
     result["ktm_valid"] = ktm_result.get("valid", False)
     result["ktm_warning"] = ktm_result.get("warning") or ktm_result.get("error")
 
@@ -276,7 +360,7 @@ async def _evaluate_one(
     candidate = _ensure_candidate(app, rubric, user, db)
 
     # --- KHS parsing/cache resolution ---
-    khs_context = _resolve_khs_context(app, candidate, rubric, db)
+    khs_context = await _resolve_khs_context(app, candidate, rubric, db)
     result["khs_summary"] = khs_context["khs_summary"]
     result["khs_warning"] = khs_context["khs_warning"]
     result["khs_used_in_ai_scoring"] = khs_context["khs_used_in_ai_scoring"]
@@ -356,11 +440,15 @@ async def _evaluate_one(
         if not cv_doc:
             raise ValueError(f"No CV document found for application {app.id}")
 
-        extraction = extract_text_from_pdf(cv_doc.file_path)
+        # Heavy sync stages (PyMuPDF extraction, IndoBERT NER inference) run
+        # in worker threads so they never block the event loop.
+        extraction = await asyncio.to_thread(extract_text_from_pdf, cv_doc.file_path)
         cv_metadata = extraction.get("metadata") or {}
         raw_text = extraction.get("raw_text", "")
-        normalised = normalize_and_segment(raw_text)
-        anonymised = anonymize_text(normalised["normalized_text"])
+        normalised = await asyncio.to_thread(normalize_and_segment, raw_text)
+        anonymised = await asyncio.to_thread(
+            anonymize_text, normalised["normalized_text"]
+        )
         full_text = anonymised.get("anonymized_text", "")
 
         # Also anonymize motivation letter if present
@@ -381,10 +469,16 @@ async def _evaluate_one(
         elif ml_doc and os.path.exists(ml_doc.file_path):
             ml_fallback_attempted = True
             try:
-                ml_extraction = extract_text_from_pdf(ml_doc.file_path)
+                ml_extraction = await asyncio.to_thread(
+                    extract_text_from_pdf, ml_doc.file_path
+                )
                 ml_metadata = ml_extraction.get("metadata") or {}
-                ml_norm = normalize_and_segment(ml_extraction.get("raw_text", ""))
-                ml_anonymised = anonymize_text(ml_norm["normalized_text"])
+                ml_norm = await asyncio.to_thread(
+                    normalize_and_segment, ml_extraction.get("raw_text", "")
+                )
+                ml_anonymised = await asyncio.to_thread(
+                    anonymize_text, ml_norm["normalized_text"]
+                )
                 ml_anon_text = ml_anonymised.get("anonymized_text", "")
                 _ensure_candidate_document(
                     candidate,
@@ -406,10 +500,16 @@ async def _evaluate_one(
         and os.path.exists(ml_doc.file_path)
     ):
         try:
-            ml_extraction = extract_text_from_pdf(ml_doc.file_path)
+            ml_extraction = await asyncio.to_thread(
+                extract_text_from_pdf, ml_doc.file_path
+            )
             ml_metadata = ml_extraction.get("metadata") or {}
-            ml_norm = normalize_and_segment(ml_extraction.get("raw_text", ""))
-            ml_anonymised = anonymize_text(ml_norm["normalized_text"])
+            ml_norm = await asyncio.to_thread(
+                normalize_and_segment, ml_extraction.get("raw_text", "")
+            )
+            ml_anonymised = await asyncio.to_thread(
+                anonymize_text, ml_norm["normalized_text"]
+            )
             ml_anon_text = ml_anonymised.get("anonymized_text", "")
             _ensure_candidate_document(
                 candidate,
@@ -483,7 +583,7 @@ async def _evaluate_one(
     db.flush()
 
     # --- SWOT text extraction (highlight only, not scored) ---
-    swot_text = _extract_swot(app, db)
+    swot_text = await _extract_swot(app, db)
     result["swot_text"] = swot_text
 
     # --- Populate result ---
@@ -576,7 +676,7 @@ def rubric_requires_academic_evidence(rubric: Rubric) -> bool:
     return any(keyword in haystack for keyword in _ACADEMIC_EVIDENCE_KEYWORDS)
 
 
-def _resolve_khs_context(
+async def _resolve_khs_context(
     app: Application,
     candidate: Candidate,
     rubric: Rubric,
@@ -607,7 +707,9 @@ def _resolve_khs_context(
         logger.info("KHS cache hit for application %d", app.id)
     else:
         logger.info("KHS cache miss for application %d, parsing inline", app.id)
-        parsed, cache_doc = _parse_and_store_khs_inline(app, candidate, khs_doc, db)
+        parsed, cache_doc = await _parse_and_store_khs_inline(
+            app, candidate, khs_doc, db
+        )
         source = "inline_fallback"
 
     warning = None
@@ -680,17 +782,21 @@ def _get_cached_khs_document(
     return cached
 
 
-def _parse_and_store_khs_inline(
+async def _parse_and_store_khs_inline(
     app: Application,
     candidate: Candidate,
     khs_doc: Document,
     db: Session,
 ) -> tuple[KhsResult, CandidateDocument | None]:
     try:
-        extraction = extract_text_from_pdf(khs_doc.file_path)
+        # parse_khs calls DeepSeek through the sync client; running it in a
+        # worker thread keeps its retries/timeout off the event loop.
+        extraction = await asyncio.to_thread(
+            extract_text_from_pdf, khs_doc.file_path
+        )
         raw_text = (extraction.get("raw_text") or "").strip()
         metadata = extraction.get("metadata") or {}
-        parsed = parse_khs(khs_doc.file_path)
+        parsed = await asyncio.to_thread(parse_khs, khs_doc.file_path)
     except Exception as exc:  # noqa: BLE001 - evaluation should degrade gracefully
         logger.warning("Inline KHS parse failed for application %d: %s", app.id, exc)
         raw_text = ""
@@ -812,14 +918,16 @@ def _public_khs_summary(parsed: KhsResult | None) -> dict | None:
     }
 
 
-def _run_ktm(app: Application, user: User | None, db: Session) -> dict:
+async def _run_ktm(app: Application, user: User | None, db: Session) -> dict:
     """Validate KTM — returns ktm_validator output or synthetic error."""
     ktm_doc = _get_doc(app.id, DocumentType.KTM, db)
     if not ktm_doc:
         return {"valid": False, "error": "No KTM document uploaded"}
 
     expected_nim = user.nim if user else None
-    return validate_ktm(ktm_doc.file_path, expected_nim=expected_nim)
+    return await asyncio.to_thread(
+        validate_ktm, ktm_doc.file_path, expected_nim=expected_nim
+    )
 
 
 def _legacy_parse_khs_inline(app: Application, db: Session) -> KhsResult:
@@ -831,13 +939,13 @@ def _legacy_parse_khs_inline(app: Application, db: Session) -> KhsResult:
     return parse_khs(khs_doc.file_path)
 
 
-def _extract_swot(app: Application, db: Session) -> str | None:
+async def _extract_swot(app: Application, db: Session) -> str | None:
     """Extract SWOT text — best effort."""
     swot_doc = _get_doc(app.id, DocumentType.SWOT, db)
     if not swot_doc or not os.path.exists(swot_doc.file_path):
         return None
     try:
-        result = extract_text_from_pdf(swot_doc.file_path)
+        result = await asyncio.to_thread(extract_text_from_pdf, swot_doc.file_path)
         return (result.get("raw_text") or "").strip() or None
     except Exception:
         return None

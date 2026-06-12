@@ -263,6 +263,7 @@ def _seed_data() -> None:
                     faculty="Fakultas Informatika",
                     major="Data Science",
                     year=2023,
+                    ipk=3.46,
                     whatsapp="+6281234567890",
                     role=UserRole.CANDIDATE,
                     is_active=True,

@@ -4,6 +4,8 @@ Initializes the app, registers middleware & routers, and creates
 database tables on startup.
 """
 
+import logging
+import threading
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -34,6 +36,40 @@ from backend.routers.periods import router as periods_router
 from backend.routers.analytics import router as analytics_router
 from backend.routers.audit_logs import router as audit_logs_router
 from backend.routers.email_notifications import router as email_notifications_router
+
+# Backend modules log through module-level loggers; without a root handler
+# Python only surfaces WARNING and above. Configure a basic INFO handler so
+# the evaluation pipeline's operational logs (batch progress, per-candidate
+# durations, NER warmup) reach the container logs. uvicorn's own loggers
+# carry their own handlers and are unaffected; basicConfig is a no-op if the
+# root logger is already configured by the embedding process.
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
+# Keep SQLAlchemy below INFO — at INFO it would echo every SQL statement.
+logging.getLogger("sqlalchemy").setLevel(logging.WARNING)
+
+logger = logging.getLogger(__name__)
+
+
+def _warm_up_ner_model() -> None:
+    """Load the IndoBERT NER model so the first evaluation doesn't pay for it.
+
+    Runs in a daemon thread during startup; the app must boot (and serve
+    /api/health) regardless of whether the warmup succeeds.
+    """
+    try:
+        logger.info("NER model warmup started")
+        from backend.utils.ner_utils import get_ner_pipeline
+
+        get_ner_pipeline()
+        logger.info("NER model warmup finished successfully")
+    except Exception:
+        logger.exception(
+            "NER model warmup failed — the model will be loaded on demand "
+            "by the first evaluation instead"
+        )
 
 
 @asynccontextmanager
@@ -79,6 +115,13 @@ async def lifespan(app: FastAPI):
             print("[OK] Division rubrics already present")
     finally:
         db.close()
+
+    # Warm the ~1.3 GB NER model off the critical path so the first
+    # evaluation after a restart doesn't pay the load inside a request.
+    threading.Thread(
+        target=_warm_up_ner_model, daemon=True, name="ner-warmup"
+    ).start()
+    print("[OK] NER model warmup started in background")
 
     print(f"[OK] Server running on port {settings.app_port}")
 

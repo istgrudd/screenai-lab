@@ -7,10 +7,14 @@ Handles storing RAG pipeline results into the database:
 - Maps language certificate scores to CEFR levels and bonus points
 """
 
+import logging
+
 from sqlalchemy.orm import Session
 
 from backend.models.candidate import Candidate, DimensionScore
 from backend.models.rubric import Dimension, Rubric
+
+logger = logging.getLogger(__name__)
 
 
 def validate_rubric_weights(rubric: Rubric) -> None:
@@ -108,7 +112,11 @@ def store_evaluation_results(
             )
 
         if not dimension:
-            print(f"[SCORING] Warning: dimension '{dim_score['dimension']}' not found in rubric {rubric_id}, skipping")
+            logger.warning(
+                "[SCORING] dimension '%s' not found in rubric %d, skipping",
+                dim_score["dimension"],
+                rubric_id,
+            )
             continue
 
         score_record = DimensionScore(

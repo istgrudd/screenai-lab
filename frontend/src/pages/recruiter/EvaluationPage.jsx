@@ -194,11 +194,20 @@ export default function RecruiterEvaluationPage() {
       await loadApplications();
       await loadActivePeriod();
     } catch (error) {
-      setLastResult({
-        error: error.message || "Evaluation failed",
-        force,
-      });
-      toast.error(error.message || "Evaluation failed");
+      if (error?.status === 409) {
+        // Backend per-division running lock — another evaluation is already
+        // in progress. Not a failure of this division's data, so keep the
+        // last result panel untouched and let the buttons recover.
+        toast.warning(
+          "Evaluation for this division is already running. Please wait until it finishes."
+        );
+      } else {
+        setLastResult({
+          error: error.message || "Evaluation failed",
+          force,
+        });
+        toast.error(error.message || "Evaluation failed");
+      }
     } finally {
       setEvaluating(false);
     }

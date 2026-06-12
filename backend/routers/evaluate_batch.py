@@ -40,6 +40,20 @@ _SANITIZED_ERROR = (
     "Please contact the administrator."
 )
 
+# Phase 1 in-process running lock: at most one evaluation per division at a
+# time. The backend runs as a single uvicorn worker (backend/Dockerfile), so
+# an in-process set is sufficient until the Phase 2 job table lands.
+# Different divisions may run concurrently — the evaluation pipeline uses
+# per-candidate sessions, so parallel divisions never share DB state.
+# Check-then-add below is race-free because no await occurs between them
+# (single event loop).
+_running_divisions: set[str] = set()
+
+_ALREADY_RUNNING_ERROR = (
+    "Evaluation for this division is already running. "
+    "Please wait until it finishes."
+)
+
 
 class EvaluateBatchRequest(BaseModel):
     # Task 14.1: typed as Division so FastAPI rejects unknown values at the
@@ -78,55 +92,72 @@ async def evaluate_batch(
     still runs (the recruiter always retains override) but the response
     carries a ``warning`` field so the frontend can flag the action.
     """
+    division_key = payload.division.value
+    if division_key in _running_divisions:
+        logger.warning(
+            "Evaluation lock conflict: division=%s already running, "
+            "rejecting duplicate trigger with 409",
+            division_key,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=_ALREADY_RUNNING_ERROR,
+        )
+    _running_divisions.add(division_key)
     try:
-        result = await run_evaluation_pipeline(
-            division=payload.division.value,
-            application_ids=payload.application_ids,
-            db=db,
-            force=payload.force,
-        )
-    except ValueError as exc:
-        msg = str(exc)
-        # Known ValueError shapes map to clean 4xx codes with their original
-        # message — these are deterministic, recruiter-actionable errors.
-        if "no dimensions configured" in msg.lower():
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=msg,
+        try:
+            result = await run_evaluation_pipeline(
+                division=payload.division.value,
+                application_ids=payload.application_ids,
+                db=db,
+                force=payload.force,
             )
-        if "no rubric found" in msg.lower():
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=msg,
+        except ValueError as exc:
+            msg = str(exc)
+            # Known ValueError shapes map to clean 4xx codes with their original
+            # message — these are deterministic, recruiter-actionable errors.
+            if "no dimensions configured" in msg.lower():
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=msg,
+                )
+            if "no rubric found" in msg.lower():
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=msg,
+                )
+            if "rubric weights must sum" in msg.lower():
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=msg,
+                )
+            # Unrecognized ValueError — log full detail server-side, return a
+            # sanitized 500 so internal exception text never reaches the client.
+            logger.error(
+                "Unrecognized ValueError in evaluate_batch: %s",
+                msg,
+                exc_info=True,
             )
-        if "rubric weights must sum" in msg.lower():
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=msg,
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=_SANITIZED_ERROR,
             )
-        # Unrecognized ValueError — log full detail server-side, return a
-        # sanitized 500 so internal exception text never reaches the client.
-        logger.error(
-            "Unrecognized ValueError in evaluate_batch: %s",
-            msg,
-            exc_info=True,
-        )
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=_SANITIZED_ERROR,
-        )
-    except HTTPException:
-        # Preserve HTTPExceptions raised by inner code (or by us above) —
-        # never let them fall through to the catch-all and get sanitized.
-        raise
-    except Exception as exc:  # pragma: no cover — defensive catch-all
-        logger.error(
-            "Unexpected error in evaluate_batch: %s", exc, exc_info=True
-        )
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=_SANITIZED_ERROR,
-        )
+        except HTTPException:
+            # Preserve HTTPExceptions raised by inner code (or by us above) —
+            # never let them fall through to the catch-all and get sanitized.
+            raise
+        except Exception as exc:  # pragma: no cover — defensive catch-all
+            logger.error(
+                "Unexpected error in evaluate_batch: %s", exc, exc_info=True
+            )
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=_SANITIZED_ERROR,
+            )
+    finally:
+        # Always release the lock, even when the pipeline raises — a stuck
+        # lock would block the division until a backend restart.
+        _running_divisions.discard(division_key)
 
     warning = _phase_warning(db)
     skipped_count = int(result.pop("skipped", 0))

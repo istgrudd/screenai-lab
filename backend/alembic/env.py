@@ -1,5 +1,6 @@
 """Alembic environment — wired to the app's SQLAlchemy Base and settings."""
 
+import logging
 from logging.config import fileConfig
 
 from sqlalchemy import engine_from_config, pool
@@ -17,8 +18,14 @@ config = context.config
 # Inject the runtime DATABASE_URL so alembic.ini doesn't duplicate it.
 config.set_main_option("sqlalchemy.url", settings.database_url)
 
-if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+# Configure logging from alembic.ini only when nothing else has set up
+# logging yet (i.e. the alembic CLI). When migrations run inside the app's
+# startup (backend.database.init_db), the app has already configured the
+# root logger — fileConfig would reset it to WARN and, with its default
+# disable_existing_loggers=True, silently disable every module logger
+# created before this point (the evaluation pipeline's logs included).
+if config.config_file_name is not None and not logging.getLogger().handlers:
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 target_metadata = Base.metadata
 

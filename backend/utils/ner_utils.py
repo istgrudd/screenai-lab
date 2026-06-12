@@ -7,6 +7,7 @@ The model is loaded as a singleton — first call downloads/loads,
 subsequent calls return the cached pipeline.
 """
 
+import threading
 from pathlib import Path
 from transformers import (
     AutoTokenizer,
@@ -18,13 +19,18 @@ from backend.config import settings
 
 # Module-level singleton — initialized on first call to get_ner_pipeline()
 _ner_pipeline = None
+# Loading is called from multiple threads (startup warmup daemon thread and
+# evaluation worker threads); the lock prevents loading the ~1.3 GB model
+# twice concurrently, which would double the memory spike.
+_ner_lock = threading.Lock()
 
 
 def get_ner_pipeline():
     """Return the NER pipeline, loading/downloading on first call.
 
     The model is cached to `settings.ner_cache_dir` (default: ./models/ner/)
-    so it only downloads once.
+    so it only downloads once. Thread-safe: concurrent callers block until
+    the single load finishes and all receive the same pipeline instance.
 
     Returns:
         transformers.Pipeline: A token-classification pipeline for NER.
@@ -33,6 +39,16 @@ def get_ner_pipeline():
 
     if _ner_pipeline is not None:
         return _ner_pipeline
+
+    with _ner_lock:
+        if _ner_pipeline is not None:
+            return _ner_pipeline
+        return _load_ner_pipeline()
+
+
+def _load_ner_pipeline():
+    """Load the model; must only be called while holding ``_ner_lock``."""
+    global _ner_pipeline
 
     model_name = settings.ner_model_name
     cache_dir = settings.ner_cache_dir
