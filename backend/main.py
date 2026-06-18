@@ -19,7 +19,6 @@ from backend.middleware.rate_limit import limiter
 from backend.routers.auth import router as auth_router
 from backend.routers.upload import router as upload_router
 from backend.routers.rubrics import router as rubrics_router
-from backend.routers.evaluation import router as evaluation_router
 from backend.routers.evaluate_batch import router as evaluate_batch_router
 from backend.routers.announcements import router as announcements_router
 from backend.routers.candidates import (
@@ -116,6 +115,23 @@ async def lifespan(app: FastAPI):
     finally:
         db.close()
 
+    # Phase 2 startup recovery: any queued/running evaluation job left in the
+    # table means the worker died mid-run (crash/deploy) — it can never make
+    # progress and is still holding the division's partial-unique slot. Mark
+    # such zombies as failed("interrupted by restart") so the slot frees and
+    # recruiters can re-trigger.
+    from backend.services.evaluation_service import recover_interrupted_jobs
+
+    recovered = recover_interrupted_jobs(SessionLocal)
+    if recovered:
+        logger.info(
+            "Startup recovery: marked %d interrupted evaluation job(s) as failed",
+            recovered,
+        )
+        print(f"[OK] Recovered {recovered} interrupted evaluation job(s)")
+    else:
+        print("[OK] No interrupted evaluation jobs to recover")
+
     # Warm the ~1.3 GB NER model off the critical path so the first
     # evaluation after a restart doesn't pay the load inside a request.
     threading.Thread(
@@ -155,7 +171,6 @@ app.add_middleware(
 app.include_router(auth_router)
 app.include_router(upload_router)
 app.include_router(rubrics_router)
-app.include_router(evaluation_router)
 app.include_router(evaluate_batch_router)
 app.include_router(announcements_router)
 app.include_router(candidates_router)

@@ -14,3 +14,8 @@ from backend.models.application import Application, ApplicationStatus, Division 
 from backend.models.document import Document, DocumentType, DocumentVerificationStatus  # noqa: F401
 from backend.models.audit import AuditLog  # noqa: F401
 from backend.models.period import RecruitmentPeriod  # noqa: F401
+from backend.models.evaluation_job import (  # noqa: F401
+    EvaluationJob,
+    EvaluationJobStatus,
+    NON_TERMINAL_JOB_STATUSES,
+)

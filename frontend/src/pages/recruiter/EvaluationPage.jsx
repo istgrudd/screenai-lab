@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   BarChart3,
@@ -15,11 +15,13 @@ import MetricCard from "@/components/common/MetricCard";
 import PageHeader from "@/components/layout/PageHeader";
 import CandidateResultCard from "@/components/recruiter/CandidateResultCard";
 import EvaluationActionPanel from "@/components/recruiter/EvaluationActionPanel";
-import EvaluationRunningOverlay from "@/components/recruiter/EvaluationRunningOverlay";
+import EvaluationProgressPanel from "@/components/recruiter/EvaluationProgressPanel";
 import { Card, CardContent } from "@/components/ui/card";
 import {
   evaluateBatch,
+  getActiveEvaluationJob,
   getActivePeriod,
+  getEvaluationJob,
   listRecruiterApplications,
 } from "@/lib/api";
 import {
@@ -51,19 +53,35 @@ const EVALUATION_QUEUE_GROUPS = [
   },
 ];
 
+// Phase 2: poll the evaluation job every ~3s while it is non-terminal.
+const JOB_POLL_INTERVAL_MS = 3000;
+
+function isNonTerminal(job) {
+  return Boolean(job && (job.status === "queued" || job.status === "running"));
+}
+
 export default function RecruiterEvaluationPage() {
   const [applications, setApplications] = useState([]);
   const [selectedDivision, setSelectedDivision] = useState("big_data");
   const [activePeriod, setActivePeriod] = useState(null);
   const [loading, setLoading] = useState(true);
   const [periodLoading, setPeriodLoading] = useState(true);
-  const [evaluating, setEvaluating] = useState(false);
+  const [triggering, setTriggering] = useState(false);
   const [evaluateWarning, setEvaluateWarning] = useState(null);
   const [lastSkippedCount, setLastSkippedCount] = useState(0);
-  const [lastResult, setLastResult] = useState(null);
+  const [lastError, setLastError] = useState(null);
+  const [job, setJob] = useState(null);
   const [reEvaluateOpen, setReEvaluateOpen] = useState(false);
 
+  // Interval id for the active-job poller. A ref (not state) so starting /
+  // stopping it never triggers a re-render.
+  const pollRef = useRef(null);
+
   const phase = activePeriod?.current_phase || null;
+  const hasActiveJob = isNonTerminal(job);
+  // Buttons are locked while a POST is in flight, while a job is active, and
+  // while the base data is still loading.
+  const controlsBusy = triggering || hasActiveJob || loading || periodLoading;
 
   const loadApplications = async () => {
     setLoading(true);
@@ -91,12 +109,85 @@ export default function RecruiterEvaluationPage() {
     }
   };
 
+  const stopPolling = () => {
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+  };
+
+  const handleTerminalJob = (finished) => {
+    if (finished.status === "completed") {
+      const ok = finished.succeeded ?? 0;
+      const failed = finished.failed ?? 0;
+      if (failed > 0) {
+        toast.warning(
+          `Evaluation finished: ${ok} succeeded, ${failed} failed.`
+        );
+      } else if (ok > 0) {
+        toast.success(`Evaluation complete. ${ok} candidate(s) evaluated.`);
+      } else {
+        toast.info("Evaluation finished — no candidates were evaluated.");
+      }
+      loadApplications();
+      loadActivePeriod();
+    } else if (finished.status === "failed") {
+      toast.error(
+        finished.note || "Evaluation job failed. Controls are available again."
+      );
+    }
+  };
+
+  const pollJobOnce = async (jobId) => {
+    try {
+      const updated = await getEvaluationJob(jobId);
+      setJob(updated);
+      if (updated.status === "completed" || updated.status === "failed") {
+        stopPolling();
+        handleTerminalJob(updated);
+      }
+    } catch {
+      // Job vanished or transient error — stop polling rather than spin.
+      stopPolling();
+    }
+  };
+
+  const startPolling = (jobId) => {
+    stopPolling();
+    pollRef.current = setInterval(() => pollJobOnce(jobId), JOB_POLL_INTERVAL_MS);
+  };
+
+  // Resume polling of any active job for the selected division — makes a page
+  // refresh harmless and surfaces a job another recruiter started.
+  const resumeActiveJob = async (division) => {
+    try {
+      const active = await getActiveEvaluationJob(division);
+      if (active && isNonTerminal(active)) {
+        setJob(active);
+        startPolling(active.id);
+      }
+    } catch {
+      // No active job / transient error — nothing to resume.
+    }
+  };
+
   useEffect(() => {
     Promise.resolve().then(loadActivePeriod);
   }, []);
 
+  // On mount and whenever the division changes: reload the queue, reset the
+  // panel, stop any stale poller, and re-discover an active job. The cleanup
+  // clears the interval on unmount.
   useEffect(() => {
-    Promise.resolve().then(loadApplications);
+    stopPolling();
+    // Defer state updates out of the effect body (cascading-render lint rule).
+    Promise.resolve().then(() => {
+      setJob(null);
+      setLastError(null);
+      loadApplications();
+      resumeActiveJob(selectedDivision);
+    });
+    return stopPolling;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedDivision]);
 
@@ -144,72 +235,84 @@ export default function RecruiterEvaluationPage() {
   }, [applications]);
 
   const runEvaluate = async ({ force = false } = {}) => {
-    if (evaluating) return;
+    if (triggering || hasActiveJob) return;
     if (!selectedDivision) {
       toast.error("Please select a division first.");
       return;
     }
 
-    setEvaluating(true);
-    setLastResult(null);
+    setTriggering(true);
+    setLastError(null);
     try {
-      const result = await evaluateBatch(selectedDivision, { force });
-      const evaluated = result.evaluated_count ?? 0;
-      const skipped = result.skipped_count ?? 0;
-      const skippedUnverified = result.skipped_unverified_count ?? 0;
-      const skippedCorrection = result.skipped_correction_count ?? 0;
+      const res = await evaluateBatch(selectedDivision, { force });
+      const queued = res.evaluated_count ?? res.total ?? 0;
+      const skipped = res.skipped_count ?? 0;
+      const skippedUnverified = res.skipped_unverified_count ?? 0;
+      const skippedCorrection = res.skipped_correction_count ?? 0;
       setLastSkippedCount(skipped);
-      setLastResult({
-        evaluated,
-        skipped,
-        skippedUnverified,
-        skippedCorrection,
-        force,
-      });
 
-      if (evaluated === 0 && skipped > 0) {
-        toast.info("All candidates in this division were already evaluated.");
-      } else if (evaluated === 0 && (skippedUnverified > 0 || skippedCorrection > 0)) {
-        toast.warning("No verified candidates were ready for evaluation. Pending or correction candidates were skipped.");
-      } else if (evaluated === 0) {
-        toast.info("No verified candidates are ready for evaluation in this division.");
-      } else if (skipped > 0) {
-        toast.success(
-          `Evaluation complete. ${evaluated} candidates evaluated, ${skipped} skipped.`
-        );
-      } else {
-        toast.success(`Evaluation complete. ${evaluated} candidates evaluated.`);
-      }
-
-      if (result.errors?.length > 0) {
-        toast.warning(`${result.errors.length} application(s) had errors.`);
-      }
-      if (result._warning) {
-        toast.warning(result._warning);
-        setEvaluateWarning(result._warning);
+      if (res._warning) {
+        toast.warning(res._warning);
+        setEvaluateWarning(res._warning);
       } else {
         setEvaluateWarning(null);
       }
 
-      await loadApplications();
-      await loadActivePeriod();
+      if (queued === 0) {
+        if (skipped > 0) {
+          toast.info("All candidates in this division were already evaluated.");
+        } else if (skippedUnverified > 0 || skippedCorrection > 0) {
+          toast.warning(
+            "No verified candidates were ready for evaluation. Pending or correction candidates were skipped."
+          );
+        } else {
+          toast.info("No verified candidates are ready for evaluation in this division.");
+        }
+      } else {
+        toast.success(
+          `Evaluation started for ${queued} candidate(s). Tracking progress…`
+        );
+      }
+
+      // Begin (or finish) tracking the created job.
+      if (res.job_id) {
+        const initial = await getEvaluationJob(res.job_id).catch(() => null);
+        const jobState =
+          initial || {
+            id: res.job_id,
+            status: res.status || "queued",
+            total: queued,
+            processed: 0,
+            succeeded: 0,
+            failed: 0,
+            errors: [],
+          };
+        setJob(jobState);
+        if (jobState.status === "completed" || jobState.status === "failed") {
+          handleTerminalJob(jobState);
+        } else {
+          startPolling(res.job_id);
+        }
+      } else {
+        // No job id (shouldn't happen) — refresh the table directly.
+        await loadApplications();
+        await loadActivePeriod();
+      }
     } catch (error) {
       if (error?.status === 409) {
-        // Backend per-division running lock — another evaluation is already
-        // in progress. Not a failure of this division's data, so keep the
-        // last result panel untouched and let the buttons recover.
+        // DB-level partial unique index — a job is already active for this
+        // division. Not a failure of this division's data; resume tracking
+        // the running job instead of corrupting state.
         toast.warning(
           "Evaluation for this division is already running. Please wait until it finishes."
         );
+        resumeActiveJob(selectedDivision);
       } else {
-        setLastResult({
-          error: error.message || "Evaluation failed",
-          force,
-        });
+        setLastError(error.message || "Evaluation failed");
         toast.error(error.message || "Evaluation failed");
       }
     } finally {
-      setEvaluating(false);
+      setTriggering(false);
     }
   };
 
@@ -221,10 +324,10 @@ export default function RecruiterEvaluationPage() {
       <PageHeader
         eyebrow="Recruiter / Evaluation"
         title="Evaluation"
-        description="Run AI-anonymized evaluation and validate AI results per division. Personal identifiers are excluded from AI evaluation input, while recruiter-facing candidate data stays visible. Controls are locked while evaluation is running to prevent duplicate or inconsistent processing."
+        description="Run AI-anonymized evaluation and validate AI results per division. Personal identifiers are excluded from AI evaluation input, while recruiter-facing candidate data stays visible. Evaluation runs as a background job — you can keep working and a page refresh resumes live progress."
       />
 
-      <EvaluationRunningOverlay running={evaluating} />
+      <EvaluationProgressPanel job={job} />
 
       {phase === "EVALUATION" &&
         (pendingReviewSummary.documentReview > 0 ||
@@ -264,23 +367,18 @@ export default function RecruiterEvaluationPage() {
         activePeriod={activePeriod}
         summary={summary}
         canReEvaluate={canReEvaluate}
-        evaluating={evaluating || loading || periodLoading}
+        evaluating={controlsBusy}
         onRun={() => runEvaluate({ force: false })}
         onReRun={() => setReEvaluateOpen(true)}
       />
 
-      {lastResult && (
-        <Card className={`brand-card ${lastResult.error ? "bg-destructive/10" : "bg-success/10"}`}>
+      {lastError && (
+        <Card className="brand-card bg-destructive/10">
           <CardContent className="p-5 text-sm leading-6 text-muted-foreground">
-            {lastResult.error ? (
-              <span>{lastResult.error}. Controls are available again; retry after checking the queue.</span>
-            ) : (
-              <span>
-                Evaluation finished: {lastResult.evaluated} evaluated,{" "}
-                {lastResult.skipped} skipped, {lastResult.skippedUnverified} unverified,{" "}
-                {lastResult.skippedCorrection} correction-blocked.
-              </span>
-            )}
+            <span>
+              {lastError}. Controls are available again; retry after checking the
+              queue.
+            </span>
           </CardContent>
         </Card>
       )}
@@ -378,7 +476,7 @@ export default function RecruiterEvaluationPage() {
         description="This will re-run evaluation for every candidate in the selected division, including candidates that already have scores."
         confirmLabel="Re-evaluate"
         cancelLabel="Cancel"
-        loading={evaluating}
+        loading={triggering}
         onConfirm={() => runEvaluate({ force: true })}
       />
     </div>

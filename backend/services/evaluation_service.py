@@ -17,12 +17,18 @@ import time
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy.orm import Session
+from sqlalchemy import update
+from sqlalchemy.orm import Session, sessionmaker
 
 from backend.database import SessionLocal, engine
 from backend.models.application import Application, ApplicationStatus, Division
 from backend.models.candidate import Candidate, CandidateDocument
 from backend.models.document import Document, DocumentType
+from backend.models.evaluation_job import (
+    EvaluationJob,
+    EvaluationJobStatus,
+    NON_TERMINAL_JOB_STATUSES,
+)
 from backend.models.rubric import Rubric
 from backend.models.user import User
 from backend.services.extractor import extract_text_from_pdf
@@ -98,25 +104,44 @@ def _generate_anon_id() -> str:
 # Public API
 # ---------------------------------------------------------------------------
 
-async def run_evaluation_pipeline(
+def select_evaluation_targets(
     division: str,
     application_ids: list[int] | None,
     db: Session,
     force: bool = False,
 ) -> dict:
-    """Run the full evaluation pipeline for applications in a division.
+    """Resolve the eligible application set for a division (DB-only, no LLM).
+
+    Phase 2: this is the synchronous selection/validation step run inside the
+    POST request. It performs exactly the selection logic the inline pipeline
+    used to do up front — rubric lookup/validation, eligible-status filter,
+    already-scored skip — and returns the IDs to evaluate plus skip counters.
+    The actual per-candidate pipeline runs later in the background job
+    (``run_evaluation_job``); only plain IDs cross into it.
 
     Args:
         division: Division value string (e.g. "big_data").
         application_ids: Specific application IDs to evaluate, or None for all
             eligible applications in the division.
-        db: Database session.
+        db: Database session (request-scoped — used for selection only).
         force: When True, re-evaluate eligible already-scored candidates in
             VERIFIED or SCREENING status. Final, draft, document-review, and
             correction statuses are always skipped.
 
     Returns:
-        { queued: int, results: [...], errors: [...], skipped: int, ...counters }
+        {
+            rubric_id: int,
+            application_ids: [int],   # eligible IDs to evaluate
+            total: int,               # len(application_ids)
+            skipped: int,
+            skipped_already_scored_count: int,
+            skipped_unverified_count: int,
+            skipped_correction_count: int,
+        }
+
+    Raises:
+        ValueError: no rubric for the division, rubric has no dimensions, or
+            rubric weights do not sum to 1.0 (mapped to 4xx by the router).
     """
     # --- 1. Find the rubric for the division ---
     rubric = (
@@ -219,7 +244,7 @@ async def run_evaluation_pipeline(
 
     if not applications:
         logger.info(
-            "Evaluation batch skipped: division=%s force=%s — no eligible "
+            "Evaluation selection: division=%s force=%s — no eligible "
             "applications (skipped_already_scored=%d, skipped_unverified=%d, "
             "skipped_correction=%d)",
             division,
@@ -228,81 +253,203 @@ async def run_evaluation_pipeline(
             skipped_unverified_count,
             skipped_correction_count,
         )
-        return {"queued": 0, "results": [], "errors": [], **counters}
 
-    # The request-scoped `db` is used only for the selection/validation work
-    # above. Each candidate coroutine opens its own short-lived session from
-    # SessionLocal and commits (or rolls back) independently, so a failed
-    # candidate can never poison the others' transactions and no partial
-    # rows survive for a candidate that is reported as failed. Only plain
-    # IDs cross the session boundary — never ORM instances.
-    application_ids_to_run = [app.id for app in applications]
-    rubric_id = rubric.id
+    return {
+        "rubric_id": rubric.id,
+        "application_ids": [app.id for app in applications],
+        "total": len(applications),
+        **counters,
+    }
 
-    logger.info(
-        "Evaluation batch started: division=%s force=%s selected=%d "
-        "(skipped_already_scored=%d, skipped_unverified=%d, skipped_correction=%d)",
-        division,
-        force,
-        len(application_ids_to_run),
-        skipped_already_scored_count,
-        skipped_unverified_count,
-        skipped_correction_count,
-    )
-    batch_started = time.monotonic()
 
-    # Bounded-concurrency evaluation. The DeepSeek request is awaitable, so up
-    # to _effective_concurrency() round-trips can overlap; sync CPU-bound
-    # stages run via asyncio.to_thread inside _evaluate_one. The per-candidate
-    # session is opened inside the semaphore so at most that many extra DB
-    # connections are held at once.
+# ---------------------------------------------------------------------------
+# Background job runner (Phase 2)
+#
+# The POST handler resolves the targets above, inserts an ``evaluation_jobs``
+# row, and schedules ``run_evaluation_job`` as a FastAPI BackgroundTask
+# (mirroring ``run_submit_anonymization``'s session-factory pattern). The
+# runner owns its whole lifecycle, reuses the Phase 1 per-candidate session
+# model unchanged, and always drives the job to a terminal state — which also
+# frees the division's slot in the partial unique index.
+# ---------------------------------------------------------------------------
+
+
+def _mark_job_running(session_factory: sessionmaker, job_id: int) -> str | None:
+    """Flip the job to ``running`` and stamp ``started_at``.
+
+    Returns the division value (for logging) or ``None`` if the job vanished.
+    """
+    session = session_factory()
+    try:
+        job = session.get(EvaluationJob, job_id)
+        if job is None:
+            return None
+        job.status = EvaluationJobStatus.RUNNING
+        job.started_at = _utcnow()
+        division = (
+            job.division.value if hasattr(job.division, "value") else str(job.division)
+        )
+        session.commit()
+        return division
+    finally:
+        session.close()
+
+
+def _increment_job_counter(
+    session_factory: sessionmaker, job_id: int, *, succeeded: bool
+) -> None:
+    """Atomically bump the job's progress counters in its own tiny session.
+
+    ``UPDATE evaluation_jobs SET processed = processed + 1, (succeeded|failed)
+    = +1 WHERE id = :job_id``. Atomic SQL increments are commutative, so the
+    concurrent candidate coroutines need no ``SELECT ... FOR UPDATE`` and
+    cannot lose updates.
+    """
+    session = session_factory()
+    try:
+        values: dict = {"processed": EvaluationJob.processed + 1}
+        if succeeded:
+            values["succeeded"] = EvaluationJob.succeeded + 1
+        else:
+            values["failed"] = EvaluationJob.failed + 1
+        session.execute(
+            update(EvaluationJob).where(EvaluationJob.id == job_id).values(**values)
+        )
+        session.commit()
+    except Exception:
+        logger.exception(
+            "Failed to increment progress counter for evaluation job %d", job_id
+        )
+        try:
+            session.rollback()
+        except Exception:
+            pass
+    finally:
+        session.close()
+
+
+def _finalize_job(
+    session_factory: sessionmaker,
+    job_id: int,
+    *,
+    status: EvaluationJobStatus,
+    errors: list[dict] | None = None,
+    succeeded: int | None = None,
+    failed: int | None = None,
+    note: str | None = None,
+) -> None:
+    """Drive the job to a terminal state and write the final error list once."""
+    session = session_factory()
+    try:
+        job = session.get(EvaluationJob, job_id)
+        if job is None:
+            logger.error("Evaluation job %d vanished before finalize", job_id)
+            return
+        job.status = status
+        job.finished_at = _utcnow()
+        if errors is not None:
+            job.errors = errors
+        if succeeded is not None:
+            job.succeeded = succeeded
+        if failed is not None:
+            job.failed = failed
+        # Reconcile the running counter against the authoritative totals so a
+        # missed live increment cannot leave processed out of step.
+        if succeeded is not None and failed is not None:
+            job.processed = succeeded + failed
+        if note is not None:
+            job.note = note
+        session.commit()
+    except Exception:
+        logger.exception("Failed to finalize evaluation job %d", job_id)
+        try:
+            session.rollback()
+        except Exception:
+            pass
+    finally:
+        session.close()
+
+
+async def _evaluate_candidate_in_session(
+    app_id: int,
+    rubric_id: int,
+    division: str,
+    session_factory: sessionmaker,
+) -> tuple[str, dict]:
+    """Evaluate one candidate in its own session (Phase 1 transaction model).
+
+    Commits on success (after the SCREENING flip), rolls back on failure, and
+    closes the session in ``finally``. Only plain IDs cross the boundary, so a
+    failed candidate can never poison another's transaction and leaves no
+    partial rows.
+    """
+    started = time.monotonic()
+    logger.info("Evaluating application %d (division=%s)", app_id, division)
+    session = session_factory()
+    try:
+        app = session.get(Application, app_id)
+        if app is None:
+            raise ValueError(f"Application {app_id} not found")
+        rubric_row = session.get(Rubric, rubric_id)
+        if rubric_row is None:
+            raise ValueError(f"Rubric {rubric_id} not found")
+        result = await _evaluate_one(app, rubric_row, session)
+        app.status = ApplicationStatus.SCREENING
+        session.commit()
+        logger.info(
+            "Application %d evaluated successfully in %.1fs",
+            app_id,
+            time.monotonic() - started,
+        )
+        return ("ok", result)
+    except Exception as exc:
+        try:
+            session.rollback()
+        except Exception:
+            logger.exception("Rollback failed for application %d", app_id)
+        logger.exception(
+            "Evaluation failed for application %d after %.1fs",
+            app_id,
+            time.monotonic() - started,
+        )
+        return ("err", {"application_id": app_id, "error": str(exc)})
+    finally:
+        session.close()
+
+
+async def _run_job_candidates(
+    job_id: int,
+    division: str,
+    application_ids: list[int],
+    rubric_id: int,
+    session_factory: sessionmaker,
+) -> tuple[list[dict], list[dict]]:
+    """Run the bounded-concurrency candidate pipeline, bumping job counters.
+
+    Identical concurrency/session model to Phase 1: an ``asyncio.Semaphore``
+    of ``_effective_concurrency()`` over per-candidate sessions, sync heavy
+    stages offloaded via ``asyncio.to_thread`` inside ``_evaluate_one``. After
+    each candidate settles, its outcome advances the job's counters with an
+    atomic increment. The detailed per-candidate error list is collected here
+    and written once by the caller at completion (never appended
+    concurrently).
+    """
+    if not application_ids:
+        return [], []
+
     semaphore = asyncio.Semaphore(_effective_concurrency())
 
     async def _bounded(app_id: int) -> tuple[str, dict]:
         async with semaphore:
-            started = time.monotonic()
-            logger.info(
-                "Evaluating application %d (division=%s)", app_id, division
+            outcome = await _evaluate_candidate_in_session(
+                app_id, rubric_id, division, session_factory
             )
-            session = SessionLocal()
-            try:
-                app = session.get(Application, app_id)
-                if app is None:
-                    raise ValueError(f"Application {app_id} not found")
-                rubric_row = session.get(Rubric, rubric_id)
-                if rubric_row is None:
-                    raise ValueError(f"Rubric {rubric_id} not found")
-                result = await _evaluate_one(app, rubric_row, session)
-                app.status = ApplicationStatus.SCREENING
-                session.commit()
-                logger.info(
-                    "Application %d evaluated successfully in %.1fs",
-                    app_id,
-                    time.monotonic() - started,
-                )
-                return ("ok", result)
-            except Exception as exc:
-                try:
-                    session.rollback()
-                except Exception:
-                    logger.exception(
-                        "Rollback failed for application %d", app_id
-                    )
-                logger.exception(
-                    "Evaluation failed for application %d after %.1fs",
-                    app_id,
-                    time.monotonic() - started,
-                )
-                return (
-                    "err",
-                    {"application_id": app_id, "error": str(exc)},
-                )
-            finally:
-                session.close()
+            _increment_job_counter(
+                session_factory, job_id, succeeded=(outcome[0] == "ok")
+            )
+            return outcome
 
-    outcomes = await asyncio.gather(
-        *[_bounded(app_id) for app_id in application_ids_to_run]
-    )
+    outcomes = await asyncio.gather(*[_bounded(app_id) for app_id in application_ids])
 
     results: list[dict] = []
     errors: list[dict] = []
@@ -311,21 +458,101 @@ async def run_evaluation_pipeline(
             results.append(item)
         else:
             errors.append(item)
+    return results, errors
 
+
+async def run_evaluation_job(
+    job_id: int,
+    division: str,
+    application_ids: list[int],
+    rubric_id: int,
+    session_factory: sessionmaker,
+) -> None:
+    """Background runner for one evaluation job — owns its full lifecycle.
+
+    Flips the job to ``running``, evaluates each candidate (Phase 1 model)
+    while atomically advancing the progress counters, writes the complete
+    ``errors`` list once at completion, and always reaches a terminal state.
+    Never raises: it is a FastAPI BackgroundTask, and an unexpected failure
+    must still free the division's partial-unique slot by marking the job
+    ``failed``.
+    """
+    started = _mark_job_running(session_factory, job_id)
+    if started is None:
+        logger.error(
+            "Evaluation job %d not found when starting runner; aborting", job_id
+        )
+        return
+
+    batch_started = time.monotonic()
     logger.info(
-        "Evaluation batch finished: division=%s ok=%d failed=%d duration=%.1fs",
+        "Evaluation job %d started: division=%s candidates=%d",
+        job_id,
         division,
+        len(application_ids),
+    )
+    try:
+        results, errors = await _run_job_candidates(
+            job_id, division, application_ids, rubric_id, session_factory
+        )
+    except Exception:
+        # _evaluate_candidate_in_session swallows per-candidate failures, so
+        # reaching here means the orchestration itself failed.
+        logger.exception(
+            "Evaluation job %d crashed during candidate processing", job_id
+        )
+        _finalize_job(
+            session_factory,
+            job_id,
+            status=EvaluationJobStatus.FAILED,
+            note="run crashed",
+        )
+        return
+
+    _finalize_job(
+        session_factory,
+        job_id,
+        status=EvaluationJobStatus.COMPLETED,
+        errors=errors,
+        succeeded=len(results),
+        failed=len(errors),
+    )
+    logger.info(
+        "Evaluation job %d finished: ok=%d failed=%d duration=%.1fs",
+        job_id,
         len(results),
         len(errors),
         time.monotonic() - batch_started,
     )
 
-    return {
-        "queued": len(applications),
-        "results": results,
-        "errors": errors,
-        **counters,
-    }
+
+def recover_interrupted_jobs(session_factory: sessionmaker) -> int:
+    """Mark any non-terminal job left by a restart as ``failed``.
+
+    Called from the FastAPI lifespan on startup. A ``queued``/``running`` job
+    in the table after a boot means the worker died mid-run (crash/deploy), so
+    it can never make progress and is holding the division's slot. Flip it to
+    ``failed`` with ``note="interrupted by restart"`` and stamp
+    ``finished_at``. Returns the number of jobs recovered.
+    """
+    session = session_factory()
+    try:
+        jobs = (
+            session.query(EvaluationJob)
+            .filter(EvaluationJob.status.in_(list(NON_TERMINAL_JOB_STATUSES)))
+            .all()
+        )
+        if not jobs:
+            return 0
+        now = _utcnow()
+        for job in jobs:
+            job.status = EvaluationJobStatus.FAILED
+            job.note = "interrupted by restart"
+            job.finished_at = now
+        session.commit()
+        return len(jobs)
+    finally:
+        session.close()
 
 
 # ---------------------------------------------------------------------------

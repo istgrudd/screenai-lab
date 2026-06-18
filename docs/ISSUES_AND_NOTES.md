@@ -35,7 +35,8 @@ No other `TODO/FIXME/XXX/HACK` comments exist in `backend/` or `frontend/src/`.
 - [backend/routers/documents.py](../backend/routers/documents.py) now writes an `AuditLog(action_type="document_verification")` row when recruiter/super_admin users review or verify a document. The audit row records the acting recruiter, the owning candidate user, old/new review statuses such as `pending -> verified`, and document context. See [DOCUMENT_VERIFICATION_AUDIT_REPORT.md](reports/DOCUMENT_VERIFICATION_AUDIT_REPORT.md).
 
 ### ✅ Legacy endpoints not flagged deprecated (Task 14.4) — **Resolved in Batch 2**
-- `POST /api/upload` and `POST /api/evaluate` now set `Deprecation: true` headers and log a `warning` on each call. The Lab pipeline (`/api/documents/upload/{doc_type}` + `/api/recruiter/evaluate/batch`) is the supported path.
+- `POST /api/upload` sets `Deprecation: true` headers and logs a `warning` on each call. The Lab pipeline (`/api/documents/upload/{doc_type}` + `/api/recruiter/evaluate/batch`) is the supported path.
+- **Phase 2 update:** the legacy `POST /api/evaluate` endpoint (`backend/routers/evaluation.py`) was removed entirely — router file deleted, `main.py` registration dropped, and the `runEvaluation` frontend caller removed. `POST /api/recruiter/evaluate/batch` is the only evaluation entry point.
 
 ### ✅ `EvaluateBatchRequest.division: str` not type-safe (Task 14.1) — **Resolved in Batch 2**
 - [backend/routers/evaluate_batch.py](../backend/routers/evaluate_batch.py) now declares `division: Division`; FastAPI returns 422 with field-path info for any value outside the enum.
