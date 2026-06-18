@@ -1,16 +1,27 @@
-"""Smoke test for Phase 1 evaluation stabilization.
+"""Smoke test for Phase 1 evaluation stabilization (Phase 2 async-job contract).
 
-Covers the Phase 1 fixes from docs/reports/EVALUATION_FREEZE_AUDIT_REPORT.md:
+Guards the Phase 1 fixes from docs/reports/EVALUATION_FREEZE_AUDIT_REPORT.md,
+re-verified through the Phase 2 background-job entry point. Phase 2 changed the
+batch endpoint contract from an inline 200 to **202 + job_id** running the
+pipeline as a FastAPI BackgroundTask, so the same invariants are now reached
+through the job runner:
+
   1. LLM clients constructed with explicit timeout and max_retries=0.
-  2. Per-division running lock: a concurrent evaluate for the same division
-     returns 409; a different division is accepted while the first runs.
-  3. The lock is released after a pipeline failure (next trigger is not 409).
+  2. Division mutual-exclusion: while one division's job is non-terminal, a
+     concurrent trigger for the same division returns 409 (DB-level partial
+     unique index, not an in-process lock); a different division is accepted
+     (202) at the same time.
+  3. The division slot is released after a job fails: the next same-division
+     trigger is accepted (202).
   4. Per-candidate transaction isolation: one failing candidate does not
      prevent the others from committing, and leaves no partial rows behind.
   5. /api/health stays responsive while an evaluation with slow sync stages
      is running (event loop not blocked thanks to asyncio.to_thread).
 
-Uses httpx.ASGITransport so no live server is needed.
+Uses httpx.ASGITransport so no live server is needed. Starlette runs a
+request's BackgroundTasks to completion before the ASGI response returns, so
+after a 202 the job is already terminal under this transport; the pipeline
+test polls the job state either way.
 
 Run:
     python -m scripts.smoke_test_evaluation_stabilization
@@ -24,6 +35,7 @@ import shutil
 import sys
 import tempfile
 import time
+from datetime import datetime, timezone
 
 os.environ["EMAIL_ENABLED"] = "false"
 os.environ["EMAIL_RESEND_COOLDOWN_SECONDS"] = "0"
@@ -39,9 +51,10 @@ import backend.utils.llm_client as llm_client
 from backend.config import settings
 from backend.database import SessionLocal
 from backend.main import app as fastapi_app
-from backend.models.application import Application, ApplicationStatus
+from backend.models.application import Application, ApplicationStatus, Division
 from backend.models.candidate import Candidate, CandidateDocument, DimensionScore
 from backend.models.document import Document, DocumentType
+from backend.models.evaluation_job import EvaluationJob, EvaluationJobStatus
 from backend.models.rubric import Dimension, Rubric
 from backend.models.user import User, UserRole
 from backend.utils.security import hash_password
@@ -58,6 +71,11 @@ CAND_EMAILS = [
 CAND_NIMS = ["1039876600001", "1039876600002", "1039876600003"]
 TEST_PASSWORD = "hunter2secure"
 SMOKE_DIM_NAMES = ["Smoke Stab Dim A", "Smoke Stab Dim B"]
+# Actual dimension names of the big_data rubric, captured at setup. The mock
+# evaluation must return these names so store_evaluation_results (which matches
+# DimensionScore rows by dimension name) can persist them — the rubric may
+# already carry differently-named dims from another suite's run.
+RUBRIC_DIM_NAMES: list[str] = []
 FAIL_MARKER = "SMOKE_STAB_FAIL_MARKER"
 
 # Sleep inside the fake NER stage. With asyncio.to_thread this runs in a
@@ -124,26 +142,21 @@ async def _fake_evaluate_candidate(*args, **kwargs) -> dict:
     text = (payload or {}).get("anonymized_text", "")
     if FAIL_MARKER in text:
         raise RuntimeError("smoke: intentional candidate failure")
+    names = RUBRIC_DIM_NAMES or SMOKE_DIM_NAMES
+    weight = round(1.0 / len(names), 4) if names else 0.0
     return {
         "composite_score": 82.0,
         "profile_summary": "Smoke stabilization profile summary.",
         "dimension_scores": [
             {
-                "dimension": SMOKE_DIM_NAMES[0],
-                "score": 84,
-                "weight": 0.5,
-                "weighted_score": 42.0,
+                "dimension": name,
+                "score": 82,
+                "weight": weight,
+                "weighted_score": round(82 * weight, 2),
                 "justification": "Strong evidence.",
                 "evidence": ["CV project"],
-            },
-            {
-                "dimension": SMOKE_DIM_NAMES[1],
-                "score": 80,
-                "weight": 0.5,
-                "weighted_score": 40.0,
-                "justification": "Clear motivation.",
-                "evidence": ["Motivation letter"],
-            },
+            }
+            for name in names
         ],
     }
 
@@ -152,7 +165,53 @@ async def _fake_evaluate_candidate(*args, **kwargs) -> dict:
 # Setup / cleanup
 # ---------------------------------------------------------------------------
 
+def _recruiter_id() -> int | None:
+    db = SessionLocal()
+    try:
+        rec = db.query(User).filter(User.email == REC_EMAIL).first()
+        return rec.id if rec else None
+    finally:
+        db.close()
+
+
+def _delete_test_jobs() -> None:
+    """Remove every evaluation_jobs row this test created (by triggered_by).
+
+    Held/failing-runner tests leave non-terminal rows that would otherwise hold
+    a division's partial-unique slot for later tests.
+    """
+    rec_id = _recruiter_id()
+    if rec_id is None:
+        return
+    db = SessionLocal()
+    try:
+        db.query(EvaluationJob).filter(
+            EvaluationJob.triggered_by == rec_id
+        ).delete(synchronize_session=False)
+        db.commit()
+    finally:
+        db.close()
+
+
+async def _await_job_terminal(
+    client: httpx.AsyncClient, rec_auth: dict, job_id: int, timeout: float = 30.0
+) -> dict | None:
+    """Poll GET /jobs/{id} until the job is terminal or the timeout elapses."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        r = await client.get(
+            f"/api/recruiter/evaluate/jobs/{job_id}", headers=rec_auth
+        )
+        if r.status_code == 200:
+            data = r.json()["data"]
+            if data and data["status"] in ("completed", "failed"):
+                return data
+        await asyncio.sleep(0.1)
+    return None
+
+
 def _cleanup() -> None:
+    _delete_test_jobs()
     db = SessionLocal()
     try:
         for email in [REC_EMAIL, *CAND_EMAILS]:
@@ -185,44 +244,49 @@ def _cleanup() -> None:
         db.close()
 
 
-def _ensure_rubric_with_dimensions() -> tuple[int, bool]:
-    """Return (rubric_id, created_dims) for big_data with valid weights."""
+def _ensure_rubric_with_dimensions(division: str) -> tuple[int, bool]:
+    """Return (rubric_id, created_dims) for a division with valid weights."""
     db = SessionLocal()
     try:
-        rubric = db.query(Rubric).filter(Rubric.division == "big_data").first()
+        rubric = db.query(Rubric).filter(Rubric.division == division).first()
         if rubric is None:
             rubric = Rubric(
-                name="Big Data",
+                name=division,
                 position="Smoke Stab Position",
-                division="big_data",
+                division=division,
                 description="",
             )
             db.add(rubric)
             db.flush()
         total_weight = sum(d.weight for d in rubric.dimensions)
-        if rubric.dimensions and 0.99 <= total_weight <= 1.01:
-            return rubric.id, False
-        # Existing dims are absent or invalid — add this script's own pair.
-        # (Existing invalid dims are left untouched; weights are re-checked
-        # against the new total below only if none existed.)
-        if rubric.dimensions:
-            # Can't safely fix someone else's rubric — bail out loudly.
-            raise RuntimeError(
-                "big_data rubric has dimensions with invalid weight sum "
-                f"({total_weight}); fix the rubric before running this smoke test"
-            )
-        for name in SMOKE_DIM_NAMES:
-            db.add(
-                Dimension(
-                    rubric_id=rubric.id,
-                    name=name,
-                    weight=0.5,
-                    description="Smoke stabilization dimension",
-                    indicators=["smoke"],
+        created = False
+        if not (rubric.dimensions and 0.99 <= total_weight <= 1.01):
+            # Existing dims are absent or invalid.
+            if rubric.dimensions:
+                # Can't safely fix someone else's rubric — bail out loudly.
+                raise RuntimeError(
+                    f"{division} rubric has dimensions with invalid weight sum "
+                    f"({total_weight}); fix the rubric before running this smoke test"
                 )
-            )
-        db.commit()
-        return rubric.id, True
+            for name in SMOKE_DIM_NAMES:
+                db.add(
+                    Dimension(
+                        rubric_id=rubric.id,
+                        name=name,
+                        weight=0.5,
+                        description="Smoke stabilization dimension",
+                        indicators=["smoke"],
+                    )
+                )
+            db.commit()
+            created = True
+        # Capture the big_data rubric's actual dimension names so the mock
+        # returns matching names (store_evaluation_results matches by name).
+        if division == "big_data":
+            dims = db.query(Dimension).filter(Dimension.rubric_id == rubric.id).all()
+            RUBRIC_DIM_NAMES.clear()
+            RUBRIC_DIM_NAMES.extend(d.name for d in dims)
+        return rubric.id, created
     finally:
         db.close()
 
@@ -343,20 +407,24 @@ def test_llm_client_config() -> int:
 
 
 async def test_division_lock(client: httpx.AsyncClient, rec_auth: dict) -> int:
-    """409 on duplicate trigger; other division OK; release on failure."""
+    """DB-level 409 on duplicate trigger; other division OK; slot freed on failure."""
     failures = 0
-    original = evaluate_batch_router.run_evaluation_pipeline
-    hold = asyncio.Event()
+    original = evaluate_batch_router.run_evaluation_job
+    started = asyncio.Event()
     release = asyncio.Event()
 
-    async def _held_pipeline(*, division, application_ids, db, force=False):
-        if division == "big_data":
-            hold.set()
-            await release.wait()
-        return {"queued": 0, "results": [], "errors": []}
+    async def _held_runner(job_id, division, application_ids, rubric_id, session_factory):
+        # The job row is already queued (slot taken) before this runs; hold it
+        # non-terminal so a concurrent same-division trigger hits the index.
+        started.set()
+        await release.wait()
 
-    evaluate_batch_router.run_evaluation_pipeline = _held_pipeline
+    evaluate_batch_router.run_evaluation_job = _held_runner
     try:
+        # Under ASGITransport, Starlette runs the BackgroundTask (here the held
+        # runner) to completion before the POST response is delivered. So every
+        # POST that schedules the runner must be driven as a task and only
+        # awaited after release.set(); awaiting one inline would deadlock.
         first = asyncio.create_task(
             client.post(
                 "/api/recruiter/evaluate/batch",
@@ -364,8 +432,10 @@ async def test_division_lock(client: httpx.AsyncClient, rec_auth: dict) -> int:
                 json={"division": "big_data"},
             )
         )
-        await asyncio.wait_for(hold.wait(), timeout=10)
+        await asyncio.wait_for(started.wait(), timeout=10)
 
+        # Duplicate same-division trigger: the IntegrityError fires before the
+        # runner is scheduled, so this POST returns its 409 immediately.
         r = await client.post(
             "/api/recruiter/evaluate/batch",
             headers=rec_auth,
@@ -381,40 +451,56 @@ async def test_division_lock(client: httpx.AsyncClient, rec_auth: dict) -> int:
                 "409 detail mentions 'already running'",
             )
 
-        r = await client.post(
-            "/api/recruiter/evaluate/batch",
-            headers=rec_auth,
-            json={"division": "cyber_security"},
-        )
-        failures += _assert(
-            r.status_code == 200,
-            f"different division during run -> 200 (got {r.status_code})",
+        # Different division is accepted while big_data is held. Its runner is
+        # also held, so schedule it as a task and release both together.
+        second = asyncio.create_task(
+            client.post(
+                "/api/recruiter/evaluate/batch",
+                headers=rec_auth,
+                json={"division": "cyber_security"},
+            )
         )
 
+        # The held runners await an asyncio.Event, not the loop, so /api/health
+        # must stay responsive while both jobs are non-terminal.
         t0 = time.perf_counter()
         r = await client.get("/api/health")
         health_elapsed = time.perf_counter() - t0
         failures += _assert(
             r.status_code == 200 and health_elapsed < HEALTH_MAX_LATENCY_SECONDS,
-            f"/api/health responsive while evaluation held "
+            f"/api/health responsive while a job is held "
             f"({health_elapsed:.3f}s)",
         )
 
         release.set()
-        r = await first
+        ra = await first
         failures += _assert(
-            r.status_code == 200,
-            f"held first request completes -> 200 (got {r.status_code})",
+            ra.status_code == 202,
+            f"held first request returns 202 (got {ra.status_code})",
+        )
+        rb = await second
+        failures += _assert(
+            rb.status_code == 202,
+            f"different division during run -> 202 (got {rb.status_code})",
         )
     finally:
         release.set()
-        evaluate_batch_router.run_evaluation_pipeline = original
+        evaluate_batch_router.run_evaluation_job = original
+        _delete_test_jobs()
 
-    # --- Lock release after failure ---
-    async def _raising_pipeline(**kwargs):
-        raise RuntimeError("smoke: pipeline crash")
+    # --- Slot release after a job failure ---
+    async def _failing_runner(job_id, division, application_ids, rubric_id, session_factory):
+        sess = session_factory()
+        try:
+            j = sess.get(EvaluationJob, job_id)
+            j.status = EvaluationJobStatus.FAILED
+            j.finished_at = datetime.now(timezone.utc)
+            j.note = "smoke: forced failure"
+            sess.commit()
+        finally:
+            sess.close()
 
-    evaluate_batch_router.run_evaluation_pipeline = _raising_pipeline
+    evaluate_batch_router.run_evaluation_job = _failing_runner
     try:
         r = await client.post(
             "/api/recruiter/evaluate/batch",
@@ -422,32 +508,35 @@ async def test_division_lock(client: httpx.AsyncClient, rec_auth: dict) -> int:
             json={"division": "big_data"},
         )
         failures += _assert(
-            r.status_code == 500,
-            f"pipeline crash -> sanitized 500 (got {r.status_code})",
+            r.status_code == 202,
+            f"trigger (job will fail) -> 202 (got {r.status_code})",
+        )
+        job_id = r.json().get("job_id")
+        final = await _await_job_terminal(client, rec_auth, job_id, timeout=10)
+        failures += _assert(
+            final is not None and final["status"] == "failed",
+            "failing job reaches terminal 'failed' state",
         )
 
-        async def _quick_pipeline(**kwargs):
-            return {"queued": 0, "results": [], "errors": []}
-
-        evaluate_batch_router.run_evaluation_pipeline = _quick_pipeline
         r = await client.post(
             "/api/recruiter/evaluate/batch",
             headers=rec_auth,
             json={"division": "big_data"},
         )
         failures += _assert(
-            r.status_code == 200,
-            f"lock released after failure: next trigger -> 200 (got {r.status_code})",
+            r.status_code == 202,
+            f"slot released after failure: next trigger -> 202 (got {r.status_code})",
         )
     finally:
-        evaluate_batch_router.run_evaluation_pipeline = original
+        evaluate_batch_router.run_evaluation_job = original
+        _delete_test_jobs()
     return failures
 
 
 async def test_real_pipeline_isolation(
     client: httpx.AsyncClient, rec_auth: dict, app_ids: list[int]
 ) -> int:
-    """Real pipeline run: failing middle candidate, health responsiveness."""
+    """Real job run: failing middle candidate, isolation, health responsiveness."""
     failures = 0
     saved = {
         "anonymize_text": evaluation_service.anonymize_text,
@@ -478,28 +567,39 @@ async def test_real_pipeline_isolation(
             json={"division": "big_data", "application_ids": app_ids},
             timeout=120,
         )
+        failures += _assert(
+            r.status_code == 202,
+            f"real pipeline batch -> 202 (got {r.status_code})",
+        )
+        if r.status_code != 202:
+            batch_done.set()
+            await poller
+            return failures + 1
+
+        job_id = r.json()["job_id"]
+        final = await _await_job_terminal(client, rec_auth, job_id, timeout=60)
         batch_done.set()
         await poller
 
-        failures += _assert(
-            r.status_code == 200,
-            f"real pipeline batch -> 200 (got {r.status_code})",
-        )
-        if r.status_code != 200:
+        failures += _assert(final is not None, "job reached a terminal state")
+        if final is None:
             return failures + 1
 
-        data = r.json()["data"]
         failures += _assert(
-            data["queued"] == 3, f"3 applications queued (got {data['queued']})"
+            final["status"] == "completed",
+            f"job completed (got {final['status']})",
         )
         failures += _assert(
-            len(data["results"]) == 2,
-            f"2 candidates succeed despite middle failure (got {len(data['results'])})",
+            final["total"] == 3, f"3 applications queued (got {final['total']})"
         )
         failures += _assert(
-            len(data["errors"]) == 1
-            and data["errors"][0]["application_id"] == app_ids[1],
-            f"exactly the middle candidate fails (errors={data['errors']})",
+            final["succeeded"] == 2,
+            f"2 candidates succeed despite middle failure (got {final['succeeded']})",
+        )
+        failures += _assert(
+            len(final["errors"]) == 1
+            and final["errors"][0]["application_id"] == app_ids[1],
+            f"exactly the middle candidate fails (errors={final['errors']})",
         )
 
         worst = max(health_samples) if health_samples else float("inf")
@@ -554,6 +654,7 @@ async def test_real_pipeline_isolation(
         batch_done.set()
         for name, fn in saved.items():
             setattr(evaluation_service, name, fn)
+        _delete_test_jobs()
     return failures
 
 
@@ -565,9 +666,9 @@ async def _amain() -> int:
     failures = 0
     _cleanup()
     doc_dir = tempfile.mkdtemp(prefix="smoke_stab_")
-    created_dims = False
     try:
-        _, created_dims = _ensure_rubric_with_dimensions()
+        _ensure_rubric_with_dimensions("big_data")
+        _ensure_rubric_with_dimensions("cyber_security")
         _create_recruiter()
         app_ids = _create_candidates(doc_dir)
 
@@ -592,9 +693,6 @@ async def _amain() -> int:
             failures += await test_real_pipeline_isolation(client, rec_auth, app_ids)
     finally:
         _cleanup()
-        if not created_dims:
-            # _cleanup also removes SMOKE_DIM_NAMES; nothing extra to undo.
-            pass
         shutil.rmtree(doc_dir, ignore_errors=True)
 
     print()
