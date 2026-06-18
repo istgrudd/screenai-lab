@@ -567,3 +567,61 @@ Phase 2 leaves a clean seam for Phase 3:
   for stale-job detection and cancellation messaging.
 - The frontend already models evaluation as a long-running, resumable job, so
   cancellation and richer progress are additive UI changes, not a rewrite.
+
+---
+
+## Appendix — Bugfix: candidate detail 500 on KHS `sections_json`
+
+*Committed separately from the Phase 2 work — this is a pre-existing
+candidate-detail bug, not Phase 2 machinery.*
+
+**Symptom.** `GET /api/candidates/{id}` returned **500** whenever the candidate
+had a KHS document; the frontend surfaced it as "Failed to fetch / Candidate not
+found".
+
+**Root cause.** `get_candidate` in `backend/routers/candidates.py` built
+`sections_detected` with
+`[k for k, v in d.sections_json.items() if v.strip()]`, assuming every value is a
+string. For KHS docs, `sections_json` is the nested LLM-parser payload
+(`{"parsed_khs": {…dict…}, "processing_status": …, "processing_error": None, …}`),
+so `v.strip()` raised `AttributeError: 'dict' object has no attribute 'strip'`
+(and would also fail on the `None` value).
+
+**Fix.** The prompt referred to an existing KHS-safe helper
+`_sections_detected_for_document` — it **did not exist in the file**, so it was
+authored to the described contract (exclude non-`cv`/`motivation_letter` docs,
+guard `isinstance(sections, dict)`, keep only non-empty **string** values) and
+`get_candidate` now calls it:
+
+```python
+"sections_detected": _sections_detected_for_document(d),
+```
+
+**Sibling consumers (`grep -rn "sections_json" backend`).** The only other place
+that iterated `sections_json` *values* was `backend/routers/upload.py` (legacy
+`/api/upload` CV path), which reads `normalization["sections"]` — always flat
+strings, never the KHS shape, so it could not hit the crash. It shared the
+unguarded `.strip()` pattern, so it got the same `isinstance(v, str)` guard
+defensively. Every other consumer goes through the KHS-safe accessors
+(`parsed_khs_from_cache` / `khs_cache_scoring_metadata`, which guard
+`isinstance(sections_json, dict)`) or is a plain assignment — none need changes.
+
+**Regression fixture (the gap that let this slip through).** The smoke suites
+had no candidate-detail fixture with a KHS document. `scripts/smoke_test_ai_validation.py`
+now seeds the scored candidate with a KHS `CandidateDocument` carrying the nested
+LLM-parser `sections_json` (a `parsed_khs` dict **and** a `processing_error: None`
+field) plus a CV doc with mixed-type sections, and asserts:
+
+- `GET /api/candidates/{id}` → **200** (was 500 before the fix);
+- the KHS doc's `sections_detected == []` (nested payload excluded);
+- the CV doc's `sections_detected == ["education", "experience"]` (only non-empty
+  string sections kept; the `""` and `None` values filtered).
+
+**Results (real).**
+
+```
+python -m scripts.smoke_test_ai_validation   → AI validation smoke checks passed (24/24)
+python -m scripts.smoke_test_evaluation       → All evaluation + announcement smoke checks passed
+python -m compileall backend/routers/candidates.py backend/routers/upload.py
+                       scripts/smoke_test_ai_validation.py → clean
+```
