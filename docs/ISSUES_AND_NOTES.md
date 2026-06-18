@@ -225,6 +225,11 @@ Target: a self-hosted VPS in the MBC Lab running three Docker containers (fronte
 ### Schema migration safety
 - Every model change must produce an Alembic migration via `alembic revision --autogenerate -m "..."`. The lifespan `init_db()` calls `alembic upgrade head` on every boot — production will auto-apply pending migrations. Review before deploy.
 
+### Boot-log noise & Hugging Face offline mode
+- The Phase 1 root INFO handler in [backend/main.py](../backend/main.py) surfaced a lot of third-party boot chatter. `httpx`, `huggingface_hub`, `transformers`, and `alembic.runtime.plugins` are now pinned to `WARNING` alongside `sqlalchemy`; app loggers (`backend.*`) stay at `INFO`.
+- **`HF_HUB_OFFLINE`** (default unset): set to `1` once the NER model is cached under `./models/ner` (or pre-baked into the image in production) for a network-free boot with no `huggingface.co` round-trips. [backend/config.py](../backend/config.py) propagates it to `TRANSFORMERS_OFFLINE` before `transformers`/`huggingface_hub` import. Leave unset for the first run so the model can download.
+- **`NER_WARMUP`** (default `1`): set to `0` to skip the boot-time ~1.3 GB model warmup — handy with `uvicorn --reload` so each save doesn't reload the model. On-demand load on first evaluation is unchanged.
+
 ### Smoke-test runner
 - `scripts/smoke_test_*.py` are stand-alone Python scripts. There is no `pytest` harness today. Phase 12 validated them sequentially as module commands:
   ```

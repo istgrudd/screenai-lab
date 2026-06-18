@@ -5,6 +5,7 @@ database tables on startup.
 """
 
 import logging
+import os
 import threading
 from contextlib import asynccontextmanager
 
@@ -48,6 +49,12 @@ logging.basicConfig(
 )
 # Keep SQLAlchemy below INFO — at INFO it would echo every SQL statement.
 logging.getLogger("sqlalchemy").setLevel(logging.WARNING)
+# Now that a root INFO handler is installed, these third-party libraries would
+# flood the boot logs: httpx request lines, huggingface_hub/transformers download
+# chatter, and alembic's "setup plugin" notices. Pin them to WARNING; app loggers
+# (backend.*) stay at INFO.
+for name in ("httpx", "huggingface_hub", "transformers", "alembic.runtime.plugins"):
+    logging.getLogger(name).setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
 
@@ -134,10 +141,15 @@ async def lifespan(app: FastAPI):
 
     # Warm the ~1.3 GB NER model off the critical path so the first
     # evaluation after a restart doesn't pay the load inside a request.
-    threading.Thread(
-        target=_warm_up_ner_model, daemon=True, name="ner-warmup"
-    ).start()
-    print("[OK] NER model warmup started in background")
+    # Gated by NER_WARMUP so iterative `uvicorn --reload` saves don't reload the
+    # model on every code change; default on.
+    if os.getenv("NER_WARMUP", "1") != "0":
+        threading.Thread(
+            target=_warm_up_ner_model, daemon=True, name="ner-warmup"
+        ).start()
+        print("[OK] NER model warmup started in background")
+    else:
+        print("[OK] NER model warmup skipped (NER_WARMUP=0)")
 
     print(f"[OK] Server running on port {settings.app_port}")
 
