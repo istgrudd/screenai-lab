@@ -393,7 +393,9 @@ def main() -> int:
         r.status_code != 403,
         f"S2a: evaluate outside EVALUATION is NOT 403 (got {r.status_code})",
     )
-    if r.status_code == 200:
+    if r.status_code == 202:
+        # Phase 2: evaluate now returns 202 (job accepted) + the soft warning
+        # in the envelope.
         failures += _assert(
             bool(body.get("warning")),
             f"S2b: evaluate outside EVALUATION returns warning (got warning={body.get('warning')!r})",

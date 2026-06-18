@@ -306,9 +306,9 @@ def main() -> int:
         headers=recruiter_auth,
         json={"division": "big_data", "application_ids": [app_id]},
     )
-    _check(response.status_code == 200, "evaluation request for document_review app -> 200")
+    _check(response.status_code == 202, "evaluation request for document_review app -> 202")
     _check(
-        response.json()["data"]["queued"] == 0,
+        response.json()["evaluated_count"] == 0,
         "evaluation excludes document_review application",
     )
 
