@@ -564,30 +564,49 @@ async def _evaluate_one(
     rubric: Rubric,
     db: Session,
 ) -> dict:
-    """Run the full pipeline for one application."""
+    """Run the full pipeline for one application.
+
+    W1 (Phase 3) — narrowed write window. The function is split into a
+    read/compute phase (KTM, KHS, NER, RAG — reads + slow async work only, no
+    flushed write) and a persist phase (Candidate, CandidateDocument caches,
+    DimensionScore, AI-validation reset) that runs with no awaits. The caller
+    flips the Application to SCREENING and commits right after, so the
+    per-candidate write transaction is held only for that short persist window
+    instead of across the whole LLM/NER/KHS round-trip.
+    """
     if app.status not in {ApplicationStatus.VERIFIED, ApplicationStatus.SCREENING}:
         app_status = app.status.value if hasattr(app.status, "value") else str(app.status)
         raise ValueError(
             f"Application {app.id} is not eligible for evaluation while status is '{app_status}'"
         )
 
-    user = db.query(User).filter(User.id == app.user_id).first()
-
     result: dict = {
         "application_id": app.id,
         "division": app.division.value if hasattr(app.division, "value") else str(app.division),
     }
+
+    # ===================== read / compute phase =====================
+    # The slow stages (KTM/KHS/NER/RAG) below run on reads only — no write is
+    # flushed here, so the per-candidate session holds no write transaction
+    # across them (under pysqlite a BEGIN is only emitted on the first DML, so
+    # a read-only session takes no lock and concurrent verification writes are
+    # not blocked). Every persist is deferred to the short write block at the
+    # bottom of this function.
+    user = db.query(User).filter(User.id == app.user_id).first()
+
+    # Read-only Candidate lookup. A Candidate usually already exists from
+    # post-verification NER; on a first-ever evaluation it is None (no caches
+    # to hit) and is created in the persist phase below.
+    existing_candidate = _find_candidate(app, db)
 
     # --- KTM validation ---
     ktm_result = await _run_ktm(app, user, db)
     result["ktm_valid"] = ktm_result.get("valid", False)
     result["ktm_warning"] = ktm_result.get("warning") or ktm_result.get("error")
 
-    # --- Task 10.3/10.4: Ensure Candidate exists (moved up for cache check) ---
-    candidate = _ensure_candidate(app, rubric, user, db)
-
-    # --- KHS parsing/cache resolution ---
-    khs_context = await _resolve_khs_context(app, candidate, rubric, db)
+    # --- KHS parsing/cache resolution (cache write deferred to persist phase) ---
+    khs_doc = _get_doc(app.id, DocumentType.KHS, db)
+    khs_context = await _resolve_khs_context(app, existing_candidate, rubric, khs_doc, db)
     result["khs_summary"] = khs_context["khs_summary"]
     result["khs_warning"] = khs_context["khs_warning"]
     result["khs_used_in_ai_scoring"] = khs_context["khs_used_in_ai_scoring"]
@@ -599,21 +618,28 @@ async def _evaluate_one(
         raise ValueError(f"No CV document found for application {app.id}")
     ml_doc = _get_doc(app.id, DocumentType.MOTIVATION_LETTER, db)
     ml_fallback_attempted = False
+    # Deferred motivation-letter cache write (a 5-tuple set when ML is rebuilt
+    # inline below; persisted in the write phase).
+    ml_cache_write: tuple | None = None
 
     # --- Task 10.3: Check NER cache from post-verification anonymization ---
-    cached_cv = (
-        db.query(CandidateDocument)
-        .filter(
-            CandidateDocument.candidate_id == candidate.id,
-            CandidateDocument.document_type == "cv",
-            CandidateDocument.anonymized_text != None,  # noqa: E711
+    # Cache lookups require an existing Candidate; without one there is nothing
+    # cached yet, so we fall straight through to the inline-NER branch.
+    cached_cv = None
+    if existing_candidate is not None:
+        cached_cv = (
+            db.query(CandidateDocument)
+            .filter(
+                CandidateDocument.candidate_id == existing_candidate.id,
+                CandidateDocument.document_type == "cv",
+                CandidateDocument.anonymized_text != None,  # noqa: E711
+            )
+            .order_by(CandidateDocument.created_at.desc())
+            .first()
         )
-        .order_by(CandidateDocument.created_at.desc())
-        .first()
-    )
-    if cached_cv and not _cache_matches_document(cached_cv, cv_doc):
-        logger.info("Ignoring stale CV NER cache for application %d", app.id)
-        cached_cv = None
+        if cached_cv and not _cache_matches_document(cached_cv, cv_doc):
+            logger.info("Ignoring stale CV NER cache for application %d", app.id)
+            cached_cv = None
 
     if cached_cv and cached_cv.anonymized_text:
         # Cache hit — use pre-computed anonymized text
@@ -623,26 +649,27 @@ async def _evaluate_one(
         full_text = cached_cv.anonymized_text
 
         # Also check for cached motivation letter
-        cached_ml = (
-            db.query(CandidateDocument)
-            .filter(
-                CandidateDocument.candidate_id == candidate.id,
-                CandidateDocument.document_type == "motivation_letter",
-                CandidateDocument.anonymized_text != None,  # noqa: E711
+        cached_ml = None
+        if existing_candidate is not None and ml_doc:
+            cached_ml = (
+                db.query(CandidateDocument)
+                .filter(
+                    CandidateDocument.candidate_id == existing_candidate.id,
+                    CandidateDocument.document_type == "motivation_letter",
+                    CandidateDocument.anonymized_text != None,  # noqa: E711
+                )
+                .order_by(CandidateDocument.created_at.desc())
+                .first()
             )
-            .order_by(CandidateDocument.created_at.desc())
-            .first()
-        )
-        if cached_ml and ml_doc and not _cache_matches_document(cached_ml, ml_doc):
-            logger.info(
-                "Ignoring stale motivation letter NER cache for application %d",
-                app.id,
-            )
-            cached_ml = None
+            if cached_ml and not _cache_matches_document(cached_ml, ml_doc):
+                logger.info(
+                    "Ignoring stale motivation letter NER cache for application %d",
+                    app.id,
+                )
+                cached_ml = None
         ml_anon_text = cached_ml.anonymized_text if cached_ml else ""
 
-        # We still need raw_text for _ensure_candidate_document bookkeeping
-        cv_doc = _get_doc(app.id, DocumentType.CV, db)
+        # We still need raw_text for the deferred CandidateDocument refresh.
         raw_text = cached_cv.raw_text or ""
         normalised = {
             "normalized_text": cached_cv.normalized_text or "",
@@ -663,10 +690,6 @@ async def _evaluate_one(
             app.id,
         )
 
-        cv_doc = _get_doc(app.id, DocumentType.CV, db)
-        if not cv_doc:
-            raise ValueError(f"No CV document found for application {app.id}")
-
         # Heavy sync stages (PyMuPDF extraction, IndoBERT NER inference) run
         # in worker threads so they never block the event loop.
         extraction = await asyncio.to_thread(extract_text_from_pdf, cv_doc.file_path)
@@ -679,16 +702,15 @@ async def _evaluate_one(
         full_text = anonymised.get("anonymized_text", "")
 
         # Also anonymize motivation letter if present
-        ml_doc = _get_doc(app.id, DocumentType.MOTIVATION_LETTER, db)
         ml_anon_text = ""
         cached_ml = (
             _get_ready_candidate_document(
-                candidate,
+                existing_candidate,
                 "motivation_letter",
                 ml_doc,
                 db,
             )
-            if ml_doc
+            if (existing_candidate is not None and ml_doc)
             else None
         )
         if cached_ml:
@@ -707,15 +729,12 @@ async def _evaluate_one(
                     anonymize_text, ml_norm["normalized_text"]
                 )
                 ml_anon_text = ml_anonymised.get("anonymized_text", "")
-                _ensure_candidate_document(
-                    candidate,
+                ml_cache_write = (
                     ml_doc,
                     ml_extraction.get("raw_text", ""),
                     ml_norm,
                     ml_anonymised,
-                    db,
-                    document_type="motivation_letter",
-                    metadata=ml_metadata,
+                    ml_metadata,
                 )
             except Exception:
                 pass  # graceful fallback — ML is bonus context
@@ -738,15 +757,12 @@ async def _evaluate_one(
                 anonymize_text, ml_norm["normalized_text"]
             )
             ml_anon_text = ml_anonymised.get("anonymized_text", "")
-            _ensure_candidate_document(
-                candidate,
+            ml_cache_write = (
                 ml_doc,
                 ml_extraction.get("raw_text", ""),
                 ml_norm,
                 ml_anonymised,
-                db,
-                document_type="motivation_letter",
-                metadata=ml_metadata,
+                ml_metadata,
             )
         except Exception:
             pass  # graceful fallback — ML is bonus context
@@ -772,8 +788,44 @@ async def _evaluate_one(
             + full_text
         )
 
-    # --- Bridge: update CandidateDocument ---
-    cand_doc = _ensure_candidate_document(
+    # --- RAG evaluation (reads the rubric + LLM round-trip; no write) ---
+    evaluation = await evaluate_candidate(
+        anonymized_cv={"anonymized_text": full_text},
+        rubric_id=rubric.id,
+        db=db,
+        certificate_data=None,
+    )
+
+    # --- SWOT text extraction (highlight only, not scored) ---
+    swot_text = await _extract_swot(app, db)
+    result["swot_text"] = swot_text
+
+    # ===================== persist phase (short write tx) =====================
+    # Everything below mutates the DB and runs straight through with no awaits.
+    # The caller flips status to SCREENING and commits immediately after, so
+    # the write lock is held only for this brief window — never across the
+    # LLM/NER/KHS work above.
+    candidate = _ensure_candidate(app, rubric, user, db)
+
+    # KHS cache row + scoring metadata, deferred from the read phase.
+    _apply_khs_persist(candidate, khs_doc, khs_context["_persist"], db)
+
+    # Motivation-letter cache, if it was rebuilt inline above.
+    if ml_cache_write is not None:
+        ml_portal_doc, ml_raw_text, ml_norm, ml_anon, ml_meta = ml_cache_write
+        _ensure_candidate_document(
+            candidate,
+            ml_portal_doc,
+            ml_raw_text,
+            ml_norm,
+            ml_anon,
+            db,
+            document_type="motivation_letter",
+            metadata=ml_meta,
+        )
+
+    # --- Bridge: refresh the CV CandidateDocument (cache hit or fresh NER) ---
+    _ensure_candidate_document(
         candidate,
         cv_doc,
         raw_text,
@@ -781,14 +833,6 @@ async def _evaluate_one(
         anonymised,
         db,
         metadata=cv_metadata,
-    )
-
-    # --- RAG evaluation ---
-    evaluation = await evaluate_candidate(
-        anonymized_cv={"anonymized_text": full_text},
-        rubric_id=rubric.id,
-        db=db,
-        certificate_data=None,
     )
 
     # --- Store results ---
@@ -808,10 +852,6 @@ async def _evaluate_one(
     candidate.ai_validated_at = None
     candidate.ai_validation_note = None
     db.flush()
-
-    # --- SWOT text extraction (highlight only, not scored) ---
-    swot_text = await _extract_swot(app, db)
-    result["swot_text"] = swot_text
 
     # --- Populate result ---
     result["candidate_id"] = candidate.id
@@ -905,13 +945,20 @@ def rubric_requires_academic_evidence(rubric: Rubric) -> bool:
 
 async def _resolve_khs_context(
     app: Application,
-    candidate: Candidate,
+    candidate: Candidate | None,
     rubric: Rubric,
+    khs_doc: Document | None,
     db: Session,
 ) -> dict:
-    """Load cached KHS or parse inline fallback, then decide prompt usage."""
+    """Load cached KHS or parse inline fallback, then decide prompt usage.
+
+    W1: read/compute only. The inline parse no longer stores its cache, and the
+    scoring-metadata write is not applied here; both are deferred to
+    ``_apply_khs_persist`` in the per-candidate persist phase. The returned
+    ``_persist`` blob carries everything needed to write them in the short
+    write window.
+    """
     requires_academic = rubric_requires_academic_evidence(rubric)
-    khs_doc = _get_doc(app.id, DocumentType.KHS, db)
     if not khs_doc:
         logger.info("KHS cache miss for application %d: no KHS document", app.id)
         return {
@@ -920,24 +967,25 @@ async def _resolve_khs_context(
             "khs_warning": "No KHS document uploaded",
             "khs_used_in_ai_scoring": False,
             "khs_source": "missing",
+            "_persist": {"has_doc": False},
         }
 
-    cached = _get_cached_khs_document(candidate, khs_doc, db)
+    cached = _get_cached_khs_document(candidate, khs_doc, db) if candidate else None
     parsed: KhsResult | None = None
-    cache_doc: CandidateDocument | None = None
     source = "missing"
+    store_inline = False
+    raw_text = ""
+    metadata: dict = {}
 
     if cached:
         parsed = parsed_khs_from_cache(cached.sections_json)
-        cache_doc = cached
         source = "cache"
         logger.info("KHS cache hit for application %d", app.id)
     else:
         logger.info("KHS cache miss for application %d, parsing inline", app.id)
-        parsed, cache_doc = await _parse_and_store_khs_inline(
-            app, candidate, khs_doc, db
-        )
+        parsed, raw_text, metadata = await _parse_khs_inline(app, khs_doc)
         source = "inline_fallback"
+        store_inline = True
 
     warning = None
     if not parsed:
@@ -967,14 +1015,6 @@ async def _resolve_khs_context(
         if parsed and not parsed.get("parse_error")
         else None
     )
-    _update_khs_scoring_metadata(
-        cache_doc,
-        parsed,
-        source=source,
-        used_in_ai_scoring=used_in_ai,
-        warning=warning,
-        db=db,
-    )
 
     return {
         "parsed_khs": parsed,
@@ -982,14 +1022,63 @@ async def _resolve_khs_context(
         "khs_warning": warning,
         "khs_used_in_ai_scoring": used_in_ai,
         "khs_source": source,
+        "_persist": {
+            "has_doc": True,
+            "store_inline": store_inline,
+            "raw_text": raw_text,
+            "metadata": metadata,
+            "parsed": parsed,
+            "source": source,
+            "used_in_ai_scoring": used_in_ai,
+            "warning": warning,
+        },
     }
 
 
-def _get_cached_khs_document(
+def _apply_khs_persist(
     candidate: Candidate,
+    khs_doc: Document | None,
+    persist: dict,
+    db: Session,
+) -> None:
+    """Persist the KHS cache row + scoring metadata resolved in the read phase.
+
+    Runs in the per-candidate persist phase (W1). For an inline parse it stores
+    the cache row now; for a cache hit it re-resolves the existing row. Either
+    way it then writes the scoring metadata (used-in-AI flag, source, warning).
+    """
+    if not persist.get("has_doc"):
+        return
+    parsed = persist.get("parsed")
+    if persist.get("store_inline"):
+        cache_doc = _store_khs_cache(
+            candidate=candidate,
+            portal_doc=khs_doc,
+            raw_text=persist.get("raw_text", ""),
+            parsed=parsed,
+            metadata=persist.get("metadata") or {},
+            db=db,
+            source="inline_fallback",
+        )
+    else:
+        cache_doc = _get_cached_khs_document(candidate, khs_doc, db)
+    _update_khs_scoring_metadata(
+        cache_doc,
+        parsed,
+        source=persist.get("source"),
+        used_in_ai_scoring=persist.get("used_in_ai_scoring", False),
+        warning=persist.get("warning"),
+        db=db,
+    )
+
+
+def _get_cached_khs_document(
+    candidate: Candidate | None,
     khs_doc: Document,
     db: Session,
 ) -> CandidateDocument | None:
+    if candidate is None:
+        return None
     cached = (
         db.query(CandidateDocument)
         .filter(
@@ -1009,12 +1098,17 @@ def _get_cached_khs_document(
     return cached
 
 
-async def _parse_and_store_khs_inline(
+async def _parse_khs_inline(
     app: Application,
-    candidate: Candidate,
     khs_doc: Document,
-    db: Session,
-) -> tuple[KhsResult, CandidateDocument | None]:
+) -> tuple[KhsResult, str, dict]:
+    """Parse KHS inline (compute only) — the cache write is deferred to persist.
+
+    W1: returns ``(parsed, raw_text, metadata)`` and performs no DB write, so it
+    never flushes inside the read phase. ``_apply_khs_persist`` stores the cache
+    row later in the short write window. Degrades to a structured parse error
+    rather than raising, so a bad KHS never fails the whole candidate.
+    """
     try:
         # parse_khs calls DeepSeek through the sync client; running it in a
         # worker thread keeps its retries/timeout off the event loop.
@@ -1030,15 +1124,6 @@ async def _parse_and_store_khs_inline(
         metadata = {}
         parsed = khs_parse_error(f"Inline KHS parse failed: {exc}")
 
-    cache_doc = _store_khs_cache(
-        candidate=candidate,
-        portal_doc=khs_doc,
-        raw_text=raw_text,
-        parsed=parsed,
-        metadata=metadata,
-        db=db,
-        source="inline_fallback",
-    )
     if parsed.get("parse_error"):
         logger.warning(
             "KHS parse error for application %d: %s",
@@ -1047,7 +1132,7 @@ async def _parse_and_store_khs_inline(
         )
     else:
         logger.info("KHS parse success for application %d", app.id)
-    return parsed, cache_doc
+    return parsed, raw_text, metadata
 
 
 def _store_khs_cache(
@@ -1176,6 +1261,20 @@ async def _extract_swot(app: Application, db: Session) -> str | None:
         return (result.get("raw_text") or "").strip() or None
     except Exception:
         return None
+
+
+def _find_candidate(app: Application, db: Session) -> Candidate | None:
+    """Read-only lookup of the Candidate linked to this application's user.
+
+    Used in the W1 read phase so cache lookups can run without creating (and
+    flushing) a Candidate row. ``_ensure_candidate`` performs the create/update
+    later, in the persist phase.
+    """
+    return (
+        db.query(Candidate)
+        .filter(Candidate.user_id == app.user_id)
+        .first()
+    )
 
 
 def _ensure_candidate(
