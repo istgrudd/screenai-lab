@@ -1,0 +1,42 @@
+# Build context exclusions for the backend image (context = repo root).
+#
+# Without this, the entire repo — including the ~1.3 GB host NER cache, the dev
+# DB, uploads, and .git — would be sent to the Docker daemon as build context,
+# defeating the W5 pre-bake (the model is downloaded fresh inside the build, not
+# copied from the host) and slowing every build.
+
+# Version control / tooling
+.git
+.gitignore
+.github
+
+# Secrets must never enter the image or its build context
+.env
+.env.*
+!.env.example
+
+# Host NER model cache — the image bakes its own copy at build time
+models/
+
+# Mutable runtime state — bind-mounted at runtime, never baked in
+data/
+uploads/
+
+# Python caches / virtualenvs
+**/__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Frontend build artifacts and deps (the frontend image builds separately)
+frontend/node_modules/
+frontend/dist/
+
+# Editor / OS noise
+.vscode/
+.idea/
+*.swp
+.DS_Store

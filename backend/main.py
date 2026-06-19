@@ -4,6 +4,7 @@ Initializes the app, registers middleware & routers, and creates
 database tables on startup.
 """
 
+import json
 import logging
 import os
 import threading
@@ -43,10 +44,35 @@ from backend.routers.email_notifications import router as email_notifications_ro
 # durations, NER warmup) reach the container logs. uvicorn's own loggers
 # carry their own handlers and are unaffected; basicConfig is a no-op if the
 # root logger is already configured by the embedding process.
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-)
+#
+# W5: an optional one-line-JSON format (LOG_FORMAT=json) for staging/prod log
+# aggregation. Default ("text") keeps the human-readable format unchanged.
+
+
+class _JsonLogFormatter(logging.Formatter):
+    """Minimal structured formatter — one JSON object per log line."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        payload = {
+            "ts": self.formatTime(record),
+            "level": record.levelname,
+            "logger": record.name,
+            "msg": record.getMessage(),
+        }
+        if record.exc_info:
+            payload["exc"] = self.formatException(record.exc_info)
+        return json.dumps(payload, ensure_ascii=False)
+
+
+if os.getenv("LOG_FORMAT", "text").lower() == "json":
+    _json_handler = logging.StreamHandler()
+    _json_handler.setFormatter(_JsonLogFormatter())
+    logging.basicConfig(level=logging.INFO, handlers=[_json_handler])
+else:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
 # Keep SQLAlchemy below INFO — at INFO it would echo every SQL statement.
 logging.getLogger("sqlalchemy").setLevel(logging.WARNING)
 # Now that a root INFO handler is installed, these third-party libraries would

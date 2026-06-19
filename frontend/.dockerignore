@@ -1,0 +1,10 @@
+# Build context exclusions for the frontend image (context = ./frontend).
+# node_modules is reinstalled inside the build; shipping the host copy is slow
+# and can leak platform-specific binaries.
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store

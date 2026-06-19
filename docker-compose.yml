@@ -21,6 +21,15 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    # W5: gate dependents on real readiness, not just "container started".
+    # ``$$`` escapes so the container shell expands the vars (set above), not
+    # docker compose at parse time.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     # Port intentionally NOT published — Postgres is reachable only on the
     # compose network as `db:5432`, never from the public internet.
 
@@ -32,8 +41,14 @@ services:
       dockerfile: backend/Dockerfile
     restart: unless-stopped
     env_file: .env
+    # W5: cap container memory so a runaway can't take the whole VPS down. The
+    # resident set is dominated by the ~1.3 GB IndoBERT model plus PyTorch and
+    # the app; 3g leaves headroom for the load spike and request handling. Tune
+    # per VPS via BACKEND_MEM_LIMIT (keep it comfortably above ~2 GB).
+    mem_limit: ${BACKEND_MEM_LIMIT:-3g}
     depends_on:
-      - db
+      db:
+        condition: service_healthy
     volumes:
       # SQLite dev DB (unused in prod), legacy raw_pdfs/extracted/anonymized
       # artifacts — all default to ./data/* in backend/config.py.
@@ -42,9 +57,25 @@ services:
       # settings.upload_dir to ./uploads, which resolves to /app/uploads inside
       # the container, so this mount makes uploads survive container recreation.
       - ./uploads:/app/uploads
-      # HuggingFace IndoBERT cache. First boot downloads ~1.3 GB; mounting
-      # the host directory means subsequent restarts skip the download.
-      - ./models:/app/models
+      # NOTE: the IndoBERT NER model is pre-baked into the image (W5) at
+      # /app/models/ner, so there is deliberately NO ./models bind mount here —
+      # a bind mount would shadow the baked-in model with an (empty) host dir
+      # and force a fresh ~1.3 GB download on boot. Rebuild the image to update
+      # the model.
+    # W5: container-level health so docker (and dependents) can tell when the
+    # API is actually serving. The slim image has no curl/wget, so probe with
+    # stdlib urllib. start_period covers boot migrations + rubric seeding; the
+    # NER warmup runs in a background thread and does not gate /api/health.
+    healthcheck:
+      test:
+        - "CMD"
+        - "python"
+        - "-c"
+        - "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/api/health', timeout=4).status==200 else 1)"
+      interval: 30s
+      timeout: 6s
+      retries: 3
+      start_period: 40s
     # Port intentionally NOT published — the frontend nginx reaches the
     # backend on the internal compose network as `backend:8000`.
 
@@ -56,8 +87,11 @@ services:
         # from the .env at docker compose build, NOT at container start.
         VITE_API_BASE_URL: ${VITE_API_BASE_URL}
     restart: unless-stopped
+    # W5: don't start serving the SPA until the backend is healthy, so the
+    # first /api proxy hit doesn't race the backend's boot.
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     ports:
       - "80:80"
     # Port 443 / TLS is handled by the host-level reverse proxy (outside
