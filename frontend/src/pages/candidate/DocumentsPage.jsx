@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import {
@@ -27,6 +27,7 @@ import {
 import {
   REQUIRED_DOCUMENTS,
   documentCompleteness,
+  isNotFoundError,
   isSubmissionPhase,
   submissionPhaseMessage,
 } from "@/lib/candidateApplication";
@@ -40,6 +41,7 @@ export default function DocumentsPage() {
   const [activeIndex, setActiveIndex] = useState(0);
   const [previewDoc, setPreviewDoc] = useState(null);
   const [loading, setLoading] = useState(true);
+  const uploadCardRef = useRef(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -65,12 +67,12 @@ export default function DocumentsPage() {
         setDocuments(docs || []);
         setLimits(lim || {});
       } catch (error) {
-        if (error.message?.toLowerCase().includes("not found")) {
-          toast.error("Mulai pendaftaran terlebih dahulu.");
+        if (isNotFoundError(error)) {
+          toast.error("Start your application first.");
           navigate("/application/start", { replace: true });
           return;
         }
-        toast.error(error.message || "Gagal memuat dokumen.");
+        toast.error(error.message || "Failed to load documents.");
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -119,20 +121,43 @@ export default function DocumentsPage() {
     });
   };
 
-  const focusFirstMissing = () => {
+  // Bring the upload area into view and move focus there so clicking a
+  // requirement / "Complete documents" gives clear viewport feedback.
+  const scrollToUpload = useCallback(() => {
+    requestAnimationFrame(() => {
+      const node = uploadCardRef.current;
+      if (!node) return;
+      node.scrollIntoView({ behavior: "smooth", block: "start" });
+      const focusTarget = node.querySelector(
+        "button:not([disabled]), a[href], input:not([disabled])"
+      );
+      focusTarget?.focus?.({ preventScroll: true });
+    });
+  }, []);
+
+  const selectStep = useCallback(
+    (index) => {
+      if (index < 0) return;
+      setActiveIndex(index);
+      scrollToUpload();
+    },
+    [scrollToUpload]
+  );
+
+  const focusFirstMissing = useCallback(() => {
     const index = REQUIRED_DOCUMENTS.findIndex(
       (item) => !uploadedTypes.has(item.doc_type)
     );
-    if (index >= 0) setActiveIndex(index);
-  };
+    selectStep(index >= 0 ? index : 0);
+  }, [selectStep, uploadedTypes]);
 
   const lockedMessage = isCorrection
     ? currentRejected
-      ? "Unggah file pengganti untuk dokumen yang ditolak."
-      : "Hanya dokumen yang ditolak yang bisa diganti pada mode revisi."
+      ? "Upload a replacement file for the rejected document."
+      : "Only rejected documents can be replaced in revision mode."
     : isDraft && !submissionOpen
     ? submissionPhaseMessage(activePeriod)
-    : "Dokumen terkunci setelah pendaftaran dikirim.";
+    : "Documents are locked after the application is submitted.";
 
   const cardLockedFor = (item) => {
     const doc = docsByType.get(item.doc_type);
@@ -151,14 +176,14 @@ export default function DocumentsPage() {
       const index = REQUIRED_DOCUMENTS.findIndex(
         (item) => docsByType.get(item.doc_type)?.verification_status === "rejected"
       );
-      if (index >= 0) setActiveIndex(index);
+      selectStep(index >= 0 ? index : 0);
       return;
     }
     focusFirstMissing();
   };
 
   if (loading) {
-    return <LoadingState label="Memuat dokumen pendaftaran..." />;
+    return <LoadingState label="Loading application documents..." />;
   }
 
   if (!application) return null;
@@ -166,16 +191,16 @@ export default function DocumentsPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        eyebrow="Pendaftaran / Dokumen"
-        title="Lengkapi Dokumen Pendaftaran"
-        description="Unggah seluruh dokumen wajib. Validasi tipe dan ukuran file tetap mengikuti aturan server."
+        eyebrow="Application / Documents"
+        title="Complete Your Documents"
+        description="Upload every required document. File type and size are still validated by the server."
       />
 
       <CandidateApplicationStepTrack
         currentStep="documents"
         application={application}
         documents={documents}
-        title="Alur Pendaftaran"
+        title="Application Flow"
       />
 
       <ApplicationProgressCard
@@ -185,10 +210,10 @@ export default function DocumentsPage() {
         canManageDocuments={canManageDocuments}
         actionLabel={
           isDraft && allComplete
-            ? "Tinjau & Kirim Pendaftaran"
+            ? "Review & Submit"
             : isCorrection
-            ? "Fokus Dokumen Revisi"
-            : "Lengkapi Dokumen"
+            ? "Fix Flagged Documents"
+            : "Complete Documents"
         }
         onAction={handleProgressAction}
       />
@@ -198,10 +223,10 @@ export default function DocumentsPage() {
           <CardContent className="flex items-start gap-3 p-5">
             <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-warning" />
             <div>
-              <p className="font-medium text-foreground">Dokumen perlu revisi</p>
+              <p className="font-medium text-foreground">Documents need revision</p>
               <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                Ganti hanya dokumen yang ditolak. Dokumen yang sudah
-                terverifikasi tetap terkunci.
+                Replace only the rejected documents. Documents that are already
+                verified stay locked.
               </p>
             </div>
           </CardContent>
@@ -213,7 +238,7 @@ export default function DocumentsPage() {
           <CardContent className="flex items-start gap-3 p-5">
             <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-warning" />
             <div>
-              <p className="font-medium text-foreground">Upload belum tersedia</p>
+              <p className="font-medium text-foreground">Upload not available yet</p>
               <p className="mt-1 text-sm leading-6 text-muted-foreground">
                 {submissionPhaseMessage(activePeriod)}
               </p>
@@ -225,10 +250,10 @@ export default function DocumentsPage() {
       <section className="space-y-3">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.08em] text-primary">
-            Requirement Dokumen
+            Document Requirements
           </p>
           <h2 className="mt-1 font-heading text-xl font-bold tracking-normal">
-            {completeness.completed}/{completeness.total} dokumen tercatat
+            {completeness.completed}/{completeness.total} documents recorded
           </h2>
         </div>
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
@@ -243,7 +268,7 @@ export default function DocumentsPage() {
                 locked={cardLockedFor(item)}
                 correctionMode={isCorrection}
                 active={index === activeIndex}
-                onUpload={() => setActiveIndex(index)}
+                onUpload={() => selectStep(index)}
                 onPreview={doc ? setPreviewDoc : undefined}
               />
             );
@@ -251,7 +276,7 @@ export default function DocumentsPage() {
         </div>
       </section>
 
-      <Card className="brand-card">
+      <Card ref={uploadCardRef} className="brand-card scroll-mt-24">
         <CardHeader className="pb-3">
           <CardTitle className="flex items-center gap-2 font-heading text-xl tracking-normal">
             <FileText className="h-5 w-5 text-primary" />
@@ -259,8 +284,8 @@ export default function DocumentsPage() {
           </CardTitle>
           <p className="text-sm leading-6 text-muted-foreground">
             {canEditCurrent
-              ? "Gunakan area unggah di bawah. Validasi file tetap dilakukan sebelum request dikirim."
-              : "Dokumen ini tidak bisa diganti pada status atau fase saat ini."}
+              ? "Use the upload area below. Files are validated before the request is sent."
+              : "This document can't be changed in the current status or phase."}
           </p>
         </CardHeader>
         <CardContent>
@@ -290,7 +315,7 @@ export default function DocumentsPage() {
             className="gap-2"
           >
             <ArrowLeft className="h-4 w-4" />
-            Sebelumnya
+            Previous
           </Button>
 
           <div className="flex flex-col gap-2 sm:flex-row">
@@ -304,7 +329,7 @@ export default function DocumentsPage() {
                 }
                 className="gap-2"
               >
-                Langkah Berikutnya
+                Next Step
                 <ArrowRight className="h-4 w-4" />
               </Button>
             ) : isDraft ? (
@@ -315,7 +340,7 @@ export default function DocumentsPage() {
                 className="gap-2"
               >
                 <ShieldCheck className="h-4 w-4" />
-                Tinjau & Kirim
+                Review & Submit
               </Button>
             ) : (
               <Button
@@ -324,7 +349,7 @@ export default function DocumentsPage() {
                 className="gap-2"
               >
                 <ShieldCheck className="h-4 w-4" />
-                Lihat Status
+                View Status
               </Button>
             )}
           </div>
@@ -334,7 +359,7 @@ export default function DocumentsPage() {
       {isDraft && (!allComplete || !submissionOpen) && (
         <p className="text-center text-xs leading-5 text-muted-foreground">
           {!allComplete
-            ? "Tombol review aktif setelah semua dokumen wajib diunggah."
+            ? "The review button activates once all required documents are uploaded."
             : submissionPhaseMessage(activePeriod)}
         </p>
       )}
