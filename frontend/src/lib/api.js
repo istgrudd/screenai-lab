@@ -640,6 +640,18 @@ export async function getActiveEvaluationJob(division) {
 }
 
 /**
+ * Request cooperative cancellation of a queued/running evaluation job (W2).
+ * The runner finishes the in-flight candidate, skips the rest, and finalizes
+ * the job as `cancelled`. Idempotent while non-terminal; throws with
+ * `status === 409` if the job already finished (completed/failed).
+ * Returns the updated job state (same shape as {@link getEvaluationJob}).
+ * @param {number} jobId
+ */
+export async function cancelEvaluationJob(jobId) {
+  return request(`/recruiter/evaluate/jobs/${jobId}/cancel`, { method: "POST" });
+}
+
+/**
  * Get evaluation result for an application (Task 8.3).
  * @param {number} applicationId
  */

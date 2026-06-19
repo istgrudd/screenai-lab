@@ -328,6 +328,21 @@ def _increment_job_counter(
         session.close()
 
 
+def _is_cancel_requested(session_factory: sessionmaker, job_id: int) -> bool:
+    """Fresh short read of the job's ``cancel_requested`` flag (W2).
+
+    The runner polls this between candidates. A separate tiny session keeps the
+    read off any per-candidate write transaction and always sees the latest
+    committed value written by the cancel endpoint.
+    """
+    session = session_factory()
+    try:
+        job = session.get(EvaluationJob, job_id)
+        return bool(job is not None and job.cancel_requested)
+    finally:
+        session.close()
+
+
 def _finalize_job(
     session_factory: sessionmaker,
     job_id: int,
@@ -441,6 +456,17 @@ async def _run_job_candidates(
 
     async def _bounded(app_id: int) -> tuple[str, dict]:
         async with semaphore:
+            # W2 cooperative cancel: check just before starting each candidate.
+            # Candidates already past this point (in-flight) finish normally;
+            # not-yet-started ones are skipped, so no new work is scheduled and
+            # nothing is hard-killed mid-candidate.
+            if _is_cancel_requested(session_factory, job_id):
+                logger.info(
+                    "Evaluation job %d cancel requested — skipping application %d",
+                    job_id,
+                    app_id,
+                )
+                return ("cancelled", {"application_id": app_id})
             outcome = await _evaluate_candidate_in_session(
                 app_id, rubric_id, division, session_factory
             )
@@ -456,8 +482,10 @@ async def _run_job_candidates(
     for tag, item in outcomes:
         if tag == "ok":
             results.append(item)
-        else:
+        elif tag == "err":
             errors.append(item)
+        # "cancelled" outcomes are skipped candidates — neither a success nor a
+        # failure, and never counted in the progress totals.
     return results, errors
 
 
@@ -506,6 +534,31 @@ async def run_evaluation_job(
             job_id,
             status=EvaluationJobStatus.FAILED,
             note="run crashed",
+        )
+        return
+
+    # W2: a cancel requested while running drives the job to the terminal
+    # ``cancelled`` state instead of ``completed``. Already-committed candidates
+    # remain (durable partial progress); the skipped ones are simply not counted
+    # (processed < total), and the division slot frees on this finalize.
+    if _is_cancel_requested(session_factory, job_id):
+        skipped = len(application_ids) - len(results) - len(errors)
+        _finalize_job(
+            session_factory,
+            job_id,
+            status=EvaluationJobStatus.CANCELLED,
+            errors=errors,
+            succeeded=len(results),
+            failed=len(errors),
+            note="cancelled by recruiter",
+        )
+        logger.info(
+            "Evaluation job %d cancelled: ok=%d failed=%d skipped=%d duration=%.1fs",
+            job_id,
+            len(results),
+            len(errors),
+            skipped,
+            time.monotonic() - batch_started,
         )
         return
 

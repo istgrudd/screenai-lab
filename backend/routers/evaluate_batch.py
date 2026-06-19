@@ -233,6 +233,7 @@ def _serialize_job(job: EvaluationJob) -> dict:
         "failed": job.failed,
         "errors": job.errors or [],
         "force": job.force,
+        "cancel_requested": bool(job.cancel_requested),
         "created_at": job.created_at.isoformat() if job.created_at else None,
         "started_at": job.started_at.isoformat() if job.started_at else None,
         "finished_at": job.finished_at.isoformat() if job.finished_at else None,
@@ -288,6 +289,64 @@ def get_evaluation_job(
         "data": _serialize_job(job),
         "error": None,
     }
+
+
+@router.post(
+    "/evaluate/jobs/{job_id}/cancel",
+    dependencies=[Depends(_recruiter_or_admin)],
+)
+def cancel_evaluation_job(
+    job_id: int,
+    db: Session = Depends(get_db),
+):
+    """Request cooperative cancellation of a queued/running job (W2).
+
+    Sets ``cancel_requested=true`` (and flips a ``running`` job to
+    ``cancelling`` so polling reflects the draining state). The runner checks
+    the flag between candidates, lets the in-flight candidate finish, and
+    finalizes the job as ``cancelled`` — already-committed candidates remain and
+    the division slot frees on that finalize. No candidate is hard-killed.
+
+    Contract: 404 if unknown; idempotent while non-terminal (queued / running /
+    cancelling all return 200 with the live state); an already ``cancelled`` job
+    is a 200 no-op; ``completed``/``failed`` jobs return 409.
+    """
+    job = db.query(EvaluationJob).filter(EvaluationJob.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Evaluation job not found")
+
+    status_value = job.status.value if hasattr(job.status, "value") else job.status
+
+    # Already cancelled — idempotent no-op (the desired end state was reached).
+    if status_value == EvaluationJobStatus.CANCELLED.value:
+        return {"success": True, "data": _serialize_job(job), "error": None}
+
+    # A finished run cannot be cancelled.
+    if status_value in (
+        EvaluationJobStatus.COMPLETED.value,
+        EvaluationJobStatus.FAILED.value,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Evaluation job has already finished and cannot be cancelled.",
+        )
+
+    # Non-terminal (queued / running / cancelling): request the cancel. A
+    # running job flips to cancelling; a queued one stays queued until the
+    # runner starts and observes the flag.
+    job.cancel_requested = True
+    if job.status == EvaluationJobStatus.RUNNING:
+        job.status = EvaluationJobStatus.CANCELLING
+    db.commit()
+    db.refresh(job)
+    new_status = job.status.value if hasattr(job.status, "value") else job.status
+    logger.info(
+        "Evaluation job %d cancel requested (status %s -> %s)",
+        job_id,
+        status_value,
+        new_status,
+    )
+    return {"success": True, "data": _serialize_job(job), "error": None}
 
 
 def _phase_warning(db: Session) -> str | None:

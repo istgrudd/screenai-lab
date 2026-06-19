@@ -18,6 +18,7 @@ import EvaluationActionPanel from "@/components/recruiter/EvaluationActionPanel"
 import EvaluationProgressPanel from "@/components/recruiter/EvaluationProgressPanel";
 import { Card, CardContent } from "@/components/ui/card";
 import {
+  cancelEvaluationJob,
   evaluateBatch,
   getActiveEvaluationJob,
   getActivePeriod,
@@ -56,8 +57,12 @@ const EVALUATION_QUEUE_GROUPS = [
 // Phase 2: poll the evaluation job every ~3s while it is non-terminal.
 const JOB_POLL_INTERVAL_MS = 3000;
 
+// queued / running / cancelling all hold the division slot and keep polling;
+// completed / failed / cancelled are terminal.
+const TERMINAL_JOB_STATUSES = ["completed", "failed", "cancelled"];
+
 function isNonTerminal(job) {
-  return Boolean(job && (job.status === "queued" || job.status === "running"));
+  return Boolean(job && !TERMINAL_JOB_STATUSES.includes(job.status));
 }
 
 export default function RecruiterEvaluationPage() {
@@ -71,6 +76,7 @@ export default function RecruiterEvaluationPage() {
   const [lastSkippedCount, setLastSkippedCount] = useState(0);
   const [lastError, setLastError] = useState(null);
   const [job, setJob] = useState(null);
+  const [cancelling, setCancelling] = useState(false);
   const [reEvaluateOpen, setReEvaluateOpen] = useState(false);
 
   // Interval id for the active-job poller. A ref (not state) so starting /
@@ -131,6 +137,14 @@ export default function RecruiterEvaluationPage() {
       }
       loadApplications();
       loadActivePeriod();
+    } else if (finished.status === "cancelled") {
+      const ok = finished.succeeded ?? 0;
+      toast.info(
+        `Evaluation cancelled. ${ok} candidate(s) were evaluated before stopping; the rest were skipped.`
+      );
+      // Some candidates were committed before the stop — refresh the queue.
+      loadApplications();
+      loadActivePeriod();
     } else if (finished.status === "failed") {
       toast.error(
         finished.note || "Evaluation job failed. Controls are available again."
@@ -142,13 +156,40 @@ export default function RecruiterEvaluationPage() {
     try {
       const updated = await getEvaluationJob(jobId);
       setJob(updated);
-      if (updated.status === "completed" || updated.status === "failed") {
+      if (TERMINAL_JOB_STATUSES.includes(updated.status)) {
         stopPolling();
+        setCancelling(false);
         handleTerminalJob(updated);
       }
     } catch {
       // Job vanished or transient error — stop polling rather than spin.
       stopPolling();
+    }
+  };
+
+  const handleCancelJob = async () => {
+    if (!job || !isNonTerminal(job) || cancelling) return;
+    setCancelling(true);
+    try {
+      const updated = await cancelEvaluationJob(job.id);
+      setJob(updated);
+      if (TERMINAL_JOB_STATUSES.includes(updated.status)) {
+        // Under fast/in-process runs the job may already be terminal.
+        stopPolling();
+        setCancelling(false);
+        handleTerminalJob(updated);
+      } else {
+        toast.info("Cancellation requested. Finishing the current candidate…");
+        // Keep polling so the card resolves to the cancelled state.
+        startPolling(job.id);
+      }
+    } catch (error) {
+      setCancelling(false);
+      if (error?.status === 409) {
+        toast.warning("This evaluation has already finished and cannot be cancelled.");
+      } else {
+        toast.error(error.message || "Failed to cancel evaluation");
+      }
     }
   };
 
@@ -183,6 +224,7 @@ export default function RecruiterEvaluationPage() {
     // Defer state updates out of the effect body (cascading-render lint rule).
     Promise.resolve().then(() => {
       setJob(null);
+      setCancelling(false);
       setLastError(null);
       loadApplications();
       resumeActiveJob(selectedDivision);
@@ -243,6 +285,7 @@ export default function RecruiterEvaluationPage() {
 
     setTriggering(true);
     setLastError(null);
+    setCancelling(false);
     try {
       const res = await evaluateBatch(selectedDivision, { force });
       const queued = res.evaluated_count ?? res.total ?? 0;
@@ -327,7 +370,11 @@ export default function RecruiterEvaluationPage() {
         description="Run AI-anonymized evaluation and validate AI results per division. Personal identifiers are excluded from AI evaluation input, while recruiter-facing candidate data stays visible. Evaluation runs as a background job — you can keep working and a page refresh resumes live progress."
       />
 
-      <EvaluationProgressPanel job={job} />
+      <EvaluationProgressPanel
+        job={job}
+        onCancel={handleCancelJob}
+        cancelling={cancelling}
+      />
 
       {phase === "EVALUATION" &&
         (pendingReviewSummary.documentReview > 0 ||

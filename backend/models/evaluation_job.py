@@ -41,24 +41,40 @@ def _utcnow() -> datetime:
 class EvaluationJobStatus(str, enum.Enum):
     """Lifecycle states for an evaluation background job.
 
-    queued:    row created, background task not yet started
-    running:   background task is processing candidates
-    completed: run finished (even if some individual candidates errored)
-    failed:    the whole run threw, or it was interrupted by a restart
+    queued:     row created, background task not yet started
+    running:    background task is processing candidates
+    cancelling: a cancel was requested while running; the runner is draining
+                in-flight candidates and scheduling no new ones (W2)
+    completed:  run finished (even if some individual candidates errored)
+    failed:     the whole run threw, or it was interrupted by a restart
+    cancelled:  the run was stopped early by a recruiter cancel request (W2);
+                already-committed candidates remain, the rest were skipped
     """
 
     QUEUED = "queued"
     RUNNING = "running"
+    CANCELLING = "cancelling"
     COMPLETED = "completed"
     FAILED = "failed"
+    CANCELLED = "cancelled"
 
 
 # Non-terminal states. A job in one of these holds the division's slot in the
-# partial unique index (``WHERE status IN ('queued','running')``). Shared here
-# so the runner, the polling endpoints, and startup recovery use one source.
+# partial unique index (``WHERE status IN ('queued','running','cancelling')``).
+# Shared here so the runner, the polling endpoints, and startup recovery use one
+# source. ``cancelling`` is non-terminal: the job is still draining and must keep
+# its division slot until it reaches the terminal ``cancelled`` state (W2).
 NON_TERMINAL_JOB_STATUSES = (
     EvaluationJobStatus.QUEUED,
     EvaluationJobStatus.RUNNING,
+    EvaluationJobStatus.CANCELLING,
+)
+
+# Terminal states — a job here has released its division slot.
+TERMINAL_JOB_STATUSES = (
+    EvaluationJobStatus.COMPLETED,
+    EvaluationJobStatus.FAILED,
+    EvaluationJobStatus.CANCELLED,
 )
 
 
@@ -100,6 +116,10 @@ class EvaluationJob(Base):
         default=EvaluationJobStatus.QUEUED,
     )
     force = Column(Boolean, nullable=False, default=False)
+    # W2 cooperative cancellation: the cancel endpoint sets this true; the
+    # runner reads it between candidates and stops scheduling new ones, then
+    # finalizes the job as ``cancelled``. In-flight candidates are never killed.
+    cancel_requested = Column(Boolean, nullable=False, default=False)
     total = Column(Integer, nullable=False, default=0)
     processed = Column(Integer, nullable=False, default=0)
     succeeded = Column(Integer, nullable=False, default=0)

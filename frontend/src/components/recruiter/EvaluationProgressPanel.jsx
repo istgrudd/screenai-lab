@@ -1,16 +1,21 @@
-import { AlertTriangle, CheckCircle2, Loader2, XCircle } from "lucide-react";
+import { AlertTriangle, Ban, CheckCircle2, Loader2, XCircle } from "lucide-react";
 
+import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 
 /**
- * Non-blocking evaluation progress panel (Phase 2).
+ * Non-blocking evaluation progress panel (Phase 2 + W2 cancellation).
  *
  * Replaces the old full-screen blocking overlay + fake steps. Bound to a real
  * evaluation job's counters: shows processed/total, succeeded/failed, and the
  * errors collected so far. Renders inline in the page flow so recruiters can
  * keep working while a job runs; a page refresh re-discovers the active job.
+ *
+ * W2: while the job is active (queued/running/cancelling) a Cancel control is
+ * shown. Clicking it calls ``onCancel``; the card then resolves to a
+ * "cancelled" state once the runner finishes draining.
  */
-export default function EvaluationProgressPanel({ job }) {
+export default function EvaluationProgressPanel({ job, onCancel, cancelling = false }) {
   if (!job) return null;
 
   const total = job.total ?? 0;
@@ -22,7 +27,12 @@ export default function EvaluationProgressPanel({ job }) {
 
   const isCompleted = status === "completed";
   const isFailed = status === "failed";
-  const isTerminal = isCompleted || isFailed;
+  const isCancelled = status === "cancelled";
+  const isCancelling = status === "cancelling";
+  const isTerminal = isCompleted || isFailed || isCancelled;
+  // A cancel has been requested (button clicked or the server flipped the job
+  // to cancelling) but the job is not yet terminal.
+  const cancelPending = !isTerminal && (cancelling || isCancelling || Boolean(job.cancel_requested));
   const pct =
     total > 0
       ? Math.min(100, Math.round((processed / total) * 100))
@@ -32,23 +42,33 @@ export default function EvaluationProgressPanel({ job }) {
 
   const title = isFailed
     ? "Evaluasi gagal"
-    : isCompleted
-      ? "Evaluasi selesai"
-      : status === "queued"
-        ? "Evaluasi dalam antrean"
-        : "Evaluasi sedang berjalan";
+    : isCancelled
+      ? "Evaluasi dibatalkan"
+      : isCompleted
+        ? "Evaluasi selesai"
+        : isCancelling
+          ? "Membatalkan evaluasi…"
+          : status === "queued"
+            ? "Evaluasi dalam antrean"
+            : "Evaluasi sedang berjalan";
 
   const subtitle = isFailed
     ? job.note || "Job evaluasi gagal diselesaikan. Silakan coba lagi."
-    : isCompleted
-      ? "Hasil sudah tersimpan. Tabel kandidat telah diperbarui."
-      : "Anda tetap bisa bekerja di halaman lain; progres diperbarui otomatis.";
+    : isCancelled
+      ? "Evaluasi dihentikan. Kandidat yang sudah dinilai tetap tersimpan."
+      : isCompleted
+        ? "Hasil sudah tersimpan. Tabel kandidat telah diperbarui."
+        : isCancelling
+          ? "Permintaan pembatalan diterima. Menyelesaikan kandidat yang sedang berjalan…"
+          : "Anda tetap bisa bekerja di halaman lain; progres diperbarui otomatis.";
 
   const barColor = isFailed
     ? "bg-destructive"
-    : isCompleted
-      ? "bg-success"
-      : "bg-primary";
+    : isCancelled || isCancelling
+      ? "bg-warning"
+      : isCompleted
+        ? "bg-success"
+        : "bg-primary";
 
   return (
     <Card className="brand-card">
@@ -58,13 +78,17 @@ export default function EvaluationProgressPanel({ job }) {
             className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl ${
               isFailed
                 ? "bg-destructive/10 text-destructive"
-                : isCompleted
-                  ? "bg-success/10 text-success"
-                  : "bg-primary/10 text-primary"
+                : isCancelled
+                  ? "bg-warning/10 text-warning"
+                  : isCompleted
+                    ? "bg-success/10 text-success"
+                    : "bg-primary/10 text-primary"
             }`}
           >
             {isFailed ? (
               <XCircle className="h-5 w-5" />
+            ) : isCancelled ? (
+              <Ban className="h-5 w-5" />
             ) : isCompleted ? (
               <CheckCircle2 className="h-5 w-5" />
             ) : (
@@ -84,6 +108,24 @@ export default function EvaluationProgressPanel({ job }) {
               {subtitle}
             </p>
           </div>
+          {!isTerminal && onCancel && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="shrink-0"
+              onClick={onCancel}
+              disabled={cancelPending}
+            >
+              {cancelPending ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Membatalkan…
+                </>
+              ) : (
+                "Batalkan"
+              )}
+            </Button>
+          )}
         </div>
 
         <div className="h-2 w-full overflow-hidden rounded-full bg-surface-container-highest">
