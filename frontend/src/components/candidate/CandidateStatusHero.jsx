@@ -63,7 +63,7 @@ export default function CandidateStatusHero({
   const copy = candidateStatusCopy(application, documents, announcement);
   const period = periodDeadlineContext(activePeriod);
   const completeness = documentCompleteness(documents);
-  const firstName = user?.full_name?.split(" ")?.[0] || user?.email || "Kandidat";
+  const firstName = user?.full_name?.split(" ")?.[0] || user?.email || "Candidate";
   const buttonLabel = primaryActionLabel || action.label;
 
   return (
@@ -96,7 +96,7 @@ export default function CandidateStatusHero({
             </div>
             <div className="min-w-0">
               <p className="text-sm font-medium text-white/75">
-                Halo, {firstName}
+                Hi, {firstName}
               </p>
               <h2 className="mt-1 font-heading text-2xl font-bold tracking-normal sm:text-3xl">
                 {copy.title}
@@ -116,10 +116,10 @@ export default function CandidateStatusHero({
             </div>
             <div className="rounded-xl bg-white/10 px-4 py-3">
               <p className="text-xs font-semibold uppercase tracking-[0.08em] text-white/65">
-                Dokumen
+                Documents
               </p>
               <p className="mt-1 text-sm font-semibold">
-                {completeness.completed}/{completeness.total} lengkap
+                {completeness.completed}/{completeness.total} complete
               </p>
             </div>
             <div className="rounded-xl bg-white/10 px-4 py-3">
@@ -152,7 +152,7 @@ export default function CandidateStatusHero({
       {application?.division && (
         <div className="mt-5 flex flex-wrap items-center gap-2 text-xs text-white/75">
           <CheckCircle2 className="h-4 w-4" />
-          <span>Divisi pilihan: {formatDivision(application.division)}</span>
+          <span>Chosen division: {formatDivision(application.division)}</span>
         </div>
       )}
     </section>

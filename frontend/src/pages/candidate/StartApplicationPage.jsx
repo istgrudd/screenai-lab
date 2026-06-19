@@ -66,11 +66,11 @@ export default function StartApplicationPage() {
           setSelectedDivision(app.division || profileData.division || null);
         } catch (error) {
           if (!isNotFoundError(error)) {
-            toast.error(error.message || "Gagal memuat pendaftaran.");
+            toast.error(error.message || "Failed to load your application.");
           }
         }
       } catch (error) {
-        toast.error(error.message || "Gagal memuat profil.");
+        toast.error(error.message || "Failed to load your profile.");
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -94,24 +94,24 @@ export default function StartApplicationPage() {
 
   const handleStart = async () => {
     if (!selectedDivision) {
-      toast.error("Pilih divisi terlebih dahulu.");
+      toast.error("Choose a division first.");
       return;
     }
 
     setSaving(true);
     try {
       await createApplication(selectedDivision);
-      toast.success("Pendaftaran dimulai. Lanjutkan dengan unggah dokumen.");
+      toast.success("Application started. Continue by uploading documents.");
       navigate("/documents");
     } catch (error) {
-      toast.error(error.message || "Gagal memulai pendaftaran.");
+      toast.error(error.message || "Failed to start the application.");
     } finally {
       setSaving(false);
     }
   };
 
   if (loading) {
-    return <LoadingState label="Memuat halaman pendaftaran..." />;
+    return <LoadingState label="Loading application page..." />;
   }
 
   if (!profile) return null;
@@ -125,26 +125,26 @@ export default function StartApplicationPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        eyebrow="Pendaftaran"
-        title="Mulai Pendaftaran"
-        description="Pilih satu divisi MBC Laboratory. Divisi akan terkunci setelah draft pendaftaran dibuat."
+        eyebrow="Application"
+        title="Start Application"
+        description="Choose one MBC Laboratory division. The division locks once your application draft is created."
       />
 
       <CandidateApplicationStepTrack
         currentStep={currentStep}
         application={application}
         profile={profile}
-        title="Alur Pendaftaran"
+        title="Application Flow"
       />
 
       <Card className="brand-card">
         <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.08em] text-primary">
-              Konteks Periode
+              Period Context
             </p>
             <h2 className="mt-1 font-heading text-xl font-bold tracking-normal">
-              {activePeriod?.name || "Tidak ada periode aktif"}
+              {activePeriod?.name || "No active period"}
             </h2>
             <p className="mt-2 text-sm leading-6 text-muted-foreground">
               {periodContext.deadlineText}
@@ -154,10 +154,10 @@ export default function StartApplicationPage() {
             {activePeriod?.current_phase ? (
               <PhaseBadge phase={activePeriod.current_phase} size="md" />
             ) : (
-              <PhaseBadge label="Tidak Aktif" tone="neutral" size="md" />
+              <PhaseBadge label="Inactive" tone="neutral" size="md" />
             )}
             {!submissionOpen && !application && (
-              <StatusBadge label="Belum bisa daftar" tone="warning" size="md" />
+              <StatusBadge label="Cannot apply yet" tone="warning" size="md" />
             )}
           </div>
         </CardContent>
@@ -166,13 +166,13 @@ export default function StartApplicationPage() {
       <Card className="brand-card">
         <CardHeader className="pb-3">
           <CardTitle className="flex items-center gap-2 font-heading text-xl tracking-normal">
-            Pilih Divisi
+            Choose Division
             {divisionLocked && <Lock className="h-4 w-4 text-muted-foreground" />}
           </CardTitle>
           <p className="text-sm leading-6 text-muted-foreground">
             {divisionLocked
-              ? "Divisi sudah terkunci agar dokumen dan pendaftaran tetap konsisten."
-              : "Pilih divisi yang paling sesuai dengan minat riset dan kemampuanmu."}
+              ? "The division is locked so your documents and application stay consistent."
+              : "Choose the division that best matches your research interests and skills."}
           </p>
         </CardHeader>
         <CardContent className="space-y-6">
@@ -193,14 +193,14 @@ export default function StartApplicationPage() {
               {application ? (
                 <span className="inline-flex flex-wrap items-center gap-2 text-foreground">
                   <CheckCircle2 className="h-4 w-4 text-success" />
-                  Divisi saat ini:{" "}
+                  Current division:{" "}
                   <span className="font-medium">
                     {formatDivision(application.division)}
                   </span>
                   <StatusBadge status={application.status} />
                 </span>
               ) : (
-                "Draft akan dibuat setelah kamu menekan tombol mulai."
+                "A draft is created after you press the start button."
               )}
             </div>
 
@@ -214,19 +214,19 @@ export default function StartApplicationPage() {
                 {saving ? (
                   <>
                     <Loader2 className="h-4 w-4 animate-spin" />
-                    Memulai...
+                    Starting...
                   </>
                 ) : (
                   <>
                     <ClipboardList className="h-4 w-4" />
-                    Mulai Pendaftaran
+                    Start Application
                   </>
                 )}
               </Button>
             ) : submittedOrLater ? (
               <Button asChild className="gap-2">
                 <Link to="/application/status">
-                  Lihat Status Pendaftaran
+                  View Application Status
                   <ArrowRight className="h-4 w-4" />
                 </Link>
               </Button>
@@ -234,13 +234,13 @@ export default function StartApplicationPage() {
               <div className="flex flex-col gap-2 sm:flex-row">
                 <Button asChild variant="outline" className="gap-2">
                   <Link to="/application">
-                    Ringkasan
+                    Overview
                     <ArrowRight className="h-4 w-4" />
                   </Link>
                 </Button>
                 <Button asChild className="gap-2">
                   <Link to="/documents">
-                    Lanjut Unggah Dokumen
+                    Continue Uploading Documents
                     <ArrowRight className="h-4 w-4" />
                   </Link>
                 </Button>

@@ -49,11 +49,11 @@ export default function ProfilePage() {
           if (!cancelled) setApplication(app);
         } catch (error) {
           if (!isNotFoundError(error)) {
-            toast.error(error.message || "Gagal memuat status pendaftaran.");
+            toast.error(error.message || "Failed to load application status.");
           }
         }
       } catch (error) {
-        toast.error(error.message || "Gagal memuat profil.");
+        toast.error(error.message || "Failed to load your profile.");
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -66,7 +66,7 @@ export default function ProfilePage() {
   }, []);
 
   if (loading) {
-    return <LoadingState label="Memuat profil kandidat..." />;
+    return <LoadingState label="Loading candidate profile..." />;
   }
 
   if (!profile) return null;
@@ -76,21 +76,21 @@ export default function ProfilePage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        eyebrow="Akun Kandidat"
-        title="Profil"
-        description="Data profil digunakan untuk pendaftaran, dokumen, dan komunikasi seleksi MBC Laboratory."
+        eyebrow="Candidate Account"
+        title="Profile"
+        description="Your profile is used for the application, documents, and MBC Laboratory selection communication."
         status={
           appStatus ? (
             <StatusBadge status={appStatus} size="md" />
           ) : (
-            <StatusBadge label="Belum Ada Pendaftaran" tone="brand" size="md" />
+            <StatusBadge label="No Application Yet" tone="brand" size="md" />
           )
         }
         action={
           <Button asChild className="gap-2">
             <Link to="/profile/edit">
               <Pencil className="h-4 w-4" />
-              Edit Profil
+              Edit Profile
             </Link>
           </Button>
         }
@@ -101,26 +101,26 @@ export default function ProfilePage() {
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2 font-heading text-xl tracking-normal">
               <UserCircle2 className="h-5 w-5 text-primary" />
-              Identitas Kandidat
+              Candidate Identity
             </CardTitle>
           </CardHeader>
           <CardContent className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            <Field label="Nama lengkap" value={profile.full_name} />
+            <Field label="Full name" value={profile.full_name} />
             <Field label="Email" value={profile.email} />
-            <Field label="Nomor WhatsApp" value={profile.whatsapp} />
+            <Field label="WhatsApp number" value={profile.whatsapp} />
             <Field label="NIM" value={profile.nim} mono />
-            <Field label="Fakultas" value={profile.faculty} />
-            <Field label="Jurusan" value={profile.major} />
-            <Field label="Angkatan" value={profile.year} />
-            <Field label="IPK" value={formatIpk(profile.ipk)} />
+            <Field label="Faculty" value={profile.faculty} />
+            <Field label="Major" value={profile.major} />
+            <Field label="Year" value={profile.year} />
+            <Field label="GPA" value={formatIpk(profile.ipk)} />
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-                Akun
+                Account
               </p>
               <div className="mt-2 flex flex-wrap items-center gap-2">
                 <StatusBadge label={profile.role || "Candidate"} tone="neutral" />
                 <StatusBadge
-                  label={profile.is_active ? "Aktif" : "Tidak Aktif"}
+                  label={profile.is_active ? "Active" : "Inactive"}
                   tone={profile.is_active ? "success" : "destructive"}
                 />
               </div>
@@ -132,25 +132,25 @@ export default function ProfilePage() {
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2 font-heading text-xl tracking-normal">
               <CheckCircle2 className="h-5 w-5 text-primary" />
-              Pendaftaran Saat Ini
+              Current Application
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-5">
             <div className="grid grid-cols-1 gap-4 text-sm">
               <Field
-                label="Divisi"
+                label="Division"
                 value={formatDivision(application?.division || profile.division)}
               />
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-                  Status aplikasi
+                  Application status
                 </p>
                 <div className="mt-1">
                   {appStatus ? (
                     <StatusBadge status={appStatus} />
                   ) : (
                     <span className="text-sm text-muted-foreground">
-                      Belum ada pendaftaran
+                      No application yet
                     </span>
                   )}
                 </div>
@@ -167,7 +167,7 @@ export default function ProfilePage() {
             <div className="flex justify-end border-t border-border/60 pt-4">
               <Button asChild variant="outline" className="gap-2">
                 <Link to="/application">
-                  Buka Ringkasan Pendaftaran
+                  Open Application Overview
                   <ArrowRight className="h-4 w-4" />
                 </Link>
               </Button>

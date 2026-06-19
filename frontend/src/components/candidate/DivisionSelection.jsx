@@ -10,28 +10,28 @@ const DIVISIONS = [
   {
     id: "big_data",
     name: "Big Data",
-    blurb: "Riset data, analitik, pipeline, dan rekayasa data skala besar.",
+    blurb: "Data research, analytics, pipelines, and large-scale data engineering.",
     icon: BarChart3,
     accent: "from-primary/10 to-info/5",
   },
   {
     id: "cyber_security",
     name: "Cyber Security",
-    blurb: "Keamanan ofensif dan defensif, CTF, audit, dan riset proteksi sistem.",
+    blurb: "Offensive and defensive security, CTF, audits, and system protection research.",
     icon: ShieldCheck,
     accent: "from-success/10 to-primary/5",
   },
   {
     id: "game_tech",
     name: "Game Technology",
-    blurb: "Game engine, pengalaman interaktif, grafis, dan teknologi permainan.",
+    blurb: "Game engines, interactive experiences, graphics, and game technology.",
     icon: Swords,
     accent: "from-destructive/10 to-primary/5",
   },
   {
     id: "gis",
     name: "Geographic Information Systems",
-    blurb: "Data spasial, pemetaan, visualisasi wilayah, dan analisis geospasial.",
+    blurb: "Spatial data, mapping, regional visualization, and geospatial analysis.",
     icon: MapIcon,
     accent: "from-warning/10 to-primary/5",
   },
@@ -63,7 +63,7 @@ function DivisionCard({ division, selected, disabled, onSelect }) {
             <p className="font-semibold text-foreground">{division.name}</p>
             {selected && (
               <Badge variant="default" className="text-[10px]">
-                Dipilih
+                Selected
               </Badge>
             )}
           </div>

@@ -20,32 +20,32 @@ import { cx } from "@/lib/candidateUx";
 const APPLICATION_STEPS = [
   {
     key: "profile",
-    label: "Profil",
-    description: "Data kandidat lengkap",
+    label: "Profile",
+    description: "Complete candidate details",
     icon: UserCheck,
   },
   {
     key: "division",
-    label: "Pilih Divisi",
-    description: "Satu divisi tujuan",
+    label: "Choose Division",
+    description: "One target division",
     icon: ShieldCheck,
   },
   {
     key: "documents",
-    label: "Dokumen",
-    description: "Dokumen wajib",
+    label: "Documents",
+    description: "Required documents",
     icon: FileText,
   },
   {
     key: "review",
-    label: "Tinjau",
-    description: "Konfirmasi final",
+    label: "Review",
+    description: "Final confirmation",
     icon: ClipboardCheck,
   },
   {
     key: "status",
     label: "Status",
-    description: "Pantau seleksi",
+    description: "Track selection",
     icon: Send,
   },
 ];
@@ -53,26 +53,26 @@ const APPLICATION_STEPS = [
 const STATUS_STEPS = [
   {
     key: "registration",
-    label: "Pendaftaran",
-    description: "Data dan dokumen diterima",
+    label: "Submission",
+    description: "Details and documents received",
     icon: Send,
   },
   {
     key: "document_review",
-    label: "Review Dokumen",
-    description: "Verifikasi recruiter",
+    label: "Document Review",
+    description: "Recruiter verification",
     icon: FileSearch,
   },
   {
     key: "evaluation",
-    label: "Evaluasi",
-    description: "Penilaian seleksi",
+    label: "Evaluation",
+    description: "Selection scoring",
     icon: Sparkles,
   },
   {
     key: "announcement",
-    label: "Pengumuman",
-    description: "Hasil akhir",
+    label: "Announcement",
+    description: "Final result",
     icon: Megaphone,
   },
 ];
