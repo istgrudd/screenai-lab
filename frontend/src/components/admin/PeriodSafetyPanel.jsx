@@ -10,7 +10,7 @@ function formatDate(value) {
   if (!value) return "-";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "-";
-  return date.toLocaleString("id-ID", {
+  return date.toLocaleString("en-GB", {
     day: "2-digit",
     month: "short",
     year: "numeric",
@@ -46,21 +46,21 @@ export default function PeriodSafetyPanel({
   const timelineSteps = [
     {
       key: "SUBMISSION",
-      label: "Pendaftaran",
+      label: "Submission",
       description: `${formatDate(activePeriod?.start_date)} - ${formatDate(
         activePeriod?.submission_end_date
       )}`,
     },
     {
       key: "EVALUATION",
-      label: "Evaluasi",
+      label: "Evaluation",
       description: `${formatDate(activePeriod?.submission_end_date)} - ${formatDate(
         activePeriod?.evaluation_end_date
       )}`,
     },
     {
       key: "ANNOUNCEMENT",
-      label: "Pengumuman",
+      label: "Announcement",
       description: `${formatDate(activePeriod?.evaluation_end_date)} - ${formatDate(
         activePeriod?.end_date
       )}`,
@@ -75,24 +75,24 @@ export default function PeriodSafetyPanel({
           Period Safety
         </CardTitle>
         <p className="text-sm leading-6 text-muted-foreground">
-          Ringkasan ini menjelaskan risiko create/update/close tanpa membuat
-          aturan baru di luar backend.
+          A read-only summary of the risks behind create/update/close actions; it
+          adds no rules beyond the backend.
         </p>
       </CardHeader>
       <CardContent className="space-y-5">
-        <div className="grid gap-3 md:grid-cols-3">
+        <div className="grid gap-3 sm:grid-cols-3">
           <div className="rounded-xl bg-surface-container-low px-4 py-3">
             <p className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
               Active Period
             </p>
-            <p className="mt-1 font-medium">
-              {loading ? "Memuat..." : activePeriod?.name || "Tidak ada"}
+            <p className="mt-1 truncate font-medium" title={activePeriod?.name}>
+              {loading ? "Loading..." : activePeriod?.name || "None"}
             </p>
             <div className="mt-2">
               {phase ? (
                 <PhaseBadge phase={phase} />
               ) : (
-                <StatusBadge label="No active period" tone="warning" />
+                <StatusBadge label="Inactive" tone="warning" />
               )}
             </div>
           </div>
@@ -100,13 +100,19 @@ export default function PeriodSafetyPanel({
             <p className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
               Threshold N
             </p>
-            <p className="mt-1 font-heading text-xl font-bold">
-              {activePeriod?.threshold_n ?? "Belum diatur"}
-            </p>
+            {activePeriod?.threshold_n != null ? (
+              <p className="mt-1 font-heading text-xl font-bold tabular-nums">
+                {activePeriod.threshold_n}
+              </p>
+            ) : (
+              <p className="mt-1 text-sm font-medium text-muted-foreground">
+                Not set
+              </p>
+            )}
             {thresholdMissing && (
               <p className="mt-1 text-xs leading-5 text-warning">
-                Ranking tetap tampil, tetapi batas kelulusan otomatis tidak
-                dijelaskan oleh threshold.
+                Ranking still shows, but no threshold defines the automatic pass
+                cutoff.
               </p>
             )}
           </div>
@@ -114,11 +120,11 @@ export default function PeriodSafetyPanel({
             <p className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
               Submitted
             </p>
-            <p className="mt-1 font-heading text-xl font-bold">
+            <p className="mt-1 font-heading text-xl font-bold tabular-nums">
               {activeStats?.total_submitted ?? activePeriod?.application_count ?? applications.length}
             </p>
             <p className="mt-1 text-xs leading-5 text-muted-foreground">
-              {evaluated} evaluated, {pendingDocuments} masih review/revisi.
+              {evaluated} evaluated, {pendingDocuments} still in review/correction.
             </p>
           </div>
         </div>
@@ -134,8 +140,8 @@ export default function PeriodSafetyPanel({
           <div className="flex items-start gap-3 rounded-xl bg-warning/10 px-4 py-3">
             <CalendarClock className="mt-0.5 h-5 w-5 shrink-0 text-warning" />
             <p className="text-sm leading-6 text-muted-foreground">
-              Tidak ada periode aktif. Create period akan membuka workflow baru;
-              pastikan jadwal fase dan threshold sudah dicek sebelum simpan.
+              No active period. Creating a period opens a new workflow; confirm
+              the phase schedule and threshold before saving.
             </p>
           </div>
         )}
@@ -143,22 +149,22 @@ export default function PeriodSafetyPanel({
         <div className="grid gap-3 md:grid-cols-2">
           <div className="flex items-start gap-3 rounded-xl bg-warning/10 px-4 py-3">
             <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-warning" />
-            <div>
+            <div className="min-w-0">
               <p className="font-medium">Active period conflict</p>
               <p className="mt-1 text-sm leading-6 text-muted-foreground">
                 {activePeriod
-                  ? `Periode "${activePeriod.name}" masih aktif. UI menjelaskan alasan create dinonaktifkan, sementara backend tetap menjadi sumber aturan final.`
-                  : "Tidak ada conflict aktif saat ini."}
+                  ? `Period "${activePeriod.name}" is still active. The UI explains why creating is disabled, while the backend stays the source of truth.`
+                  : "No active conflict right now."}
               </p>
             </div>
           </div>
           <div className="flex items-start gap-3 rounded-xl bg-destructive/10 px-4 py-3">
             <LockKeyhole className="mt-0.5 h-5 w-5 shrink-0 text-destructive" />
-            <div>
-              <p className="font-medium">Tutup periode</p>
+            <div className="min-w-0">
+              <p className="font-medium">Close period</p>
               <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                Tindakan close bersifat destructive dan harus dikonfirmasi.
-                Kandidat tidak dapat submit sampai periode baru tersedia.
+                Closing is destructive and must be confirmed. Candidates cannot
+                submit until a new period is available.
               </p>
             </div>
           </div>
