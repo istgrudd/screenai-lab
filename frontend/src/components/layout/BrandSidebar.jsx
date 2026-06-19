@@ -10,7 +10,6 @@ import {
   LayoutDashboard,
   LogOut,
   Mail,
-  Settings,
   ShieldCheck,
   Sparkles,
   UserCog,
@@ -132,7 +131,6 @@ const ADMIN_GROUPS = [
       { to: "/admin/periods", label: "Periods", icon: CalendarClock },
       { to: "/admin/audit-logs", label: "Audit Logs", icon: ShieldCheck },
       { to: "/admin/email-templates", label: "Emails", icon: Mail },
-      { to: "/admin/settings", label: "Settings", icon: Settings },
     ],
   },
   {

@@ -6,7 +6,6 @@ import {
   FileCheck2,
   Mail,
   Megaphone,
-  Settings,
   ShieldCheck,
   Sparkles,
   UserCog,
@@ -59,14 +58,6 @@ const ADMIN_ACTIONS = [
     actionLabel: "Open Emails",
     icon: Mail,
     tone: "info",
-  },
-  {
-    title: "Settings",
-    description: "Placeholder for future backend-supported system settings.",
-    to: "/admin/settings",
-    actionLabel: "View Placeholder",
-    icon: Settings,
-    tone: "neutral",
   },
 ];
 
