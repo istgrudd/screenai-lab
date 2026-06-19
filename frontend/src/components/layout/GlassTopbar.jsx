@@ -49,15 +49,15 @@ export default function GlassTopbar() {
     period.status === "ready" && period.data
       ? period.data.name
       : period.status === "loading"
-        ? "Memuat periode"
-        : "Tidak ada periode aktif";
+        ? "Loading period"
+        : "No active period";
   const phaseLabel =
     period.status === "ready" && period.data
       ? formatPhase(period.data.current_phase)
       : null;
 
   return (
-    <header className="sticky top-0 z-30 border-b border-border/70 bg-background/75 px-4 py-3 backdrop-blur-xl lg:px-8">
+    <header className="static z-30 border-b border-border/70 bg-background/75 px-4 py-3 backdrop-blur-xl md:sticky md:top-0 lg:px-8">
       <div className="glass-surface mx-auto flex max-w-7xl flex-col gap-3 rounded-2xl border border-white/70 px-4 py-3 shadow-[0px_8px_24px_rgba(30,63,117,0.08)] sm:flex-row sm:items-center sm:justify-between">
         <div className="flex min-w-0 items-center gap-3">
           <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
@@ -69,7 +69,7 @@ export default function GlassTopbar() {
             </p>
             {phaseLabel && (
               <p className="text-xs font-medium text-muted-foreground">
-                Fase saat ini: {phaseLabel}
+                Current phase: {phaseLabel}
               </p>
             )}
           </div>
