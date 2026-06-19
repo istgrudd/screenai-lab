@@ -120,7 +120,12 @@ export function applicationReferenceId(application) {
 }
 
 export function isNotFoundError(error) {
-  return error?.message?.toLowerCase().includes("not found");
+  // Prefer the HTTP status: the backend 404 detail is "No application found
+  // for this user", which does not contain the substring "not found", so a
+  // message-only check silently fails and turns a normal empty state into a
+  // red error toast. Fall back to the message for non-ApiError shapes.
+  if (error?.status === 404) return true;
+  return Boolean(error?.message?.toLowerCase().includes("not found"));
 }
 
 export function isDraftApplication(application) {
