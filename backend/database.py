@@ -22,6 +22,15 @@ if _is_sqlite:
 else:
     # pool_pre_ping avoids stale-connection errors on long-lived Postgres pools.
     engine_kwargs["pool_pre_ping"] = True
+    # Finding 5 (EVALUATION_FREEZE_AUDIT_REPORT): size the pool deliberately
+    # rather than relying on SQLAlchemy's default 5 + 10 overflow = 15-conn
+    # ceiling. A background evaluation job opens up to _effective_concurrency()
+    # short-lived per-candidate sessions, the frontend polls every ~3 s, and
+    # normal recruiter/candidate traffic runs alongside — all of which must not
+    # exhaust the pool. 10 + 20 overflow gives headroom while staying well
+    # under Postgres' default max_connections.
+    engine_kwargs["pool_size"] = 10
+    engine_kwargs["max_overflow"] = 20
 
 engine = create_engine(_database_url, connect_args=connect_args, **engine_kwargs)
 

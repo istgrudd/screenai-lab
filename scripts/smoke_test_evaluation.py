@@ -603,62 +603,62 @@ def main() -> int:
         db.commit()
     db.close()
 
-    # Now evaluate — this calls the LLM so may fail if no API key
+    # Phase 2: evaluation is a background job. The endpoint returns 202 +
+    # job_id; TestClient runs the BackgroundTask to completion before the POST
+    # returns, so by the time we read the job it is already terminal. The
+    # per-candidate detail (ktm/khs/dimension scores) now lives on the result
+    # endpoint rather than an inline response payload.
     r = client.post(
         "/api/recruiter/evaluate/batch",
         headers=rec_auth,
         json={"division": "big_data", "application_ids": [app_id]},
     )
-    # If no DeepSeek API key configured, we expect either 200 (success)
-    # or an error — but NOT 400 (that was the empty-rubric guard)
-    if r.status_code == 200:
-        data = r.json()["data"]
+    failures += _assert(
+        r.status_code == 202, f"eval with dimensions -> 202 (got {r.status_code})"
+    )
+    if r.status_code == 202:
+        body = r.json()
+        job_id = body.get("job_id")
         failures += _assert(
-            data["queued"] >= 1 or len(data.get("errors", [])) >= 1,
-            f"eval returns queued={data.get('queued')} or errors",
+            body.get("evaluated_count") == 1,
+            f"eval queues 1 candidate (got {body.get('evaluated_count')})",
         )
 
-        # Check result structure if any succeeded
-        if data.get("results"):
-            first = data["results"][0]
+        jr = client.get(
+            f"/api/recruiter/evaluate/jobs/{job_id}", headers=rec_auth
+        )
+        job = jr.json().get("data") if jr.status_code == 200 else None
+        failures += _assert(
+            job is not None and job["status"] == "completed",
+            f"eval job reaches completed (got {job and job.get('status')})",
+        )
+        failures += _assert(
+            job is not None and job["succeeded"] == 1,
+            f"eval job succeeded == 1 (got {job and job.get('succeeded')})",
+        )
+
+        # Per-candidate KHS metadata is exposed by the result endpoint.
+        rr = client.get(f"/api/recruiter/results/{app_id}", headers=rec_auth)
+        rd = rr.json().get("data") if rr.status_code == 200 else None
+        failures += _assert(rd is not None, "result endpoint returns detail")
+        if rd:
             failures += _assert(
-                "ktm_valid" in first,
-                "result has ktm_valid field",
-            )
-            failures += _assert(
-                "khs_summary" in first or "khs_warning" in first,
+                "khs_summary" in rd or "khs_warning" in rd,
                 "result has khs_summary or khs_warning",
             )
             failures += _assert(
-                first.get("khs_used_in_ai_scoring") is True,
+                rd.get("khs_used_in_ai_scoring") is True,
                 "academic rubric uses KHS in AI scoring",
             )
             failures += _assert(
-                first.get("khs_source") == "cache",
-                f"academic rubric uses cached KHS source (got {first.get('khs_source')})",
+                rd.get("khs_source") == "cache",
+                f"academic rubric uses cached KHS source (got {rd.get('khs_source')})",
             )
-            failures += _assert(
-                "ktm_warning" in first,
-                "result has ktm_warning field",
-            )
-            failures += _assert(
-                bool(EVAL_PROMPTS and "DATA AKADEMIK TERSTRUKTUR" in EVAL_PROMPTS[-1]),
-                "academic rubric prompt includes structured academic block",
-            )
-        else:
-            # LLM call may have failed — that's ok if errors are reported
-            failures += _assert(
-                len(data.get("errors", [])) >= 1,
-                "eval reports errors when LLM unavailable",
-            )
-        print(f"     -> eval returned {r.status_code} (may depend on LLM availability)")
-    else:
-        # Non-400 error is acceptable (e.g. 422 from LLM unavailable)
         failures += _assert(
-            r.status_code != 400,
-            f"eval with dimensions should not be 400 (got {r.status_code})",
+            bool(EVAL_PROMPTS and "DATA AKADEMIK TERSTRUKTUR" in EVAL_PROMPTS[-1]),
+            "academic rubric prompt includes structured academic block",
         )
-        print(f"     -> eval returned {r.status_code} (LLM likely unavailable, acceptable)")
+        print(f"     -> eval job {job_id} completed")
 
     # =====================================================================
     db = SessionLocal()
@@ -676,8 +676,8 @@ def main() -> int:
         headers=rec_auth,
         json={"division": "big_data", "application_ids": [app_id], "force": False},
     )
-    failures += _assert(r.status_code == 200, "normal re-run request -> 200")
-    if r.status_code == 200:
+    failures += _assert(r.status_code == 202, "normal re-run request -> 202")
+    if r.status_code == 202:
         body = r.json()
         failures += _assert(body["evaluated_count"] == 0, "normal re-run skips screening app")
         failures += _assert(body["skipped_count"] >= 1, "normal re-run reports skipped scored app")
@@ -687,8 +687,8 @@ def main() -> int:
         headers=rec_auth,
         json={"division": "big_data", "application_ids": [app_id], "force": True},
     )
-    failures += _assert(r.status_code == 200, "force re-evaluate request -> 200")
-    if r.status_code == 200:
+    failures += _assert(r.status_code == 202, "force re-evaluate request -> 202")
+    if r.status_code == 202:
         body = r.json()
         failures += _assert(body["evaluated_count"] == 1, "force=true re-evaluates screening app")
 
@@ -716,19 +716,11 @@ def main() -> int:
         headers=rec_auth,
         json={"division": "big_data", "application_ids": [app_id], "force": True},
     )
-    failures += _assert(r.status_code == 200, "non-academic force re-evaluate request -> 200")
-    if r.status_code == 200:
+    failures += _assert(r.status_code == 202, "non-academic force re-evaluate request -> 202")
+    if r.status_code == 202:
         body = r.json()
         failures += _assert(body["evaluated_count"] == 1, "non-academic force re-evaluates screening app")
-        first = (body.get("data", {}).get("results") or [{}])[0]
-        failures += _assert(
-            first.get("khs_used_in_ai_scoring") is False,
-            "non-academic rubric skips KHS in AI scoring",
-        )
-        failures += _assert(
-            first.get("khs_source") == "cache",
-            f"non-academic rubric still reports cached KHS metadata (got {first.get('khs_source')})",
-        )
+        # The KHS-skip metadata is verified via the result endpoint below.
         failures += _assert(
             bool(EVAL_PROMPTS and "DATA AKADEMIK TERSTRUKTUR" not in EVAL_PROMPTS[-1]),
             "non-academic rubric prompt does not include KHS block",

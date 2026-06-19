@@ -433,7 +433,6 @@ For endpoint-level detail see [API_REFERENCE.md](API_REFERENCE.md). For runtime 
 
 - [backend/routers/evaluate_batch.py](../backend/routers/evaluate_batch.py)
 - [backend/services/evaluation_service.py](../backend/services/evaluation_service.py)
-- [backend/routers/evaluation.py](../backend/routers/evaluation.py) — deprecated legacy path.
 
 **Inputs**
 
@@ -479,9 +478,8 @@ For endpoint-level detail see [API_REFERENCE.md](API_REFERENCE.md). For runtime 
 
 **Notable edge cases**
 
-- Per-candidate exceptions are caught and returned in `errors`, so a single failure does not fail the whole batch.
-- A single `db.commit()` occurs after collecting batch outcomes.
-- Legacy `POST /api/evaluate` is rubric-id driven and not the Lab pipeline.
+- Per-candidate exceptions are caught and recorded in the job's `errors`, so a single failure does not fail the whole batch.
+- Phase 2: each candidate commits in its own session; the POST returns 202 + job_id and the pipeline runs as a background task (see the Phase 2 report).
 
 ---
 
@@ -693,12 +691,11 @@ For endpoint-level detail see [API_REFERENCE.md](API_REFERENCE.md). For runtime 
 
 ## 15. Legacy Compatibility Endpoints
 
-**Responsibility.** Keep old Capstone-style upload/evaluate endpoints available temporarily without making them the Lab pipeline.
+**Responsibility.** Keep the old Capstone-style upload endpoint available temporarily without making it the Lab pipeline.
 
 **Key files**
 
 - [backend/routers/upload.py](../backend/routers/upload.py)
-- [backend/routers/evaluation.py](../backend/routers/evaluation.py)
 - [frontend/src/pages/UploadPage.jsx](../frontend/src/pages/UploadPage.jsx)
 
 **Endpoints**
@@ -706,19 +703,17 @@ For endpoint-level detail see [API_REFERENCE.md](API_REFERENCE.md). For runtime 
 | Endpoint | Replacement | Status |
 |---|---|---|
 | `POST /api/upload` | `POST /api/documents/upload/{doc_type}` | Deprecated compatibility only |
-| `POST /api/evaluate` | `POST /api/recruiter/evaluate/batch` | Deprecated compatibility only |
+| ~~`POST /api/evaluate`~~ | `POST /api/recruiter/evaluate/batch` | **Removed in Phase 2** |
 
 **Business rules**
 
-- Both endpoints emit `Deprecation: true` and `X-Deprecated-Message` headers on handled responses.
-- Both endpoints write warning logs on use.
+- `POST /api/upload` emits `Deprecation: true` and `X-Deprecated-Message` headers on handled responses and writes a warning log on use.
 - Legacy upload remains candidate-only.
-- Legacy evaluate remains recruiter+.
+- The legacy `POST /api/evaluate` router (`backend/routers/evaluation.py`) was deleted in Phase 2 along with its `main.py` registration and the `runEvaluation` frontend caller.
 
 **Notable edge cases**
 
-- Do not use these endpoints for new Lab UI/API work.
-- Removal should be a separate backend task because it requires checking frontend legacy page, smoke scripts, and router includes.
+- Do not use the legacy upload endpoint for new Lab UI/API work.
 
 ---
 

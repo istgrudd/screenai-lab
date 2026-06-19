@@ -4,6 +4,10 @@ Initializes the app, registers middleware & routers, and creates
 database tables on startup.
 """
 
+import json
+import logging
+import os
+import threading
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -17,7 +21,6 @@ from backend.middleware.rate_limit import limiter
 from backend.routers.auth import router as auth_router
 from backend.routers.upload import router as upload_router
 from backend.routers.rubrics import router as rubrics_router
-from backend.routers.evaluation import router as evaluation_router
 from backend.routers.evaluate_batch import router as evaluate_batch_router
 from backend.routers.announcements import router as announcements_router
 from backend.routers.candidates import (
@@ -34,6 +37,71 @@ from backend.routers.periods import router as periods_router
 from backend.routers.analytics import router as analytics_router
 from backend.routers.audit_logs import router as audit_logs_router
 from backend.routers.email_notifications import router as email_notifications_router
+
+# Backend modules log through module-level loggers; without a root handler
+# Python only surfaces WARNING and above. Configure a basic INFO handler so
+# the evaluation pipeline's operational logs (batch progress, per-candidate
+# durations, NER warmup) reach the container logs. uvicorn's own loggers
+# carry their own handlers and are unaffected; basicConfig is a no-op if the
+# root logger is already configured by the embedding process.
+#
+# W5: an optional one-line-JSON format (LOG_FORMAT=json) for staging/prod log
+# aggregation. Default ("text") keeps the human-readable format unchanged.
+
+
+class _JsonLogFormatter(logging.Formatter):
+    """Minimal structured formatter — one JSON object per log line."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        payload = {
+            "ts": self.formatTime(record),
+            "level": record.levelname,
+            "logger": record.name,
+            "msg": record.getMessage(),
+        }
+        if record.exc_info:
+            payload["exc"] = self.formatException(record.exc_info)
+        return json.dumps(payload, ensure_ascii=False)
+
+
+if os.getenv("LOG_FORMAT", "text").lower() == "json":
+    _json_handler = logging.StreamHandler()
+    _json_handler.setFormatter(_JsonLogFormatter())
+    logging.basicConfig(level=logging.INFO, handlers=[_json_handler])
+else:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+# Keep SQLAlchemy below INFO — at INFO it would echo every SQL statement.
+logging.getLogger("sqlalchemy").setLevel(logging.WARNING)
+# Now that a root INFO handler is installed, these third-party libraries would
+# flood the boot logs: httpx request lines, huggingface_hub/transformers download
+# chatter, and alembic's "setup plugin" notices. Pin them to WARNING; app loggers
+# (backend.*) stay at INFO.
+for name in ("httpx", "huggingface_hub", "transformers", "alembic.runtime.plugins"):
+    logging.getLogger(name).setLevel(logging.WARNING)
+
+logger = logging.getLogger(__name__)
+
+
+def _warm_up_ner_model() -> None:
+    """Load the IndoBERT NER model so the first evaluation doesn't pay for it.
+
+    Runs in a daemon thread during startup; the app must boot (and serve
+    /api/health) regardless of whether the warmup succeeds.
+    """
+    try:
+        logger.info("NER model warmup started")
+        from backend.utils.ner_utils import get_ner_pipeline
+
+        get_ner_pipeline()
+        logger.info("NER model warmup finished successfully")
+    except Exception:
+        logger.exception(
+            "NER model warmup failed — the model will be loaded on demand "
+            "by the first evaluation instead"
+        )
 
 
 @asynccontextmanager
@@ -80,6 +148,35 @@ async def lifespan(app: FastAPI):
     finally:
         db.close()
 
+    # Phase 2 startup recovery: any queued/running evaluation job left in the
+    # table means the worker died mid-run (crash/deploy) — it can never make
+    # progress and is still holding the division's partial-unique slot. Mark
+    # such zombies as failed("interrupted by restart") so the slot frees and
+    # recruiters can re-trigger.
+    from backend.services.evaluation_service import recover_interrupted_jobs
+
+    recovered = recover_interrupted_jobs(SessionLocal)
+    if recovered:
+        logger.info(
+            "Startup recovery: marked %d interrupted evaluation job(s) as failed",
+            recovered,
+        )
+        print(f"[OK] Recovered {recovered} interrupted evaluation job(s)")
+    else:
+        print("[OK] No interrupted evaluation jobs to recover")
+
+    # Warm the ~1.3 GB NER model off the critical path so the first
+    # evaluation after a restart doesn't pay the load inside a request.
+    # Gated by NER_WARMUP so iterative `uvicorn --reload` saves don't reload the
+    # model on every code change; default on.
+    if os.getenv("NER_WARMUP", "1") != "0":
+        threading.Thread(
+            target=_warm_up_ner_model, daemon=True, name="ner-warmup"
+        ).start()
+        print("[OK] NER model warmup started in background")
+    else:
+        print("[OK] NER model warmup skipped (NER_WARMUP=0)")
+
     print(f"[OK] Server running on port {settings.app_port}")
 
     yield
@@ -112,7 +209,6 @@ app.add_middleware(
 app.include_router(auth_router)
 app.include_router(upload_router)
 app.include_router(rubrics_router)
-app.include_router(evaluation_router)
 app.include_router(evaluate_batch_router)
 app.include_router(announcements_router)
 app.include_router(candidates_router)

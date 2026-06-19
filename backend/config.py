@@ -1,7 +1,22 @@
 """Application configuration loaded from environment variables."""
 
+import os
+
 from pydantic_settings import BaseSettings
 from pathlib import Path
+
+# Hugging Face offline mode — opt-in via HF_HUB_OFFLINE=1. Once the NER model is
+# cached on disk (dev/staging after the first download, or pre-baked into the
+# production image), this skips the boot-time round-trips to huggingface.co
+# (config/tokenizer/vocab/safetensors HEAD+GET, refs/commits/discussions) and the
+# "unauthenticated requests to HF Hub" warning. The HF libraries read these env
+# vars at import time, so this must run before `transformers`/`huggingface_hub`
+# are imported — config is the earliest backend module imported by main.py, which
+# is why it lives here rather than in the lifespan. Leave HF_HUB_OFFLINE unset for
+# the first run so the model can still download.
+if os.getenv("HF_HUB_OFFLINE") == "1":
+    os.environ.setdefault("HF_HUB_OFFLINE", "1")
+    os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 
 
 class Settings(BaseSettings):

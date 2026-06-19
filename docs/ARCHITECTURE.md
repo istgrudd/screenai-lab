@@ -17,7 +17,7 @@
 - A **recruiter "Validasi Evaluasi AI" marker**: recruiters can mark an AI evaluation as `validated` or `needs_discussion` (with a note) as an accountability checkpoint. This is informative only — it does not change the score or application status, and it is not currently a gate for announcement. A fresh (re-)evaluation resets the marker to `pending`.
 - A **recruiter / super-admin console**: filtering, evaluation, re-evaluation, score override, AI-evaluation validation, threshold highlight, manual checklist, and bulk announcement.
 
-The repo was forked from the Capstone project [`istgrudd/screenai`](https://github.com/istgrudd/screenai). Legacy Capstone endpoints (`POST /api/upload`, `POST /api/evaluate`) remain mounted for compatibility, but the Lab pipeline is the primary path.
+The repo was forked from the Capstone project [`istgrudd/screenai`](https://github.com/istgrudd/screenai). The legacy Capstone `POST /api/upload` endpoint remains mounted for compatibility; the legacy `POST /api/evaluate` endpoint was removed in Phase 2. The Lab pipeline is the primary path.
 
 | Phase | Description | Status |
 |---|---|---|
@@ -192,8 +192,7 @@ screenai-lab/
 │   │   ├── periods.py         — RecruitmentPeriod CRUD + active stats
 │   │   ├── rubrics.py         — rubric CRUD
 │   │   ├── candidates.py      — candidate detail + score override + history
-│   │   ├── evaluate_batch.py  — division-based batch evaluation
-│   │   ├── evaluation.py      — deprecated legacy /api/evaluate
+│   │   ├── evaluate_batch.py  — division-based batch evaluation (202 + job polling)
 │   │   ├── upload.py          — deprecated legacy /api/upload
 │   │   ├── analytics.py       — active-period recruitment analytics
 │   │   ├── audit_logs.py      — super-admin audit listing

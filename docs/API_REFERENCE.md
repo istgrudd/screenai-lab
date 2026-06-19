@@ -1121,7 +1121,8 @@ Source: [`backend/routers/evaluate_batch.py`](../backend/routers/evaluate_batch.
 
 ### 👀 `POST /api/recruiter/evaluate/batch`
 
-Runs division-based batch evaluation.
+Creates a division-based batch evaluation **job** and runs it in the background
+(Phase 2). The endpoint no longer runs the pipeline inline.
 
 **Body**
 
@@ -1131,20 +1132,36 @@ Runs division-based batch evaluation.
 
 `division` is Pydantic-validated as a `Division` enum.
 
-**Response 200**
+**Response 202 (Accepted)**
 
-Non-standard envelope:
+The endpoint validates the rubric, resolves the eligible set + skip counters
+synchronously, inserts an `evaluation_jobs` row, schedules the pipeline as a
+background task, and returns immediately. Non-standard envelope:
 
 ```json
 {
   "success": true,
-  "data": { "queued": 5, "results": [], "errors": [] },
+  "data": { "job_id": 42, "status": "queued", "total": 5 },
+  "job_id": 42,
+  "status": "queued",
+  "total": 5,
   "evaluated_count": 5,
   "skipped_count": 2,
+  "skipped_already_scored_count": 2,
+  "skipped_unverified_count": 0,
+  "skipped_correction_count": 0,
   "warning": "Evaluasi dijalankan di luar window evaluasi resmi.",
   "error": null
 }
 ```
+
+`evaluated_count` is the number of eligible candidates **queued** (resolved at
+trigger time); it is not a success count. Poll progress via the job endpoints
+below.
+
+> **Contract change (Phase 2):** this was `200 + { queued, results, errors }`.
+> It is now `202 + job_id`; per-candidate results are read from the job's
+> counters/errors and `GET /api/recruiter/results/{id}`.
 
 **Rules**
 
@@ -1155,7 +1172,7 @@ Non-standard envelope:
 - Successful application evaluations move application status to `screening`.
 - Evaluation outside `EVALUATION` phase is allowed but returns a soft `warning`.
 
-**Pipeline summary**
+**Pipeline summary** (runs in the background job)
 
 ```text
 KTM validate -> KHS parse -> ensure Candidate -> cached/inline NER
@@ -1167,8 +1184,35 @@ KTM validate -> KHS parse -> ensure Candidate -> cached/inline NER
 - `404` no rubric for division.
 - `400` rubric has zero dimensions.
 - `400` rubric weights do not sum to 1.0.
+- `409` an evaluation job is already non-terminal for this division (enforced by
+  a partial unique index on `evaluation_jobs`).
 - `500` unrecognized setup errors are logged server-side and returned with a sanitized detail.
-- Per-candidate pipeline failures are collected in `data.errors` while the batch response can still be `200`.
+- Per-candidate pipeline failures are recorded in the job's `errors` list; the job still reaches `completed`.
+
+### 👀 `GET /api/recruiter/evaluate/jobs/{job_id}`
+
+Returns one job's live state. `404` if not found.
+
+```json
+{
+  "success": true,
+  "data": {
+    "id": 42, "division": "big_data", "status": "running",
+    "total": 5, "processed": 3, "succeeded": 3, "failed": 0,
+    "errors": [], "force": false,
+    "created_at": "...", "started_at": "...", "finished_at": null, "note": null
+  },
+  "error": null
+}
+```
+
+`status` is one of `queued | running | completed | failed`.
+
+### 👀 `GET /api/recruiter/evaluate/jobs/active?division=big_data`
+
+Returns the active (non-terminal) job for a division, or `{ "data": null }`
+(HTTP 200) when none. Used by the frontend on mount to resume polling after a
+refresh.
 
 ### 👀 `GET /api/recruiter/results/{application_id}`
 
@@ -1379,18 +1423,10 @@ Deprecation: true
 X-Deprecated-Message: POST /api/upload is deprecated; use POST /api/documents/upload/{doc_type} instead.
 ```
 
-### 👀 `POST /api/evaluate`
-
-Source: [`backend/routers/evaluation.py`](../backend/routers/evaluation.py)
-
-Deprecated replacement: `POST /api/recruiter/evaluate/batch`.
-
-**Deprecation signals**
-
-```http
-Deprecation: true
-X-Deprecated-Message: POST /api/evaluate is deprecated; use POST /api/recruiter/evaluate/batch instead.
-```
+> **Removed (Phase 2):** the legacy `POST /api/evaluate` endpoint and its
+> `backend/routers/evaluation.py` router were deleted. Use
+> `POST /api/recruiter/evaluate/batch` (which now returns **202 + job_id**;
+> see the Evaluation section above).
 
 ---
 

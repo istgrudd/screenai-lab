@@ -559,24 +559,24 @@ export async function deleteRubric(rubricId) {
 // ── Evaluation ──────────────────────────────────────────────────────────────
 
 /**
- * Trigger batch evaluation for a rubric (legacy Capstone).
- * @param {number} rubricId
- */
-export async function runEvaluation(rubricId) {
-  return request("/evaluate", {
-    method: "POST",
-    body: JSON.stringify({ rubric_id: rubricId }),
-  });
-}
-
-/**
- * Trigger batch evaluation for a division (Task 8.1).
- * Returns the `data` payload merged with envelope-level fields:
+ * Trigger batch evaluation for a division (Phase 2: 202 + job_id).
+ *
+ * The endpoint no longer runs the pipeline inline — it validates, resolves the
+ * eligible set, creates an `evaluation_jobs` row, and returns **202** with a
+ * `job_id`. Poll progress via {@link getEvaluationJob} / {@link getActiveEvaluationJob}.
+ *
+ * Returns the `data` payload (`{ job_id, status, total }`) merged with
+ * envelope-level fields surfaced for backward-compatible UI counters:
+ *   job_id           — the created job's id (also in data)
+ *   status           — "queued"
  *   _warning         — Task 13.2.2 soft phase warning (or null)
- *   evaluated_count  — Task 13.5.2 number of candidates processed this run
- *   skipped_count    — Task 13.5.2 number skipped (already scored, force=False)
+ *   evaluated_count  — number of eligible candidates queued this run (= total)
+ *   skipped_count    — number skipped (already scored, force=False)
  * These sit outside `data` in the envelope, so the generic request wrapper
  * would drop them; this helper does its own fetch to surface them.
+ *
+ * A duplicate trigger while a job is active throws an {@link ApiError} with
+ * `status === 409` (DB-level partial unique index).
  * @param {string} division  — e.g. "big_data"
  * @param {object} [opts]
  * @param {number[]|null} [opts.applicationIds] — specific IDs, or null for all
@@ -616,6 +616,39 @@ export async function evaluateBatch(division, opts = {}) {
     skipped_unverified_count: json.skipped_unverified_count ?? 0,
     skipped_correction_count: json.skipped_correction_count ?? 0,
   };
+}
+
+/**
+ * Get an evaluation job's live state by id (Phase 2 polling).
+ * Returns { id, division, status, total, processed, succeeded, failed,
+ * errors, force, created_at, started_at, finished_at, note }.
+ * @param {number} jobId
+ */
+export async function getEvaluationJob(jobId) {
+  return request(`/recruiter/evaluate/jobs/${jobId}`);
+}
+
+/**
+ * Get the active (non-terminal) evaluation job for a division, or null when
+ * none is running. Used on mount to resume polling after a page refresh.
+ * @param {string} division — e.g. "big_data"
+ */
+export async function getActiveEvaluationJob(division) {
+  return request(
+    `/recruiter/evaluate/jobs/active?division=${encodeURIComponent(division)}`
+  );
+}
+
+/**
+ * Request cooperative cancellation of a queued/running evaluation job (W2).
+ * The runner finishes the in-flight candidate, skips the rest, and finalizes
+ * the job as `cancelled`. Idempotent while non-terminal; throws with
+ * `status === 409` if the job already finished (completed/failed).
+ * Returns the updated job state (same shape as {@link getEvaluationJob}).
+ * @param {number} jobId
+ */
+export async function cancelEvaluationJob(jobId) {
+  return request(`/recruiter/evaluate/jobs/${jobId}/cancel`, { method: "POST" });
 }
 
 /**

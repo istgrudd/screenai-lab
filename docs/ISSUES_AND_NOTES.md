@@ -35,7 +35,8 @@ No other `TODO/FIXME/XXX/HACK` comments exist in `backend/` or `frontend/src/`.
 - [backend/routers/documents.py](../backend/routers/documents.py) now writes an `AuditLog(action_type="document_verification")` row when recruiter/super_admin users review or verify a document. The audit row records the acting recruiter, the owning candidate user, old/new review statuses such as `pending -> verified`, and document context. See [DOCUMENT_VERIFICATION_AUDIT_REPORT.md](reports/DOCUMENT_VERIFICATION_AUDIT_REPORT.md).
 
 ### ✅ Legacy endpoints not flagged deprecated (Task 14.4) — **Resolved in Batch 2**
-- `POST /api/upload` and `POST /api/evaluate` now set `Deprecation: true` headers and log a `warning` on each call. The Lab pipeline (`/api/documents/upload/{doc_type}` + `/api/recruiter/evaluate/batch`) is the supported path.
+- `POST /api/upload` sets `Deprecation: true` headers and logs a `warning` on each call. The Lab pipeline (`/api/documents/upload/{doc_type}` + `/api/recruiter/evaluate/batch`) is the supported path.
+- **Phase 2 update:** the legacy `POST /api/evaluate` endpoint (`backend/routers/evaluation.py`) was removed entirely — router file deleted, `main.py` registration dropped, and the `runEvaluation` frontend caller removed. `POST /api/recruiter/evaluate/batch` is the only evaluation entry point.
 
 ### ✅ `EvaluateBatchRequest.division: str` not type-safe (Task 14.1) — **Resolved in Batch 2**
 - [backend/routers/evaluate_batch.py](../backend/routers/evaluate_batch.py) now declares `division: Division`; FastAPI returns 422 with field-path info for any value outside the enum.
@@ -223,6 +224,11 @@ Target: a self-hosted VPS in the MBC Lab running three Docker containers (fronte
 
 ### Schema migration safety
 - Every model change must produce an Alembic migration via `alembic revision --autogenerate -m "..."`. The lifespan `init_db()` calls `alembic upgrade head` on every boot — production will auto-apply pending migrations. Review before deploy.
+
+### Boot-log noise & Hugging Face offline mode
+- The Phase 1 root INFO handler in [backend/main.py](../backend/main.py) surfaced a lot of third-party boot chatter. `httpx`, `huggingface_hub`, `transformers`, and `alembic.runtime.plugins` are now pinned to `WARNING` alongside `sqlalchemy`; app loggers (`backend.*`) stay at `INFO`.
+- **`HF_HUB_OFFLINE`** (default unset): set to `1` once the NER model is cached under `./models/ner` (or pre-baked into the image in production) for a network-free boot with no `huggingface.co` round-trips. [backend/config.py](../backend/config.py) propagates it to `TRANSFORMERS_OFFLINE` before `transformers`/`huggingface_hub` import. Leave unset for the first run so the model can download.
+- **`NER_WARMUP`** (default `1`): set to `0` to skip the boot-time ~1.3 GB model warmup — handy with `uvicorn --reload` so each save doesn't reload the model. On-demand load on first evaluation is unchanged.
 
 ### Smoke-test runner
 - `scripts/smoke_test_*.py` are stand-alone Python scripts. There is no `pytest` harness today. Phase 12 validated them sequentially as module commands:

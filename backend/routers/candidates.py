@@ -107,6 +107,29 @@ def _sections_detected_for_document(document: CandidateDocument) -> list[str]:
         if isinstance(value, str) and value.strip()
     ]
 
+def _sections_detected_for_document(document: CandidateDocument) -> list[str]:
+    """Section keys with non-empty text, for the candidate-detail document list.
+
+    Only ``cv`` / ``motivation_letter`` cache rows carry the flat
+    ``{section_name: text}`` shape this surfaces. Other document types are
+    excluded — notably KHS, whose ``sections_json`` is the nested LLM-parser
+    payload (``{"parsed_khs": {...}, "processing_status": ..., "processing_error":
+    None, ...}``); its values are dicts/None, so the old ``v.strip()`` raised
+    ``AttributeError`` and 500'd the whole detail response. Each value is
+    ``isinstance(..., str)``-guarded so a non-string can never crash the view.
+    """
+    if document.document_type not in ("cv", "motivation_letter"):
+        return []
+    sections = document.sections_json
+    if not isinstance(sections, dict):
+        return []
+    return [
+        key
+        for key, value in sections.items()
+        if isinstance(value, str) and value.strip()
+    ]
+
+
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------

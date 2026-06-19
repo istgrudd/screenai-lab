@@ -263,6 +263,7 @@ def _seed_data() -> None:
                     faculty="Fakultas Informatika",
                     major="Data Science",
                     year=2023,
+                    ipk=3.46,
                     whatsapp="+6281234567890",
                     role=UserRole.CANDIDATE,
                     is_active=True,
@@ -541,8 +542,8 @@ def main() -> int:
         headers=recruiter_auth,
         json={"division": DIVISION, "application_ids": [cache_app_id]},
     )
-    failures += _assert(response.status_code == 200, "evaluation with cache -> 200")
-    if response.status_code == 200:
+    failures += _assert(response.status_code == 202, "evaluation with cache -> 202")
+    if response.status_code == 202:
         failures += _assert(response.json()["evaluated_count"] == 1, "verified app with cache is evaluated")
     failures += _assert(
         EVAL_EXTRACT_CALLS["cv"] == 0,
@@ -575,8 +576,8 @@ def main() -> int:
         headers=recruiter_auth,
         json={"division": DIVISION, "application_ids": [ml_fallback_app_id]},
     )
-    failures += _assert(response.status_code == 200, "evaluation with missing ML cache -> 200")
-    if response.status_code == 200:
+    failures += _assert(response.status_code == 202, "evaluation with missing ML cache -> 202")
+    if response.status_code == 202:
         failures += _assert(
             response.json()["evaluated_count"] == 1,
             "verified app with missing ML cache is evaluated",
@@ -613,8 +614,8 @@ def main() -> int:
         headers=recruiter_auth,
         json={"division": DIVISION, "application_ids": [fallback_app_id]},
     )
-    failures += _assert(response.status_code == 200, "evaluation fallback without cache -> 200")
-    if response.status_code == 200:
+    failures += _assert(response.status_code == 202, "evaluation fallback without cache -> 202")
+    if response.status_code == 202:
         failures += _assert(response.json()["evaluated_count"] == 1, "verified app without cache is evaluated")
     failures += _assert(EVAL_EXTRACT_CALLS["cv"] >= 1, "fallback extracts CV inline")
     failures += _assert(
@@ -638,8 +639,8 @@ def main() -> int:
         headers=recruiter_auth,
         json={"division": DIVISION, "application_ids": [review_app_id]},
     )
-    failures += _assert(response.status_code == 200, "document_review evaluation request -> 200")
-    if response.status_code == 200:
+    failures += _assert(response.status_code == 202, "document_review evaluation request -> 202")
+    if response.status_code == 202:
         body = response.json()
         failures += _assert(body["evaluated_count"] == 0, "document_review app is not evaluated")
         failures += _assert(
@@ -694,8 +695,8 @@ def main() -> int:
         headers=recruiter_auth,
         json={"division": DIVISION, "application_ids": [correction_app_id]},
     )
-    failures += _assert(response.status_code == 200, "correction evaluation request -> 200")
-    if response.status_code == 200:
+    failures += _assert(response.status_code == 202, "correction evaluation request -> 202")
+    if response.status_code == 202:
         body = response.json()
         failures += _assert(body["evaluated_count"] == 0, "correction app is not evaluated")
         failures += _assert(

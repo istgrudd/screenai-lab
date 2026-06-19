@@ -10,6 +10,9 @@ Covers PUT /api/candidates/{id}/ai-validation and the related response fields:
   * candidate detail returns the ai_validation object
   * candidate list returns ai_validation_status
   * a candidate (non recruiter/admin) cannot update validation -> 403
+  * candidate detail with a KHS document (nested LLM-parser sections_json,
+    incl. a None field) returns 200, not 500 — regression for the old
+    get_candidate `v.strip()` crash
 
 Re-evaluation reset (validated -> pending after a fresh AI result) is verified
 at the service layer in evaluation_service and recorded as a manual check; it
@@ -42,6 +45,33 @@ PASS = "[PASS]"
 FAIL = "[FAIL]"
 TEST_PASSWORD = "hunter2secure"
 EMAIL_PREFIX = "smoke+aivalid_"
+
+# Nested LLM-parser KHS payload — the real shape stored in
+# CandidateDocument.sections_json for KHS docs. Its values are a dict
+# (parsed_khs) and None (processing_error), which crashed the old
+# get_candidate `v.strip()` with AttributeError -> 500.
+KHS_SECTIONS_JSON = {
+    "parsed_khs": {
+        "ipk_final": 3.5,
+        "total_sks_final": 100,
+        "courses": [{"code": "CII3A3", "name": "Machine Learning", "grade": "A"}],
+        "ongoing_courses": [],
+        "parse_warning": None,
+        "parser_version": "telkom_khs_llm_v1",
+    },
+    "processing_status": "completed",
+    "processing_error": None,
+    "source": "llm_parser",
+}
+
+# Flat {section: text} payload — the cv/motivation_letter shape. Mixed values
+# verify the helper keeps only non-empty *string* sections.
+CV_SECTIONS_JSON = {
+    "education": "S1 Informatika, Telkom University",
+    "experience": "Built an internal analytics dashboard.",
+    "skills": "",       # empty string -> excluded
+    "_meta": None,      # non-string -> excluded
+}
 
 
 def _assert(cond: bool, msg: str) -> int:
@@ -125,6 +155,27 @@ def _seed() -> dict:
         )
         db.add_all([scored, unscored])
         db.flush()
+
+        # Attach documents to the scored candidate so candidate-detail exercises
+        # the sections_json rendering path. The KHS doc carries the nested
+        # LLM-parser payload (the bug fixture); the CV doc carries flat sections.
+        db.add_all([
+            CandidateDocument(
+                candidate_id=scored.id,
+                filename="khs.pdf",
+                file_path="data/raw_pdfs/smoke_aivalid_khs.pdf",
+                document_type="khs",
+                sections_json=KHS_SECTIONS_JSON,
+            ),
+            CandidateDocument(
+                candidate_id=scored.id,
+                filename="cv.pdf",
+                file_path="data/raw_pdfs/smoke_aivalid_cv.pdf",
+                document_type="cv",
+                sections_json=CV_SECTIONS_JSON,
+            ),
+        ])
+        db.flush()
         ids = {"scored_id": scored.id, "unscored_id": unscored.id}
         db.commit()
         return ids
@@ -155,15 +206,31 @@ def main() -> int:
     admin_auth = _login(client, "admin")
     cand_auth = _login(client, "scored")
 
-    # --- Default state: pending in detail + list ---
+    # --- Default state: pending in detail + list; KHS doc must not 500 ---
     r = client.get(f"/api/candidates/{scored_id}", headers=rec_auth)
-    failures += _assert(r.status_code == 200, "candidate detail -> 200")
+    failures += _assert(
+        r.status_code == 200,
+        f"candidate detail with KHS document -> 200, not 500 (got {r.status_code})",
+    )
     if r.status_code == 200:
         data = r.json()["data"]
         failures += _assert("ai_validation" in data, "detail contains ai_validation object")
         failures += _assert(
             data.get("ai_validation", {}).get("status") == "pending",
             "default ai_validation status is pending",
+        )
+        # Regression: a KHS document's sections_json is the nested LLM-parser
+        # payload (dict + None values), not flat strings. The old v.strip()
+        # raised AttributeError and 500'd this whole response.
+        docs = {d["document_type"]: d for d in data.get("documents", [])}
+        failures += _assert(
+            docs.get("khs", {}).get("sections_detected") == [],
+            "KHS document sections_detected is [] (nested payload excluded)",
+        )
+        failures += _assert(
+            sorted(docs.get("cv", {}).get("sections_detected", []))
+            == ["education", "experience"],
+            "CV document sections_detected keeps only non-empty string sections",
         )
 
     r = client.get("/api/candidates", headers=rec_auth)

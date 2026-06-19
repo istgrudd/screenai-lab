@@ -33,14 +33,40 @@ COPY backend ./backend
 COPY alembic.ini ./
 COPY scripts ./scripts
 
-# Persisted directories — declared so a `docker run` without docker-compose
-# still gets durable storage. In normal use docker-compose.yml mounts host
-# directories over these paths.
+# Pre-bake the IndoBERT NER model into the image (W5 ops hardening). This is the
+# ~1.3 GB download that Phase 1/2 paid on the *first* boot of every fresh
+# deployment; doing it at build time means the runtime container makes ZERO
+# huggingface.co round-trips. The model lands in settings.ner_cache_dir
+# (./models/ner -> /app/models/ner, the same path the runtime loader reads), so
+# get_ner_pipeline() resolves it straight from disk.
 #
-#   /app/models/ner  — HuggingFace IndoBERT cache (~1.3 GB first download)
-#   /app/data        — SQLite dev DB, legacy raw_pdfs, extracted, anonymized
-#   /app/uploads     — candidate-submitted application documents
-VOLUME ["/app/models/ner", "/app/data", "/app/uploads"]
+# Order matters: this RUN happens BEFORE the HF offline ENV below (so the
+# download is allowed to reach the Hub) and BEFORE the VOLUME declaration (data
+# written to a path that is later declared VOLUME would be discarded). The model
+# dir is therefore intentionally NOT a VOLUME — it is immutable, reproducible
+# image content, not mutable runtime state.
+RUN python -c "from backend.config import settings; \
+from transformers import AutoTokenizer, AutoModelForTokenClassification; \
+AutoTokenizer.from_pretrained(settings.ner_model_name, cache_dir=settings.ner_cache_dir); \
+AutoModelForTokenClassification.from_pretrained(settings.ner_model_name, cache_dir=settings.ner_cache_dir); \
+print('[build] NER model cached to', settings.ner_cache_dir)"
+
+# Runtime is fully offline for Hugging Face: the model is already baked in above,
+# so boot performs no network calls (no config/tokenizer/safetensors HEAD+GET,
+# no 'unauthenticated requests to HF Hub' warning). The libraries read these at
+# import time; setting them here (after the download) makes offline the image
+# default without touching .env.
+ENV HF_HUB_OFFLINE=1 \
+    TRANSFORMERS_OFFLINE=1
+
+# Persisted directories — declared so a `docker run` without docker-compose
+# still gets durable storage for *mutable* state. In normal use
+# docker-compose.yml mounts host directories over these paths. The NER model
+# dir is deliberately excluded (baked into the image above, immutable).
+#
+#   /app/data     — SQLite dev DB, legacy raw_pdfs, extracted, anonymized
+#   /app/uploads  — candidate-submitted application documents
+VOLUME ["/app/data", "/app/uploads"]
 
 EXPOSE 8000
 

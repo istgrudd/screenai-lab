@@ -10,19 +10,28 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from pydantic import BaseModel
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from backend.database import get_db
+from backend.database import SessionLocal, get_db
 from backend.middleware.auth_middleware import get_current_user, require_role
 from backend.models.application import Application, Division
 from backend.models.candidate import Candidate, CandidateDocument, DimensionScore
 from backend.models.document import DocumentType
+from backend.models.evaluation_job import (
+    EvaluationJob,
+    EvaluationJobStatus,
+    NON_TERMINAL_JOB_STATUSES,
+)
 from backend.models.period import RecruitmentPeriod
 from backend.models.rubric import Rubric
 from backend.models.user import User, UserRole
-from backend.services.evaluation_service import run_evaluation_pipeline
+from backend.services.evaluation_service import (
+    run_evaluation_job,
+    select_evaluation_targets,
+)
 from backend.services.khs_parser import (
     khs_cache_scoring_metadata,
     khs_processing_status,
@@ -40,6 +49,16 @@ _SANITIZED_ERROR = (
     "Please contact the administrator."
 )
 
+# Phase 2: duplicate-trigger protection is enforced at the database level by
+# the partial unique index on evaluation_jobs (one non-terminal job per
+# division — see the evaluation_jobs migration). A duplicate insert raises
+# IntegrityError, which we map to 409 below. The DB constraint is the source
+# of truth (no TOCTOU race), superseding the Phase 1 in-process set.
+_ALREADY_RUNNING_ERROR = (
+    "Evaluation for this division is already running. "
+    "Please wait until it finishes."
+)
+
 
 class EvaluateBatchRequest(BaseModel):
     # Task 14.1: typed as Division so FastAPI rejects unknown values at the
@@ -54,33 +73,47 @@ class EvaluateBatchRequest(BaseModel):
 
 @router.post(
     "/evaluate/batch",
+    status_code=status.HTTP_202_ACCEPTED,
     dependencies=[Depends(_recruiter_or_admin)],
 )
 async def evaluate_batch(
     payload: EvaluateBatchRequest,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    """Run the full evaluation pipeline for a division.
+    """Create an evaluation job for a division and run it in the background.
+
+    Phase 2 contract change (200 + full result → **202 + job_id**): this
+    endpoint no longer runs the pipeline inline. It validates the rubric,
+    resolves the eligible application set + skip counters synchronously
+    (DB-only, no LLM), inserts an ``evaluation_jobs`` row, schedules the
+    pipeline as a FastAPI BackgroundTask, and returns **202 Accepted**.
+    Progress is polled via ``GET /evaluate/jobs/{id}`` or
+    ``GET /evaluate/jobs/active?division=``.
 
     Body: { division: str, application_ids: [int] | null, force: bool }
 
     If application_ids is null, evaluates all eligible applications in the
-    given division. By default (force=False) candidates whose Candidate row
-    already carries a composite_score are skipped to avoid recomputation.
-    With force=True the score filter is bypassed; the verified/screening
-    eligibility filter still applies regardless.
+    division. By default (force=False) candidates whose Candidate row already
+    carries a composite_score are skipped. With force=True the score filter is
+    bypassed; the verified/screening eligibility filter still applies.
 
-    Precondition: the division's rubric must have at least one dimension.
-    Returns 400 if the rubric has zero dimensions.
+    Precondition: the division's rubric must have at least one dimension
+    (else 400). Uniqueness: a partial unique index allows at most one
+    non-terminal job per division — a duplicate trigger raises IntegrityError,
+    mapped to **409**.
 
     Task 13.2.2 — Soft phase warning: when no active period exists or the
-    active period is not currently in the EVALUATION phase, evaluation
-    still runs (the recruiter always retains override) but the response
-    carries a ``warning`` field so the frontend can flag the action.
+    active period is not in the EVALUATION phase, the job still runs (the
+    recruiter retains override) but the response carries a ``warning`` field.
     """
+    division_value = payload.division.value
+
+    # 1. Validate + resolve the eligible set synchronously (DB-only, no LLM).
     try:
-        result = await run_evaluation_pipeline(
-            division=payload.division.value,
+        targets = select_evaluation_targets(
+            division=division_value,
             application_ids=payload.application_ids,
             db=db,
             force=payload.force,
@@ -88,64 +121,232 @@ async def evaluate_batch(
     except ValueError as exc:
         msg = str(exc)
         # Known ValueError shapes map to clean 4xx codes with their original
-        # message — these are deterministic, recruiter-actionable errors.
+        # message — deterministic, recruiter-actionable errors.
         if "no dimensions configured" in msg.lower():
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=msg,
-            )
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=msg)
         if "no rubric found" in msg.lower():
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=msg,
-            )
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=msg)
         if "rubric weights must sum" in msg.lower():
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=msg,
-            )
-        # Unrecognized ValueError — log full detail server-side, return a
-        # sanitized 500 so internal exception text never reaches the client.
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=msg)
+        # Unrecognized — log full detail server-side, return a sanitized 500.
         logger.error(
-            "Unrecognized ValueError in evaluate_batch: %s",
-            msg,
-            exc_info=True,
-        )
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=_SANITIZED_ERROR,
-        )
-    except HTTPException:
-        # Preserve HTTPExceptions raised by inner code (or by us above) —
-        # never let them fall through to the catch-all and get sanitized.
-        raise
-    except Exception as exc:  # pragma: no cover — defensive catch-all
-        logger.error(
-            "Unexpected error in evaluate_batch: %s", exc, exc_info=True
+            "Unrecognized ValueError in evaluate_batch: %s", msg, exc_info=True
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=_SANITIZED_ERROR,
         )
 
+    # 2. Resolve the soft phase warning + active period_id (nullable).
     warning = _phase_warning(db)
-    skipped_count = int(result.pop("skipped", 0))
-    skipped_already_scored_count = int(result.pop("skipped_already_scored_count", 0))
-    skipped_unverified_count = int(result.pop("skipped_unverified_count", 0))
-    skipped_correction_count = int(result.pop("skipped_correction_count", 0))
-    evaluated_count = int(result.get("queued", 0))
+    active_period = (
+        db.query(RecruitmentPeriod)
+        .filter(RecruitmentPeriod.is_active == True)  # noqa: E712
+        .first()
+    )
+    period_id = active_period.id if active_period else None
 
+    # 3. Insert the job row. The partial unique index ("one non-terminal job
+    #    per division") is the source of truth — a duplicate insert raises
+    #    IntegrityError, which we map to 409. No app-level "is there an active
+    #    job?" pre-check is used as the primary guard (TOCTOU race).
+    job = EvaluationJob(
+        division=payload.division,
+        period_id=period_id,
+        status=EvaluationJobStatus.QUEUED,
+        force=payload.force,
+        total=targets["total"],
+        triggered_by=current_user.id,
+    )
+    db.add(job)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        logger.warning(
+            "Evaluation job conflict: division=%s already has a non-terminal "
+            "job; rejecting duplicate trigger with 409",
+            division_value,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=_ALREADY_RUNNING_ERROR,
+        )
+    job_id = job.id
+
+    # 4. Schedule the background runner. It opens its own sessions from
+    #    SessionLocal (mirroring run_submit_anonymization) — only plain IDs
+    #    cross the boundary, never ORM instances bound to the request session.
+    background_tasks.add_task(
+        run_evaluation_job,
+        job_id,
+        division_value,
+        targets["application_ids"],
+        targets["rubric_id"],
+        SessionLocal,
+    )
+
+    logger.info(
+        "Evaluation job %d queued: division=%s force=%s total=%d "
+        "(skipped_already_scored=%d, skipped_unverified=%d, skipped_correction=%d)",
+        job_id,
+        division_value,
+        payload.force,
+        targets["total"],
+        targets["skipped_already_scored_count"],
+        targets["skipped_unverified_count"],
+        targets["skipped_correction_count"],
+    )
+
+    # 5. Respond 202 with the job id + skip breakdown. The envelope-level
+    #    counters mirror the historical shape; `evaluated_count` is the number
+    #    of eligible candidates queued (resolved at trigger time).
     return {
         "success": True,
-        "data": result,
-        "evaluated_count": evaluated_count,
-        "skipped_count": skipped_count,
-        "skipped_already_scored_count": skipped_already_scored_count,
-        "skipped_unverified_count": skipped_unverified_count,
-        "skipped_correction_count": skipped_correction_count,
+        "data": {
+            "job_id": job_id,
+            "status": EvaluationJobStatus.QUEUED.value,
+            "total": targets["total"],
+        },
+        "job_id": job_id,
+        "status": EvaluationJobStatus.QUEUED.value,
+        "total": targets["total"],
+        "evaluated_count": targets["total"],
+        "skipped_count": targets["skipped"],
+        "skipped_already_scored_count": targets["skipped_already_scored_count"],
+        "skipped_unverified_count": targets["skipped_unverified_count"],
+        "skipped_correction_count": targets["skipped_correction_count"],
         "warning": warning,
         "error": None,
     }
+
+
+def _serialize_job(job: EvaluationJob) -> dict:
+    """Public job state for the polling endpoints."""
+    return {
+        "id": job.id,
+        "division": job.division.value if hasattr(job.division, "value") else job.division,
+        "status": job.status.value if hasattr(job.status, "value") else job.status,
+        "total": job.total,
+        "processed": job.processed,
+        "succeeded": job.succeeded,
+        "failed": job.failed,
+        "errors": job.errors or [],
+        "force": job.force,
+        "cancel_requested": bool(job.cancel_requested),
+        "created_at": job.created_at.isoformat() if job.created_at else None,
+        "started_at": job.started_at.isoformat() if job.started_at else None,
+        "finished_at": job.finished_at.isoformat() if job.finished_at else None,
+        "note": job.note,
+    }
+
+
+@router.get(
+    "/evaluate/jobs/active",
+    dependencies=[Depends(_recruiter_or_admin)],
+)
+def get_active_evaluation_job(
+    division: Division,
+    db: Session = Depends(get_db),
+):
+    """Return the active (non-terminal) job for a division, or null.
+
+    ``GET /api/recruiter/evaluate/jobs/active?division=big_data``. The empty
+    contract is an explicit ``{ data: null }`` with HTTP 200 — the frontend
+    uses this on mount to resume polling after a refresh. Declared before the
+    ``/{job_id}`` route so "active" is never parsed as an id.
+    """
+    job = (
+        db.query(EvaluationJob)
+        .filter(
+            EvaluationJob.division == division,
+            EvaluationJob.status.in_(list(NON_TERMINAL_JOB_STATUSES)),
+        )
+        .order_by(EvaluationJob.created_at.desc())
+        .first()
+    )
+    return {
+        "success": True,
+        "data": _serialize_job(job) if job else None,
+        "error": None,
+    }
+
+
+@router.get(
+    "/evaluate/jobs/{job_id}",
+    dependencies=[Depends(_recruiter_or_admin)],
+)
+def get_evaluation_job(
+    job_id: int,
+    db: Session = Depends(get_db),
+):
+    """Return a single evaluation job's state. 404 if not found."""
+    job = db.query(EvaluationJob).filter(EvaluationJob.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Evaluation job not found")
+    return {
+        "success": True,
+        "data": _serialize_job(job),
+        "error": None,
+    }
+
+
+@router.post(
+    "/evaluate/jobs/{job_id}/cancel",
+    dependencies=[Depends(_recruiter_or_admin)],
+)
+def cancel_evaluation_job(
+    job_id: int,
+    db: Session = Depends(get_db),
+):
+    """Request cooperative cancellation of a queued/running job (W2).
+
+    Sets ``cancel_requested=true`` (and flips a ``running`` job to
+    ``cancelling`` so polling reflects the draining state). The runner checks
+    the flag between candidates, lets the in-flight candidate finish, and
+    finalizes the job as ``cancelled`` — already-committed candidates remain and
+    the division slot frees on that finalize. No candidate is hard-killed.
+
+    Contract: 404 if unknown; idempotent while non-terminal (queued / running /
+    cancelling all return 200 with the live state); an already ``cancelled`` job
+    is a 200 no-op; ``completed``/``failed`` jobs return 409.
+    """
+    job = db.query(EvaluationJob).filter(EvaluationJob.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Evaluation job not found")
+
+    status_value = job.status.value if hasattr(job.status, "value") else job.status
+
+    # Already cancelled — idempotent no-op (the desired end state was reached).
+    if status_value == EvaluationJobStatus.CANCELLED.value:
+        return {"success": True, "data": _serialize_job(job), "error": None}
+
+    # A finished run cannot be cancelled.
+    if status_value in (
+        EvaluationJobStatus.COMPLETED.value,
+        EvaluationJobStatus.FAILED.value,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Evaluation job has already finished and cannot be cancelled.",
+        )
+
+    # Non-terminal (queued / running / cancelling): request the cancel. A
+    # running job flips to cancelling; a queued one stays queued until the
+    # runner starts and observes the flag.
+    job.cancel_requested = True
+    if job.status == EvaluationJobStatus.RUNNING:
+        job.status = EvaluationJobStatus.CANCELLING
+    db.commit()
+    db.refresh(job)
+    new_status = job.status.value if hasattr(job.status, "value") else job.status
+    logger.info(
+        "Evaluation job %d cancel requested (status %s -> %s)",
+        job_id,
+        status_value,
+        new_status,
+    )
+    return {"success": True, "data": _serialize_job(job), "error": None}
 
 
 def _phase_warning(db: Session) -> str | None:

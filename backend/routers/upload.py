@@ -241,7 +241,9 @@ def upload_documents(
                 "page_count": extraction["metadata"]["page_count"],
                 "file_size_kb": extraction["metadata"]["file_size_kb"],
                 "sections_detected": [
-                    k for k, v in normalization["sections"].items() if v.strip()
+                    k
+                    for k, v in normalization["sections"].items()
+                    if isinstance(v, str) and v.strip()
                 ],
             },
             "anonymization": {

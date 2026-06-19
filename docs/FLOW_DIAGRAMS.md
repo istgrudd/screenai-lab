@@ -381,40 +381,49 @@ Source: [backend/services/evaluation_service.py:165–325](../backend/services/e
 
 ## 8. Batch Evaluation Flow (Recruiter-Initiated)
 
-What happens when the recruiter clicks **Run Evaluation**.
+What happens when the recruiter clicks **Run Evaluation**. **Phase 2:** the
+endpoint no longer runs the pipeline inline — it validates + resolves the
+eligible set synchronously, creates an `evaluation_jobs` row, returns
+**202 + job_id**, and runs the pipeline as a background task. The frontend
+polls the job (~3 s) and resumes polling on mount.
 
 ```mermaid
 flowchart TD
     A[Recruiter clicks Run Evaluation] --> B[POST /api/recruiter/evaluate/batch<br/>division, application_ids?, force?]
-    B --> C[Load rubric WHERE division=X]
+    B --> C[select_evaluation_targets:<br/>load rubric WHERE division=X]
     C --> D{Rubric found?}
     D -- no --> E[404]
-    D -- yes --> F{Rubric has dimensions?}
+    D -- yes --> F{Rubric has dimensions<br/>+ weights sum 1.0?}
     F -- no --> G[400 'Please set up the rubric first']
-    F -- yes --> H[SELECT Application<br/>WHERE division=X AND status=SUBMITTED<br/>+ optional id filter]
+    F -- yes --> H[Resolve eligible Applications<br/>status=VERIFIED, or +SCREENING if force<br/>skip already-scored when not force]
 
-    H --> I{force=true?}
-    I -- yes --> K[evaluate every row]
-    I -- no --> J[skip rows whose Candidate<br/>already has composite_score]
+    H --> I[INSERT evaluation_jobs<br/>status=queued, total=N]
+    I --> I2{IntegrityError?<br/>partial unique index:<br/>one non-terminal job/division}
+    I2 -- yes --> I3[409 'already running']
+    I2 -- no --> J[202 + job_id, status=queued<br/>+ skip counters + soft warning]
+    J --> BG[BackgroundTask: run_evaluation_job<br/>own SessionLocal sessions]
 
-    J --> K
-    K --> L{For each Application}
-    L --> M[_evaluate_one app, rubric, db]
+    BG --> K[mark job running, started_at]
+    K --> L{For each Application<br/>bounded concurrency}
+    L --> M[_evaluate_candidate_in_session<br/>own per-candidate session]
     M --> N{exception?}
-    N -- yes --> O[append to errors, traceback]
-    N -- no --> P[Application.status = SCREENING]
-    O --> L
-    P --> L
+    N -- yes --> O[per-candidate rollback<br/>collect error entry]
+    N -- no --> P[Application.status = SCREENING<br/>per-candidate commit]
+    O --> INC[atomic: processed+1, failed+1]
+    P --> INC2[atomic: processed+1, succeeded+1]
+    INC --> L
+    INC2 --> L
 
-    L -. done .-> Q[db.commit]
-    Q --> R[Compute warning:<br/>None if active period in EVALUATION,<br/>else 'Evaluasi di luar window']
-    R --> S[200 envelope with<br/>data, evaluated_count, skipped_count, warning]
+    L -. done .-> Q[finalize job: status=completed<br/>write errors list once, finished_at]
+
+    POLL[GET /evaluate/jobs/id ~3s<br/>GET /evaluate/jobs/active on mount] -. reads .-> Q
 
     style E fill:#fee
     style G fill:#fee
+    style I3 fill:#fee
 ```
 
-Source: [backend/routers/evaluate_batch.py](../backend/routers/evaluate_batch.py), [backend/services/evaluation_service.py:49–158](../backend/services/evaluation_service.py#L49).
+Source: [backend/routers/evaluate_batch.py](../backend/routers/evaluate_batch.py), [backend/services/evaluation_service.py](../backend/services/evaluation_service.py) (`select_evaluation_targets`, `run_evaluation_job`), [backend/models/evaluation_job.py](../backend/models/evaluation_job.py).
 
 ---
 

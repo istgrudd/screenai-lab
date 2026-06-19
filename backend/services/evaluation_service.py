@@ -13,15 +13,22 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import traceback
+import time
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy.orm import Session
+from sqlalchemy import update
+from sqlalchemy.orm import Session, sessionmaker
 
+from backend.database import SessionLocal, engine
 from backend.models.application import Application, ApplicationStatus, Division
 from backend.models.candidate import Candidate, CandidateDocument
 from backend.models.document import Document, DocumentType
+from backend.models.evaluation_job import (
+    EvaluationJob,
+    EvaluationJobStatus,
+    NON_TERMINAL_JOB_STATUSES,
+)
 from backend.models.rubric import Rubric
 from backend.models.user import User
 from backend.services.extractor import extract_text_from_pdf
@@ -48,6 +55,20 @@ logger = logging.getLogger(__name__)
 # Keep this small enough to stay under DeepSeek rate limits but large enough
 # that batch wall-clock scales sub-linearly with N.
 _LLM_CONCURRENCY = 5
+
+
+def _effective_concurrency() -> int:
+    """Per-batch candidate concurrency, adjusted for the DB backend.
+
+    Each candidate evaluation holds its own write transaction for the whole
+    candidate duration (per-candidate sessions). SQLite allows a single
+    writer, so concurrent candidates would spin in sqlite3's busy-wait —
+    on the event loop — until "database is locked". Serialize on SQLite
+    (dev); Postgres (production) keeps the concurrent LLM overlap.
+    """
+    if engine.dialect.name == "sqlite":
+        return 1
+    return _LLM_CONCURRENCY
 
 _ACADEMIC_EVIDENCE_KEYWORDS = (
     "ipk",
@@ -83,25 +104,44 @@ def _generate_anon_id() -> str:
 # Public API
 # ---------------------------------------------------------------------------
 
-async def run_evaluation_pipeline(
+def select_evaluation_targets(
     division: str,
     application_ids: list[int] | None,
     db: Session,
     force: bool = False,
 ) -> dict:
-    """Run the full evaluation pipeline for applications in a division.
+    """Resolve the eligible application set for a division (DB-only, no LLM).
+
+    Phase 2: this is the synchronous selection/validation step run inside the
+    POST request. It performs exactly the selection logic the inline pipeline
+    used to do up front — rubric lookup/validation, eligible-status filter,
+    already-scored skip — and returns the IDs to evaluate plus skip counters.
+    The actual per-candidate pipeline runs later in the background job
+    (``run_evaluation_job``); only plain IDs cross into it.
 
     Args:
         division: Division value string (e.g. "big_data").
         application_ids: Specific application IDs to evaluate, or None for all
             eligible applications in the division.
-        db: Database session.
+        db: Database session (request-scoped — used for selection only).
         force: When True, re-evaluate eligible already-scored candidates in
             VERIFIED or SCREENING status. Final, draft, document-review, and
             correction statuses are always skipped.
 
     Returns:
-        { queued: int, results: [...], errors: [...], skipped: int, ...counters }
+        {
+            rubric_id: int,
+            application_ids: [int],   # eligible IDs to evaluate
+            total: int,               # len(application_ids)
+            skipped: int,
+            skipped_already_scored_count: int,
+            skipped_unverified_count: int,
+            skipped_correction_count: int,
+        }
+
+    Raises:
+        ValueError: no rubric for the division, rubric has no dimensions, or
+            rubric weights do not sum to 1.0 (mapped to 4xx by the router).
     """
     # --- 1. Find the rubric for the division ---
     rubric = (
@@ -203,45 +243,369 @@ async def run_evaluation_pipeline(
     }
 
     if not applications:
-        return {"queued": 0, "results": [], "errors": [], **counters}
+        logger.info(
+            "Evaluation selection: division=%s force=%s — no eligible "
+            "applications (skipped_already_scored=%d, skipped_unverified=%d, "
+            "skipped_correction=%d)",
+            division,
+            force,
+            skipped_already_scored_count,
+            skipped_unverified_count,
+            skipped_correction_count,
+        )
 
-    # Bounded-concurrency evaluation. The SQLAlchemy Session is sync and DB
-    # work happens between awaits; the DeepSeek request itself is awaitable,
-    # so up to _LLM_CONCURRENCY LLM round-trips can overlap inside this batch.
-    semaphore = asyncio.Semaphore(_LLM_CONCURRENCY)
+    return {
+        "rubric_id": rubric.id,
+        "application_ids": [app.id for app in applications],
+        "total": len(applications),
+        **counters,
+    }
 
-    async def _bounded(app: Application) -> tuple[str, dict]:
+
+# ---------------------------------------------------------------------------
+# Background job runner (Phase 2)
+#
+# The POST handler resolves the targets above, inserts an ``evaluation_jobs``
+# row, and schedules ``run_evaluation_job`` as a FastAPI BackgroundTask
+# (mirroring ``run_submit_anonymization``'s session-factory pattern). The
+# runner owns its whole lifecycle, reuses the Phase 1 per-candidate session
+# model unchanged, and always drives the job to a terminal state — which also
+# frees the division's slot in the partial unique index.
+# ---------------------------------------------------------------------------
+
+
+def _mark_job_running(session_factory: sessionmaker, job_id: int) -> str | None:
+    """Flip the job to ``running`` and stamp ``started_at``.
+
+    Returns the division value (for logging) or ``None`` if the job vanished.
+    """
+    session = session_factory()
+    try:
+        job = session.get(EvaluationJob, job_id)
+        if job is None:
+            return None
+        job.status = EvaluationJobStatus.RUNNING
+        job.started_at = _utcnow()
+        division = (
+            job.division.value if hasattr(job.division, "value") else str(job.division)
+        )
+        session.commit()
+        return division
+    finally:
+        session.close()
+
+
+def _increment_job_counter(
+    session_factory: sessionmaker, job_id: int, *, succeeded: bool
+) -> None:
+    """Atomically bump the job's progress counters in its own tiny session.
+
+    ``UPDATE evaluation_jobs SET processed = processed + 1, (succeeded|failed)
+    = +1 WHERE id = :job_id``. Atomic SQL increments are commutative, so the
+    concurrent candidate coroutines need no ``SELECT ... FOR UPDATE`` and
+    cannot lose updates.
+    """
+    session = session_factory()
+    try:
+        values: dict = {"processed": EvaluationJob.processed + 1}
+        if succeeded:
+            values["succeeded"] = EvaluationJob.succeeded + 1
+        else:
+            values["failed"] = EvaluationJob.failed + 1
+        session.execute(
+            update(EvaluationJob).where(EvaluationJob.id == job_id).values(**values)
+        )
+        session.commit()
+    except Exception:
+        logger.exception(
+            "Failed to increment progress counter for evaluation job %d", job_id
+        )
+        try:
+            session.rollback()
+        except Exception:
+            pass
+    finally:
+        session.close()
+
+
+def _is_cancel_requested(session_factory: sessionmaker, job_id: int) -> bool:
+    """Fresh short read of the job's ``cancel_requested`` flag (W2).
+
+    The runner polls this between candidates. A separate tiny session keeps the
+    read off any per-candidate write transaction and always sees the latest
+    committed value written by the cancel endpoint.
+    """
+    session = session_factory()
+    try:
+        job = session.get(EvaluationJob, job_id)
+        return bool(job is not None and job.cancel_requested)
+    finally:
+        session.close()
+
+
+def _finalize_job(
+    session_factory: sessionmaker,
+    job_id: int,
+    *,
+    status: EvaluationJobStatus,
+    errors: list[dict] | None = None,
+    succeeded: int | None = None,
+    failed: int | None = None,
+    note: str | None = None,
+) -> None:
+    """Drive the job to a terminal state and write the final error list once."""
+    session = session_factory()
+    try:
+        job = session.get(EvaluationJob, job_id)
+        if job is None:
+            logger.error("Evaluation job %d vanished before finalize", job_id)
+            return
+        job.status = status
+        job.finished_at = _utcnow()
+        if errors is not None:
+            job.errors = errors
+        if succeeded is not None:
+            job.succeeded = succeeded
+        if failed is not None:
+            job.failed = failed
+        # Reconcile the running counter against the authoritative totals so a
+        # missed live increment cannot leave processed out of step.
+        if succeeded is not None and failed is not None:
+            job.processed = succeeded + failed
+        if note is not None:
+            job.note = note
+        session.commit()
+    except Exception:
+        logger.exception("Failed to finalize evaluation job %d", job_id)
+        try:
+            session.rollback()
+        except Exception:
+            pass
+    finally:
+        session.close()
+
+
+async def _evaluate_candidate_in_session(
+    app_id: int,
+    rubric_id: int,
+    division: str,
+    session_factory: sessionmaker,
+) -> tuple[str, dict]:
+    """Evaluate one candidate in its own session (Phase 1 transaction model).
+
+    Commits on success (after the SCREENING flip), rolls back on failure, and
+    closes the session in ``finally``. Only plain IDs cross the boundary, so a
+    failed candidate can never poison another's transaction and leaves no
+    partial rows.
+    """
+    started = time.monotonic()
+    logger.info("Evaluating application %d (division=%s)", app_id, division)
+    session = session_factory()
+    try:
+        app = session.get(Application, app_id)
+        if app is None:
+            raise ValueError(f"Application {app_id} not found")
+        rubric_row = session.get(Rubric, rubric_id)
+        if rubric_row is None:
+            raise ValueError(f"Rubric {rubric_id} not found")
+        result = await _evaluate_one(app, rubric_row, session)
+        app.status = ApplicationStatus.SCREENING
+        session.commit()
+        logger.info(
+            "Application %d evaluated successfully in %.1fs",
+            app_id,
+            time.monotonic() - started,
+        )
+        return ("ok", result)
+    except Exception as exc:
+        try:
+            session.rollback()
+        except Exception:
+            logger.exception("Rollback failed for application %d", app_id)
+        logger.exception(
+            "Evaluation failed for application %d after %.1fs",
+            app_id,
+            time.monotonic() - started,
+        )
+        return ("err", {"application_id": app_id, "error": str(exc)})
+    finally:
+        session.close()
+
+
+async def _run_job_candidates(
+    job_id: int,
+    division: str,
+    application_ids: list[int],
+    rubric_id: int,
+    session_factory: sessionmaker,
+) -> tuple[list[dict], list[dict]]:
+    """Run the bounded-concurrency candidate pipeline, bumping job counters.
+
+    Identical concurrency/session model to Phase 1: an ``asyncio.Semaphore``
+    of ``_effective_concurrency()`` over per-candidate sessions, sync heavy
+    stages offloaded via ``asyncio.to_thread`` inside ``_evaluate_one``. After
+    each candidate settles, its outcome advances the job's counters with an
+    atomic increment. The detailed per-candidate error list is collected here
+    and written once by the caller at completion (never appended
+    concurrently).
+    """
+    if not application_ids:
+        return [], []
+
+    semaphore = asyncio.Semaphore(_effective_concurrency())
+
+    async def _bounded(app_id: int) -> tuple[str, dict]:
         async with semaphore:
-            try:
-                result = await _evaluate_one(app, rubric, db)
-                app.status = ApplicationStatus.SCREENING
-                db.flush()
-                return ("ok", result)
-            except Exception as exc:
-                traceback.print_exc()
-                return (
-                    "err",
-                    {"application_id": app.id, "error": str(exc)},
+            # W2 cooperative cancel: check just before starting each candidate.
+            # Candidates already past this point (in-flight) finish normally;
+            # not-yet-started ones are skipped, so no new work is scheduled and
+            # nothing is hard-killed mid-candidate.
+            if _is_cancel_requested(session_factory, job_id):
+                logger.info(
+                    "Evaluation job %d cancel requested — skipping application %d",
+                    job_id,
+                    app_id,
                 )
+                return ("cancelled", {"application_id": app_id})
+            outcome = await _evaluate_candidate_in_session(
+                app_id, rubric_id, division, session_factory
+            )
+            _increment_job_counter(
+                session_factory, job_id, succeeded=(outcome[0] == "ok")
+            )
+            return outcome
 
-    outcomes = await asyncio.gather(*[_bounded(a) for a in applications])
+    outcomes = await asyncio.gather(*[_bounded(app_id) for app_id in application_ids])
 
     results: list[dict] = []
     errors: list[dict] = []
     for tag, item in outcomes:
         if tag == "ok":
             results.append(item)
-        else:
+        elif tag == "err":
             errors.append(item)
+        # "cancelled" outcomes are skipped candidates — neither a success nor a
+        # failure, and never counted in the progress totals.
+    return results, errors
 
-    db.commit()
 
-    return {
-        "queued": len(applications),
-        "results": results,
-        "errors": errors,
-        **counters,
-    }
+async def run_evaluation_job(
+    job_id: int,
+    division: str,
+    application_ids: list[int],
+    rubric_id: int,
+    session_factory: sessionmaker,
+) -> None:
+    """Background runner for one evaluation job — owns its full lifecycle.
+
+    Flips the job to ``running``, evaluates each candidate (Phase 1 model)
+    while atomically advancing the progress counters, writes the complete
+    ``errors`` list once at completion, and always reaches a terminal state.
+    Never raises: it is a FastAPI BackgroundTask, and an unexpected failure
+    must still free the division's partial-unique slot by marking the job
+    ``failed``.
+    """
+    started = _mark_job_running(session_factory, job_id)
+    if started is None:
+        logger.error(
+            "Evaluation job %d not found when starting runner; aborting", job_id
+        )
+        return
+
+    batch_started = time.monotonic()
+    logger.info(
+        "Evaluation job %d started: division=%s candidates=%d",
+        job_id,
+        division,
+        len(application_ids),
+    )
+    try:
+        results, errors = await _run_job_candidates(
+            job_id, division, application_ids, rubric_id, session_factory
+        )
+    except Exception:
+        # _evaluate_candidate_in_session swallows per-candidate failures, so
+        # reaching here means the orchestration itself failed.
+        logger.exception(
+            "Evaluation job %d crashed during candidate processing", job_id
+        )
+        _finalize_job(
+            session_factory,
+            job_id,
+            status=EvaluationJobStatus.FAILED,
+            note="run crashed",
+        )
+        return
+
+    # W2: a cancel requested while running drives the job to the terminal
+    # ``cancelled`` state instead of ``completed``. Already-committed candidates
+    # remain (durable partial progress); the skipped ones are simply not counted
+    # (processed < total), and the division slot frees on this finalize.
+    if _is_cancel_requested(session_factory, job_id):
+        skipped = len(application_ids) - len(results) - len(errors)
+        _finalize_job(
+            session_factory,
+            job_id,
+            status=EvaluationJobStatus.CANCELLED,
+            errors=errors,
+            succeeded=len(results),
+            failed=len(errors),
+            note="cancelled by recruiter",
+        )
+        logger.info(
+            "Evaluation job %d cancelled: ok=%d failed=%d skipped=%d duration=%.1fs",
+            job_id,
+            len(results),
+            len(errors),
+            skipped,
+            time.monotonic() - batch_started,
+        )
+        return
+
+    _finalize_job(
+        session_factory,
+        job_id,
+        status=EvaluationJobStatus.COMPLETED,
+        errors=errors,
+        succeeded=len(results),
+        failed=len(errors),
+    )
+    logger.info(
+        "Evaluation job %d finished: ok=%d failed=%d duration=%.1fs",
+        job_id,
+        len(results),
+        len(errors),
+        time.monotonic() - batch_started,
+    )
+
+
+def recover_interrupted_jobs(session_factory: sessionmaker) -> int:
+    """Mark any non-terminal job left by a restart as ``failed``.
+
+    Called from the FastAPI lifespan on startup. A ``queued``/``running`` job
+    in the table after a boot means the worker died mid-run (crash/deploy), so
+    it can never make progress and is holding the division's slot. Flip it to
+    ``failed`` with ``note="interrupted by restart"`` and stamp
+    ``finished_at``. Returns the number of jobs recovered.
+    """
+    session = session_factory()
+    try:
+        jobs = (
+            session.query(EvaluationJob)
+            .filter(EvaluationJob.status.in_(list(NON_TERMINAL_JOB_STATUSES)))
+            .all()
+        )
+        if not jobs:
+            return 0
+        now = _utcnow()
+        for job in jobs:
+            job.status = EvaluationJobStatus.FAILED
+            job.note = "interrupted by restart"
+            job.finished_at = now
+        session.commit()
+        return len(jobs)
+    finally:
+        session.close()
 
 
 # ---------------------------------------------------------------------------
@@ -253,30 +617,49 @@ async def _evaluate_one(
     rubric: Rubric,
     db: Session,
 ) -> dict:
-    """Run the full pipeline for one application."""
+    """Run the full pipeline for one application.
+
+    W1 (Phase 3) — narrowed write window. The function is split into a
+    read/compute phase (KTM, KHS, NER, RAG — reads + slow async work only, no
+    flushed write) and a persist phase (Candidate, CandidateDocument caches,
+    DimensionScore, AI-validation reset) that runs with no awaits. The caller
+    flips the Application to SCREENING and commits right after, so the
+    per-candidate write transaction is held only for that short persist window
+    instead of across the whole LLM/NER/KHS round-trip.
+    """
     if app.status not in {ApplicationStatus.VERIFIED, ApplicationStatus.SCREENING}:
         app_status = app.status.value if hasattr(app.status, "value") else str(app.status)
         raise ValueError(
             f"Application {app.id} is not eligible for evaluation while status is '{app_status}'"
         )
 
-    user = db.query(User).filter(User.id == app.user_id).first()
-
     result: dict = {
         "application_id": app.id,
         "division": app.division.value if hasattr(app.division, "value") else str(app.division),
     }
 
+    # ===================== read / compute phase =====================
+    # The slow stages (KTM/KHS/NER/RAG) below run on reads only — no write is
+    # flushed here, so the per-candidate session holds no write transaction
+    # across them (under pysqlite a BEGIN is only emitted on the first DML, so
+    # a read-only session takes no lock and concurrent verification writes are
+    # not blocked). Every persist is deferred to the short write block at the
+    # bottom of this function.
+    user = db.query(User).filter(User.id == app.user_id).first()
+
+    # Read-only Candidate lookup. A Candidate usually already exists from
+    # post-verification NER; on a first-ever evaluation it is None (no caches
+    # to hit) and is created in the persist phase below.
+    existing_candidate = _find_candidate(app, db)
+
     # --- KTM validation ---
-    ktm_result = _run_ktm(app, user, db)
+    ktm_result = await _run_ktm(app, user, db)
     result["ktm_valid"] = ktm_result.get("valid", False)
     result["ktm_warning"] = ktm_result.get("warning") or ktm_result.get("error")
 
-    # --- Task 10.3/10.4: Ensure Candidate exists (moved up for cache check) ---
-    candidate = _ensure_candidate(app, rubric, user, db)
-
-    # --- KHS parsing/cache resolution ---
-    khs_context = _resolve_khs_context(app, candidate, rubric, db)
+    # --- KHS parsing/cache resolution (cache write deferred to persist phase) ---
+    khs_doc = _get_doc(app.id, DocumentType.KHS, db)
+    khs_context = await _resolve_khs_context(app, existing_candidate, rubric, khs_doc, db)
     result["khs_summary"] = khs_context["khs_summary"]
     result["khs_warning"] = khs_context["khs_warning"]
     result["khs_used_in_ai_scoring"] = khs_context["khs_used_in_ai_scoring"]
@@ -288,21 +671,28 @@ async def _evaluate_one(
         raise ValueError(f"No CV document found for application {app.id}")
     ml_doc = _get_doc(app.id, DocumentType.MOTIVATION_LETTER, db)
     ml_fallback_attempted = False
+    # Deferred motivation-letter cache write (a 5-tuple set when ML is rebuilt
+    # inline below; persisted in the write phase).
+    ml_cache_write: tuple | None = None
 
     # --- Task 10.3: Check NER cache from post-verification anonymization ---
-    cached_cv = (
-        db.query(CandidateDocument)
-        .filter(
-            CandidateDocument.candidate_id == candidate.id,
-            CandidateDocument.document_type == "cv",
-            CandidateDocument.anonymized_text != None,  # noqa: E711
+    # Cache lookups require an existing Candidate; without one there is nothing
+    # cached yet, so we fall straight through to the inline-NER branch.
+    cached_cv = None
+    if existing_candidate is not None:
+        cached_cv = (
+            db.query(CandidateDocument)
+            .filter(
+                CandidateDocument.candidate_id == existing_candidate.id,
+                CandidateDocument.document_type == "cv",
+                CandidateDocument.anonymized_text != None,  # noqa: E711
+            )
+            .order_by(CandidateDocument.created_at.desc())
+            .first()
         )
-        .order_by(CandidateDocument.created_at.desc())
-        .first()
-    )
-    if cached_cv and not _cache_matches_document(cached_cv, cv_doc):
-        logger.info("Ignoring stale CV NER cache for application %d", app.id)
-        cached_cv = None
+        if cached_cv and not _cache_matches_document(cached_cv, cv_doc):
+            logger.info("Ignoring stale CV NER cache for application %d", app.id)
+            cached_cv = None
 
     if cached_cv and cached_cv.anonymized_text:
         # Cache hit — use pre-computed anonymized text
@@ -312,26 +702,27 @@ async def _evaluate_one(
         full_text = cached_cv.anonymized_text
 
         # Also check for cached motivation letter
-        cached_ml = (
-            db.query(CandidateDocument)
-            .filter(
-                CandidateDocument.candidate_id == candidate.id,
-                CandidateDocument.document_type == "motivation_letter",
-                CandidateDocument.anonymized_text != None,  # noqa: E711
+        cached_ml = None
+        if existing_candidate is not None and ml_doc:
+            cached_ml = (
+                db.query(CandidateDocument)
+                .filter(
+                    CandidateDocument.candidate_id == existing_candidate.id,
+                    CandidateDocument.document_type == "motivation_letter",
+                    CandidateDocument.anonymized_text != None,  # noqa: E711
+                )
+                .order_by(CandidateDocument.created_at.desc())
+                .first()
             )
-            .order_by(CandidateDocument.created_at.desc())
-            .first()
-        )
-        if cached_ml and ml_doc and not _cache_matches_document(cached_ml, ml_doc):
-            logger.info(
-                "Ignoring stale motivation letter NER cache for application %d",
-                app.id,
-            )
-            cached_ml = None
+            if cached_ml and not _cache_matches_document(cached_ml, ml_doc):
+                logger.info(
+                    "Ignoring stale motivation letter NER cache for application %d",
+                    app.id,
+                )
+                cached_ml = None
         ml_anon_text = cached_ml.anonymized_text if cached_ml else ""
 
-        # We still need raw_text for _ensure_candidate_document bookkeeping
-        cv_doc = _get_doc(app.id, DocumentType.CV, db)
+        # We still need raw_text for the deferred CandidateDocument refresh.
         raw_text = cached_cv.raw_text or ""
         normalised = {
             "normalized_text": cached_cv.normalized_text or "",
@@ -352,28 +743,27 @@ async def _evaluate_one(
             app.id,
         )
 
-        cv_doc = _get_doc(app.id, DocumentType.CV, db)
-        if not cv_doc:
-            raise ValueError(f"No CV document found for application {app.id}")
-
-        extraction = extract_text_from_pdf(cv_doc.file_path)
+        # Heavy sync stages (PyMuPDF extraction, IndoBERT NER inference) run
+        # in worker threads so they never block the event loop.
+        extraction = await asyncio.to_thread(extract_text_from_pdf, cv_doc.file_path)
         cv_metadata = extraction.get("metadata") or {}
         raw_text = extraction.get("raw_text", "")
-        normalised = normalize_and_segment(raw_text)
-        anonymised = anonymize_text(normalised["normalized_text"])
+        normalised = await asyncio.to_thread(normalize_and_segment, raw_text)
+        anonymised = await asyncio.to_thread(
+            anonymize_text, normalised["normalized_text"]
+        )
         full_text = anonymised.get("anonymized_text", "")
 
         # Also anonymize motivation letter if present
-        ml_doc = _get_doc(app.id, DocumentType.MOTIVATION_LETTER, db)
         ml_anon_text = ""
         cached_ml = (
             _get_ready_candidate_document(
-                candidate,
+                existing_candidate,
                 "motivation_letter",
                 ml_doc,
                 db,
             )
-            if ml_doc
+            if (existing_candidate is not None and ml_doc)
             else None
         )
         if cached_ml:
@@ -381,20 +771,23 @@ async def _evaluate_one(
         elif ml_doc and os.path.exists(ml_doc.file_path):
             ml_fallback_attempted = True
             try:
-                ml_extraction = extract_text_from_pdf(ml_doc.file_path)
+                ml_extraction = await asyncio.to_thread(
+                    extract_text_from_pdf, ml_doc.file_path
+                )
                 ml_metadata = ml_extraction.get("metadata") or {}
-                ml_norm = normalize_and_segment(ml_extraction.get("raw_text", ""))
-                ml_anonymised = anonymize_text(ml_norm["normalized_text"])
+                ml_norm = await asyncio.to_thread(
+                    normalize_and_segment, ml_extraction.get("raw_text", "")
+                )
+                ml_anonymised = await asyncio.to_thread(
+                    anonymize_text, ml_norm["normalized_text"]
+                )
                 ml_anon_text = ml_anonymised.get("anonymized_text", "")
-                _ensure_candidate_document(
-                    candidate,
+                ml_cache_write = (
                     ml_doc,
                     ml_extraction.get("raw_text", ""),
                     ml_norm,
                     ml_anonymised,
-                    db,
-                    document_type="motivation_letter",
-                    metadata=ml_metadata,
+                    ml_metadata,
                 )
             except Exception:
                 pass  # graceful fallback — ML is bonus context
@@ -406,20 +799,23 @@ async def _evaluate_one(
         and os.path.exists(ml_doc.file_path)
     ):
         try:
-            ml_extraction = extract_text_from_pdf(ml_doc.file_path)
+            ml_extraction = await asyncio.to_thread(
+                extract_text_from_pdf, ml_doc.file_path
+            )
             ml_metadata = ml_extraction.get("metadata") or {}
-            ml_norm = normalize_and_segment(ml_extraction.get("raw_text", ""))
-            ml_anonymised = anonymize_text(ml_norm["normalized_text"])
+            ml_norm = await asyncio.to_thread(
+                normalize_and_segment, ml_extraction.get("raw_text", "")
+            )
+            ml_anonymised = await asyncio.to_thread(
+                anonymize_text, ml_norm["normalized_text"]
+            )
             ml_anon_text = ml_anonymised.get("anonymized_text", "")
-            _ensure_candidate_document(
-                candidate,
+            ml_cache_write = (
                 ml_doc,
                 ml_extraction.get("raw_text", ""),
                 ml_norm,
                 ml_anonymised,
-                db,
-                document_type="motivation_letter",
-                metadata=ml_metadata,
+                ml_metadata,
             )
         except Exception:
             pass  # graceful fallback — ML is bonus context
@@ -445,8 +841,44 @@ async def _evaluate_one(
             + full_text
         )
 
-    # --- Bridge: update CandidateDocument ---
-    cand_doc = _ensure_candidate_document(
+    # --- RAG evaluation (reads the rubric + LLM round-trip; no write) ---
+    evaluation = await evaluate_candidate(
+        anonymized_cv={"anonymized_text": full_text},
+        rubric_id=rubric.id,
+        db=db,
+        certificate_data=None,
+    )
+
+    # --- SWOT text extraction (highlight only, not scored) ---
+    swot_text = await _extract_swot(app, db)
+    result["swot_text"] = swot_text
+
+    # ===================== persist phase (short write tx) =====================
+    # Everything below mutates the DB and runs straight through with no awaits.
+    # The caller flips status to SCREENING and commits immediately after, so
+    # the write lock is held only for this brief window — never across the
+    # LLM/NER/KHS work above.
+    candidate = _ensure_candidate(app, rubric, user, db)
+
+    # KHS cache row + scoring metadata, deferred from the read phase.
+    _apply_khs_persist(candidate, khs_doc, khs_context["_persist"], db)
+
+    # Motivation-letter cache, if it was rebuilt inline above.
+    if ml_cache_write is not None:
+        ml_portal_doc, ml_raw_text, ml_norm, ml_anon, ml_meta = ml_cache_write
+        _ensure_candidate_document(
+            candidate,
+            ml_portal_doc,
+            ml_raw_text,
+            ml_norm,
+            ml_anon,
+            db,
+            document_type="motivation_letter",
+            metadata=ml_meta,
+        )
+
+    # --- Bridge: refresh the CV CandidateDocument (cache hit or fresh NER) ---
+    _ensure_candidate_document(
         candidate,
         cv_doc,
         raw_text,
@@ -454,14 +886,6 @@ async def _evaluate_one(
         anonymised,
         db,
         metadata=cv_metadata,
-    )
-
-    # --- RAG evaluation ---
-    evaluation = await evaluate_candidate(
-        anonymized_cv={"anonymized_text": full_text},
-        rubric_id=rubric.id,
-        db=db,
-        certificate_data=None,
     )
 
     # --- Store results ---
@@ -481,10 +905,6 @@ async def _evaluate_one(
     candidate.ai_validated_at = None
     candidate.ai_validation_note = None
     db.flush()
-
-    # --- SWOT text extraction (highlight only, not scored) ---
-    swot_text = _extract_swot(app, db)
-    result["swot_text"] = swot_text
 
     # --- Populate result ---
     result["candidate_id"] = candidate.id
@@ -576,15 +996,22 @@ def rubric_requires_academic_evidence(rubric: Rubric) -> bool:
     return any(keyword in haystack for keyword in _ACADEMIC_EVIDENCE_KEYWORDS)
 
 
-def _resolve_khs_context(
+async def _resolve_khs_context(
     app: Application,
-    candidate: Candidate,
+    candidate: Candidate | None,
     rubric: Rubric,
+    khs_doc: Document | None,
     db: Session,
 ) -> dict:
-    """Load cached KHS or parse inline fallback, then decide prompt usage."""
+    """Load cached KHS or parse inline fallback, then decide prompt usage.
+
+    W1: read/compute only. The inline parse no longer stores its cache, and the
+    scoring-metadata write is not applied here; both are deferred to
+    ``_apply_khs_persist`` in the per-candidate persist phase. The returned
+    ``_persist`` blob carries everything needed to write them in the short
+    write window.
+    """
     requires_academic = rubric_requires_academic_evidence(rubric)
-    khs_doc = _get_doc(app.id, DocumentType.KHS, db)
     if not khs_doc:
         logger.info("KHS cache miss for application %d: no KHS document", app.id)
         return {
@@ -593,22 +1020,25 @@ def _resolve_khs_context(
             "khs_warning": "No KHS document uploaded",
             "khs_used_in_ai_scoring": False,
             "khs_source": "missing",
+            "_persist": {"has_doc": False},
         }
 
-    cached = _get_cached_khs_document(candidate, khs_doc, db)
+    cached = _get_cached_khs_document(candidate, khs_doc, db) if candidate else None
     parsed: KhsResult | None = None
-    cache_doc: CandidateDocument | None = None
     source = "missing"
+    store_inline = False
+    raw_text = ""
+    metadata: dict = {}
 
     if cached:
         parsed = parsed_khs_from_cache(cached.sections_json)
-        cache_doc = cached
         source = "cache"
         logger.info("KHS cache hit for application %d", app.id)
     else:
         logger.info("KHS cache miss for application %d, parsing inline", app.id)
-        parsed, cache_doc = _parse_and_store_khs_inline(app, candidate, khs_doc, db)
+        parsed, raw_text, metadata = await _parse_khs_inline(app, khs_doc)
         source = "inline_fallback"
+        store_inline = True
 
     warning = None
     if not parsed:
@@ -638,14 +1068,6 @@ def _resolve_khs_context(
         if parsed and not parsed.get("parse_error")
         else None
     )
-    _update_khs_scoring_metadata(
-        cache_doc,
-        parsed,
-        source=source,
-        used_in_ai_scoring=used_in_ai,
-        warning=warning,
-        db=db,
-    )
 
     return {
         "parsed_khs": parsed,
@@ -653,14 +1075,63 @@ def _resolve_khs_context(
         "khs_warning": warning,
         "khs_used_in_ai_scoring": used_in_ai,
         "khs_source": source,
+        "_persist": {
+            "has_doc": True,
+            "store_inline": store_inline,
+            "raw_text": raw_text,
+            "metadata": metadata,
+            "parsed": parsed,
+            "source": source,
+            "used_in_ai_scoring": used_in_ai,
+            "warning": warning,
+        },
     }
 
 
-def _get_cached_khs_document(
+def _apply_khs_persist(
     candidate: Candidate,
+    khs_doc: Document | None,
+    persist: dict,
+    db: Session,
+) -> None:
+    """Persist the KHS cache row + scoring metadata resolved in the read phase.
+
+    Runs in the per-candidate persist phase (W1). For an inline parse it stores
+    the cache row now; for a cache hit it re-resolves the existing row. Either
+    way it then writes the scoring metadata (used-in-AI flag, source, warning).
+    """
+    if not persist.get("has_doc"):
+        return
+    parsed = persist.get("parsed")
+    if persist.get("store_inline"):
+        cache_doc = _store_khs_cache(
+            candidate=candidate,
+            portal_doc=khs_doc,
+            raw_text=persist.get("raw_text", ""),
+            parsed=parsed,
+            metadata=persist.get("metadata") or {},
+            db=db,
+            source="inline_fallback",
+        )
+    else:
+        cache_doc = _get_cached_khs_document(candidate, khs_doc, db)
+    _update_khs_scoring_metadata(
+        cache_doc,
+        parsed,
+        source=persist.get("source"),
+        used_in_ai_scoring=persist.get("used_in_ai_scoring", False),
+        warning=persist.get("warning"),
+        db=db,
+    )
+
+
+def _get_cached_khs_document(
+    candidate: Candidate | None,
     khs_doc: Document,
     db: Session,
 ) -> CandidateDocument | None:
+    if candidate is None:
+        return None
     cached = (
         db.query(CandidateDocument)
         .filter(
@@ -680,32 +1151,32 @@ def _get_cached_khs_document(
     return cached
 
 
-def _parse_and_store_khs_inline(
+async def _parse_khs_inline(
     app: Application,
-    candidate: Candidate,
     khs_doc: Document,
-    db: Session,
-) -> tuple[KhsResult, CandidateDocument | None]:
+) -> tuple[KhsResult, str, dict]:
+    """Parse KHS inline (compute only) — the cache write is deferred to persist.
+
+    W1: returns ``(parsed, raw_text, metadata)`` and performs no DB write, so it
+    never flushes inside the read phase. ``_apply_khs_persist`` stores the cache
+    row later in the short write window. Degrades to a structured parse error
+    rather than raising, so a bad KHS never fails the whole candidate.
+    """
     try:
-        extraction = extract_text_from_pdf(khs_doc.file_path)
+        # parse_khs calls DeepSeek through the sync client; running it in a
+        # worker thread keeps its retries/timeout off the event loop.
+        extraction = await asyncio.to_thread(
+            extract_text_from_pdf, khs_doc.file_path
+        )
         raw_text = (extraction.get("raw_text") or "").strip()
         metadata = extraction.get("metadata") or {}
-        parsed = parse_khs(khs_doc.file_path)
+        parsed = await asyncio.to_thread(parse_khs, khs_doc.file_path)
     except Exception as exc:  # noqa: BLE001 - evaluation should degrade gracefully
         logger.warning("Inline KHS parse failed for application %d: %s", app.id, exc)
         raw_text = ""
         metadata = {}
         parsed = khs_parse_error(f"Inline KHS parse failed: {exc}")
 
-    cache_doc = _store_khs_cache(
-        candidate=candidate,
-        portal_doc=khs_doc,
-        raw_text=raw_text,
-        parsed=parsed,
-        metadata=metadata,
-        db=db,
-        source="inline_fallback",
-    )
     if parsed.get("parse_error"):
         logger.warning(
             "KHS parse error for application %d: %s",
@@ -714,7 +1185,7 @@ def _parse_and_store_khs_inline(
         )
     else:
         logger.info("KHS parse success for application %d", app.id)
-    return parsed, cache_doc
+    return parsed, raw_text, metadata
 
 
 def _store_khs_cache(
@@ -812,14 +1283,16 @@ def _public_khs_summary(parsed: KhsResult | None) -> dict | None:
     }
 
 
-def _run_ktm(app: Application, user: User | None, db: Session) -> dict:
+async def _run_ktm(app: Application, user: User | None, db: Session) -> dict:
     """Validate KTM — returns ktm_validator output or synthetic error."""
     ktm_doc = _get_doc(app.id, DocumentType.KTM, db)
     if not ktm_doc:
         return {"valid": False, "error": "No KTM document uploaded"}
 
     expected_nim = user.nim if user else None
-    return validate_ktm(ktm_doc.file_path, expected_nim=expected_nim)
+    return await asyncio.to_thread(
+        validate_ktm, ktm_doc.file_path, expected_nim=expected_nim
+    )
 
 
 def _legacy_parse_khs_inline(app: Application, db: Session) -> KhsResult:
@@ -831,16 +1304,30 @@ def _legacy_parse_khs_inline(app: Application, db: Session) -> KhsResult:
     return parse_khs(khs_doc.file_path)
 
 
-def _extract_swot(app: Application, db: Session) -> str | None:
+async def _extract_swot(app: Application, db: Session) -> str | None:
     """Extract SWOT text — best effort."""
     swot_doc = _get_doc(app.id, DocumentType.SWOT, db)
     if not swot_doc or not os.path.exists(swot_doc.file_path):
         return None
     try:
-        result = extract_text_from_pdf(swot_doc.file_path)
+        result = await asyncio.to_thread(extract_text_from_pdf, swot_doc.file_path)
         return (result.get("raw_text") or "").strip() or None
     except Exception:
         return None
+
+
+def _find_candidate(app: Application, db: Session) -> Candidate | None:
+    """Read-only lookup of the Candidate linked to this application's user.
+
+    Used in the W1 read phase so cache lookups can run without creating (and
+    flushing) a Candidate row. ``_ensure_candidate`` performs the create/update
+    later, in the persist phase.
+    """
+    return (
+        db.query(Candidate)
+        .filter(Candidate.user_id == app.user_id)
+        .first()
+    )
 
 
 def _ensure_candidate(

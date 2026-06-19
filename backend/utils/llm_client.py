@@ -6,12 +6,22 @@ recruitment screening pipeline.
 
 import asyncio
 import json
+import logging
 import time
 
 from openai import AsyncOpenAI, OpenAI
 
 from backend.config import settings
 
+logger = logging.getLogger(__name__)
+
+# Explicit client limits. The OpenAI SDK defaults to a 600 s timeout with 2
+# internal retries; combined with the app-level retry loops below, a single
+# slow/failing DeepSeek call could pin a request for many minutes. SDK
+# retries stay at 0 because call_llm / call_llm_async / call_khs_llm_parser
+# already implement their own 3-attempt backoff.
+LLM_TIMEOUT_SECONDS = 90.0
+LLM_MAX_RETRIES = 0
 
 # Module-level singleton
 _client: OpenAI | None = None
@@ -37,6 +47,8 @@ def get_llm_client() -> OpenAI:
         _client = OpenAI(
             api_key=settings.deepseek_api_key,
             base_url=settings.deepseek_base_url,
+            timeout=LLM_TIMEOUT_SECONDS,
+            max_retries=LLM_MAX_RETRIES,
         )
     return _client
 
@@ -48,6 +60,8 @@ def get_async_llm_client() -> AsyncOpenAI:
         _async_client = AsyncOpenAI(
             api_key=settings.deepseek_api_key,
             base_url=settings.deepseek_base_url,
+            timeout=LLM_TIMEOUT_SECONDS,
+            max_retries=LLM_MAX_RETRIES,
         )
     return _async_client
 
@@ -94,10 +108,10 @@ def call_llm(
 
         except Exception as e:
             last_error = e
-            print(f"[LLM] Attempt {attempt}/{max_retries} failed: {e}")
+            logger.warning("[LLM] Attempt %d/%d failed: %s", attempt, max_retries, e)
             if attempt < max_retries:
                 wait = 2 ** attempt  # exponential backoff: 2, 4, 8 seconds
-                print(f"[LLM] Retrying in {wait}s...")
+                logger.info("[LLM] Retrying in %ds...", wait)
                 time.sleep(wait)
 
     raise RuntimeError(
@@ -134,9 +148,11 @@ def call_llm_json(
         try:
             return _parse_json_response(raw)
         except (json.JSONDecodeError, ValueError) as e:
-            print(f"[LLM] JSON parse attempt {attempt}/{max_retries} failed: {e}")
+            logger.warning(
+                "[LLM] JSON parse attempt %d/%d failed: %s", attempt, max_retries, e
+            )
             if attempt < max_retries:
-                print("[LLM] Retrying with stricter prompt...")
+                logger.info("[LLM] Retrying with stricter prompt...")
 
     raise ValueError(
         f"Failed to get valid JSON from LLM after {max_retries} attempts. "
@@ -175,10 +191,10 @@ async def call_llm_async(
 
         except Exception as e:
             last_error = e
-            print(f"[LLM] Attempt {attempt}/{max_retries} failed: {e}")
+            logger.warning("[LLM] Attempt %d/%d failed: %s", attempt, max_retries, e)
             if attempt < max_retries:
                 wait = 2 ** attempt  # exponential backoff: 2, 4, 8 seconds
-                print(f"[LLM] Retrying in {wait}s...")
+                logger.info("[LLM] Retrying in %ds...", wait)
                 await asyncio.sleep(wait)
 
     raise RuntimeError(
@@ -205,9 +221,11 @@ async def call_llm_json_async(
         try:
             return _parse_json_response(raw)
         except (json.JSONDecodeError, ValueError) as e:
-            print(f"[LLM] JSON parse attempt {attempt}/{max_retries} failed: {e}")
+            logger.warning(
+                "[LLM] JSON parse attempt %d/%d failed: %s", attempt, max_retries, e
+            )
             if attempt < max_retries:
-                print("[LLM] Retrying with stricter prompt...")
+                logger.info("[LLM] Retrying with stricter prompt...")
 
     raise ValueError(
         f"Failed to get valid JSON from LLM after {max_retries} attempts. "
@@ -249,9 +267,10 @@ def _khs_chat_completion(
     except Exception as exc:  # noqa: BLE001 - inspect to decide on fallback
         if not _looks_like_thinking_rejection(exc):
             raise
-        print(
-            f"[KHS LLM] 'thinking' parameter rejected "
-            f"({exc.__class__.__name__}: {exc}); retrying without it"
+        logger.warning(
+            "[KHS LLM] 'thinking' parameter rejected (%s: %s); retrying without it",
+            exc.__class__.__name__,
+            exc,
         )
         return client.chat.completions.create(**base_kwargs)
 
@@ -304,13 +323,16 @@ def call_khs_llm_parser(
             )
         except Exception as exc:  # noqa: BLE001 - transient SDK/API error
             last_error = exc
-            print(
-                f"[KHS LLM] call attempt {attempt}/{max_retries} failed: "
-                f"{exc.__class__.__name__}: {exc}"
+            logger.warning(
+                "[KHS LLM] call attempt %d/%d failed: %s: %s",
+                attempt,
+                max_retries,
+                exc.__class__.__name__,
+                exc,
             )
             if attempt < max_retries:
                 wait = 2 ** attempt
-                print(f"[KHS LLM] retrying in {wait}s...")
+                logger.info("[KHS LLM] retrying in %ds...", wait)
                 time.sleep(wait)
             continue
 
@@ -323,9 +345,11 @@ def call_khs_llm_parser(
                 f"LLM returned empty content. finish_reason={finish_reason!r}, "
                 f"model={model!r}, message={choice.message!r}"
             )
-            print(
-                f"[KHS LLM] empty content attempt {attempt}/{max_retries}: "
-                f"{last_error}"
+            logger.warning(
+                "[KHS LLM] empty content attempt %d/%d: %s",
+                attempt,
+                max_retries,
+                last_error,
             )
             if attempt < max_retries:
                 continue
@@ -339,11 +363,13 @@ def call_khs_llm_parser(
                 f"LLM returned invalid JSON (model={model!r}, "
                 f"finish_reason={finish_reason!r}): {exc} | raw preview: {preview!r}"
             )
-            print(
-                f"[KHS LLM] invalid JSON attempt {attempt}/{max_retries}: {exc}"
+            logger.warning(
+                "[KHS LLM] invalid JSON attempt %d/%d: %s", attempt, max_retries, exc
             )
             if attempt < max_retries:
-                print("[KHS LLM] retrying with strict json_object response_format...")
+                logger.info(
+                    "[KHS LLM] retrying with strict json_object response_format..."
+                )
                 continue
             raise last_error
 
