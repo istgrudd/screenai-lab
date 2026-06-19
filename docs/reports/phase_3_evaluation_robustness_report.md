@@ -2,7 +2,7 @@
 
 - **Date:** 2026-06-19
 - **Branch:** `fix/backend-evaluation`
-- **Status:** W1 ✅ · W2 ✅ · W5 ✅ implemented and tested · W3 ⬜ not implemented · W4 ⬜ not implemented · W6 ⏸ deferred (decision-gated)
+- **Status:** Phase 3 **closed at W1 + W2 + W5 by decision.** W1 ✅ · W2 ✅ · W5 ✅ implemented and tested · W3 ⬜ out of scope (deferred) · W4 ⬜ out of scope (deferred) · W6 ⏸ deferred (decision-gated)
 - **Commits (local, not pushed):**
   - `475b4a1` — `perf(eval): hold write tx only around score persist` (W1)
   - `8df85b3` — `feat(eval): cancellable evaluation jobs` (W2)
@@ -233,21 +233,22 @@ docker stats <backend-container>
 
 ---
 
-## 6. Intentionally not implemented (this pass)
+## 6. Out of scope for Phase 3 (deferred by decision)
+
+Phase 3 is **closed at W1 + W2 + W5.** W3 and W4 were deliberately dropped from
+this phase; they remain valid future work but are not part of Phase 3. Both are
+independent and can be picked up later without reworking W1/W2/W5.
 
 - **W3 — heartbeat + stale-job watchdog.** Not implemented. Phase 2 startup
   recovery still catches jobs orphaned by a restart, but a job that wedges
   **without** a restart is not yet auto-failed. No model/migration or watchdog
   task was added; there is consequently no `heartbeat_at` column and no watchdog
-  threshold env flag yet. Recommended as the next workstream.
+  threshold env flag yet. (See the remaining-risk note in §9.)
 - **W4 — async KHS parser.** Not implemented. The KHS parse path still uses the
   sync DeepSeek client offloaded via `asyncio.to_thread` (the Phase 1 stopgap),
   which keeps it off the event loop but does not yet use the native `AsyncOpenAI`
   client. W1 did split the KHS path into `_parse_khs_inline` (compute) +
-  `_apply_khs_persist` (write), which is a clean seam for W4 to make
-  `_parse_khs_inline` natively async later.
-
-Both are independent and can be picked up without reworking W1/W2/W5.
+  `_apply_khs_persist` (write), which is a clean seam should W4 be revisited.
 
 ---
 
