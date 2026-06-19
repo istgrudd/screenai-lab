@@ -18,11 +18,11 @@ export const PHASES = {
 };
 
 export const PHASE_LABEL = {
-  UPCOMING: "Belum dibuka",
-  SUBMISSION: "Pendaftaran",
-  EVALUATION: "Evaluasi AI",
-  ANNOUNCEMENT: "Pengumuman",
-  CLOSED: "Selesai",
+  UPCOMING: "Upcoming",
+  SUBMISSION: "Submission",
+  EVALUATION: "Evaluation",
+  ANNOUNCEMENT: "Announcement",
+  CLOSED: "Closed",
 };
 
 /** Tailwind class set for the phase badge — colour per spec 13.3.4. */

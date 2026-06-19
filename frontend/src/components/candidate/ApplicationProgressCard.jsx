@@ -14,36 +14,36 @@ import { cx } from "@/lib/candidateUx";
 function readiness(application, complete) {
   if (!application) {
     return {
-      label: "Belum mulai",
+      label: "Not started",
       tone: "neutral",
-      description: "Buat pendaftaran terlebih dahulu sebelum mengunggah dokumen.",
+      description: "Create your application before uploading documents.",
     };
   }
   if (application.status === "correction_requested") {
     return {
-      label: "Perlu revisi",
+      label: "Needs revision",
       tone: "warning",
-      description: "Ganti dokumen yang ditolak sesuai catatan reviewer.",
+      description: "Replace the rejected documents according to the reviewer notes.",
     };
   }
   if (application.status !== "draft") {
     return {
-      label: "Sudah terkirim",
+      label: "Submitted",
       tone: "info",
-      description: "Pendaftaran sudah terkirim dan dokumen tidak bisa diubah.",
+      description: "Your application is submitted and documents can no longer be changed.",
     };
   }
   if (complete) {
     return {
-      label: "Siap ditinjau",
+      label: "Ready to review",
       tone: "success",
-      description: "Semua dokumen wajib sudah ada. Lanjutkan ke review final.",
+      description: "All required documents are in. Continue to the final review.",
     };
   }
   return {
-    label: "Belum siap submit",
+    label: "Not ready to submit",
     tone: "warning",
-    description: "Lengkapi seluruh dokumen wajib sebelum menuju review final.",
+    description: "Complete all required documents before moving to the final review.",
   };
 }
 
@@ -73,11 +73,11 @@ export default function ApplicationProgressCard({
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.08em] text-primary">
-              Progress Dokumen
+              Document Progress
             </p>
             <CardTitle className="mt-1 flex items-center gap-2 font-heading text-xl tracking-normal">
               <FileText className="h-5 w-5 text-primary" />
-              Kesiapan Pendaftaran
+              Application Readiness
             </CardTitle>
           </div>
           <StatusBadge
@@ -92,7 +92,7 @@ export default function ApplicationProgressCard({
         <div className="space-y-2">
           <div className="flex items-center justify-between gap-3">
             <p className="text-sm font-medium">
-              {completed}/{total} dokumen wajib sudah diunggah
+              {completed}/{total} required documents uploaded
             </p>
             <span className="font-heading text-lg font-bold tabular-nums text-primary">
               {percent}%
@@ -113,7 +113,7 @@ export default function ApplicationProgressCard({
         {missing.length > 0 ? (
           <div className="rounded-xl bg-surface-container-low px-4 py-3">
             <p className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-              Masih dibutuhkan
+              Still needed
             </p>
             <div className="mt-3 flex flex-wrap gap-2">
               {missing.map((item) => (
@@ -129,13 +129,13 @@ export default function ApplicationProgressCard({
         ) : (
           <div className="flex items-start gap-3 rounded-xl bg-success/10 px-4 py-3 text-sm text-success">
             <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
-            <span>Seluruh dokumen wajib sudah tercatat di pendaftaran.</span>
+            <span>All required documents are recorded in your application.</span>
           </div>
         )}
 
         {standardCompleteness.total !== total && (
           <p className="text-xs text-muted-foreground">
-            Catatan: progress mengikuti daftar dokumen wajib halaman ini.
+            Note: progress follows the required-document list on this page.
           </p>
         )}
 

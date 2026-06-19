@@ -135,6 +135,52 @@ function SmallStat({ label, value }) {
   );
 }
 
+function ActivePeriodSummary({ activePeriod, summary }) {
+  return (
+    <Card className="brand-card">
+      <CardContent className="flex flex-col gap-4 p-5 lg:flex-row lg:items-center lg:justify-between">
+        <div className="min-w-0">
+          <p className="text-xs font-semibold uppercase tracking-[0.08em] text-primary">
+            Active Period
+          </p>
+          <div className="mt-1 flex flex-wrap items-center gap-2">
+            <h2 className="font-heading text-xl font-bold tracking-normal">
+              {activePeriod.name}
+            </h2>
+            <PhaseBadge phase={activePeriod.current_phase} />
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
+          <div>
+            <p className="text-muted-foreground">Threshold</p>
+            <p className="font-semibold tabular-nums">
+              {activePeriod.threshold_n ?? "-"}
+            </p>
+          </div>
+          <div>
+            <p className="text-muted-foreground">Applications</p>
+            <p className="font-semibold tabular-nums">
+              {formatNumber(summary.total_applications)}
+            </p>
+          </div>
+          <div>
+            <p className="text-muted-foreground">Submitted</p>
+            <p className="font-semibold tabular-nums">
+              {formatNumber(summary.submitted_or_later)}
+            </p>
+          </div>
+          <div>
+            <p className="text-muted-foreground">Average score</p>
+            <p className="font-semibold tabular-nums">
+              {formatScore(summary.average_score)}
+            </p>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function RecruiterAnalyticsPage() {
   const [divisionFilter, setDivisionFilter] = useState("all");
   const [analytics, setAnalytics] = useState(EMPTY_ANALYTICS);
@@ -271,107 +317,67 @@ export default function RecruiterAnalyticsPage() {
         }
       />
 
-      {activePeriod ? (
-        <Card className="brand-card">
-          <CardContent className="flex flex-col gap-4 p-5 lg:flex-row lg:items-center lg:justify-between">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.08em] text-primary">
-                Active Period
-              </p>
-              <div className="mt-1 flex flex-wrap items-center gap-2">
-                <h2 className="font-heading text-xl font-bold tracking-normal">
-                  {activePeriod.name}
-                </h2>
-                <PhaseBadge phase={activePeriod.current_phase} />
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
-              <div>
-                <p className="text-muted-foreground">Threshold</p>
-                <p className="font-semibold tabular-nums">
-                  {activePeriod.threshold_n ?? "-"}
-                </p>
-              </div>
-              <div>
-                <p className="text-muted-foreground">Applications</p>
-                <p className="font-semibold tabular-nums">
-                  {formatNumber(summary.total_applications)}
-                </p>
-              </div>
-              <div>
-                <p className="text-muted-foreground">Submitted</p>
-                <p className="font-semibold tabular-nums">
-                  {formatNumber(summary.submitted_or_later)}
-                </p>
-              </div>
-              <div>
-                <p className="text-muted-foreground">Average score</p>
-                <p className="font-semibold tabular-nums">
-                  {formatScore(summary.average_score)}
-                </p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      ) : (
+      {loading ? (
+        <LoadingState label="Loading analytics..." />
+      ) : !activePeriod ? (
         <EmptyState
           icon={Clock}
           title="No active recruitment period"
-          description="Analytics are scoped to the active period, so all metrics are zero until a period is active."
+          description="Analytics are scoped to the active recruitment period. Create or activate a period to start collecting metrics."
         />
-      )}
+      ) : !hasApplications ? (
+        <>
+          <ActivePeriodSummary
+            activePeriod={activePeriod}
+            summary={summary}
+          />
+          <EmptyState
+            icon={Users}
+            title="No applications in the active period"
+            description="Metrics and charts will populate here as candidates submit their applications."
+          />
+        </>
+      ) : (
+        <>
+          <ActivePeriodSummary activePeriod={activePeriod} summary={summary} />
 
-      {loading && <LoadingState label="Loading analytics..." />}
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
+            <MetricCard
+              icon={Users}
+              label="Total applications"
+              value={formatNumber(summary.total_applications)}
+            />
+            <MetricCard
+              icon={ShieldCheck}
+              label="Verified"
+              value={formatNumber(summary.total_verified)}
+              tone="success"
+            />
+            <MetricCard
+              icon={Sparkles}
+              label="Evaluated"
+              value={formatNumber(summary.total_evaluated)}
+              tone="success"
+            />
+            <MetricCard
+              icon={Gauge}
+              label="Average score"
+              value={formatScore(summary.average_score)}
+              tone="warning"
+            />
+            <MetricCard
+              icon={FileWarning}
+              label="Review or correction"
+              value={formatNumber(
+                Number(evaluation.document_review_blocked_count || 0) +
+                  Number(evaluation.correction_blocked_count || 0)
+              )}
+              tone="destructive"
+            />
+          </div>
 
-      {!loading && activePeriod && !hasApplications && (
-        <EmptyState
-          icon={Users}
-          title="No applications in the active period"
-          description="Metrics will populate as candidates submit applications."
-        />
-      )}
-
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
-        <MetricCard
-          icon={Users}
-          label="Total applications"
-          value={loading ? "..." : formatNumber(summary.total_applications)}
-        />
-        <MetricCard
-          icon={ShieldCheck}
-          label="Verified"
-          value={loading ? "..." : formatNumber(summary.total_verified)}
-          tone="success"
-        />
-        <MetricCard
-          icon={Sparkles}
-          label="Evaluated"
-          value={loading ? "..." : formatNumber(summary.total_evaluated)}
-          tone="success"
-        />
-        <MetricCard
-          icon={Gauge}
-          label="Average score"
-          value={loading ? "..." : formatScore(summary.average_score)}
-          tone="warning"
-        />
-        <MetricCard
-          icon={FileWarning}
-          label="Review or correction"
-          value={
-            loading
-              ? "..."
-              : formatNumber(
-                  Number(evaluation.document_review_blocked_count || 0) +
-                    Number(evaluation.correction_blocked_count || 0)
-                )
-          }
-          tone="destructive"
-        />
-      </div>
-
-      <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
-        <InsightCard title="Applicants Per Division">
+          <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+            <InsightCard title="Applicants Per Division">
           {applicantsByDivision.length ? (
             applicantsByDivision.map((item) => (
               <BarRow
@@ -535,7 +541,9 @@ export default function RecruiterAnalyticsPage() {
             </p>
           )}
         </InsightCard>
-      </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }

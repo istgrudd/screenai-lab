@@ -63,11 +63,11 @@ export default function ApplicationOverviewPage() {
           if (!cancelled) setDocuments(docs || []);
         } catch (error) {
           if (!isNotFoundError(error)) {
-            toast.error(error.message || "Gagal memuat pendaftaran.");
+            toast.error(error.message || "Failed to load your application.");
           }
         }
       } catch (error) {
-        toast.error(error.message || "Gagal memuat profil.");
+        toast.error(error.message || "Failed to load your profile.");
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -80,7 +80,7 @@ export default function ApplicationOverviewPage() {
   }, []);
 
   if (loading) {
-    return <LoadingState label="Memuat ringkasan pendaftaran..." />;
+    return <LoadingState label="Loading application overview..." />;
   }
 
   if (!profile) return null;
@@ -89,19 +89,19 @@ export default function ApplicationOverviewPage() {
   const completeness = documentCompleteness(documents);
   const isDraft = application?.status === "draft";
   const actionLabel = !application
-    ? "Mulai Pendaftaran"
+    ? "Start Application"
     : isDraft && !completeness.complete
-    ? "Lanjut Unggah Dokumen"
+    ? "Continue Uploading Documents"
     : isDraft
-    ? "Tinjau & Kirim Pendaftaran"
-    : "Lihat Status Pendaftaran";
+    ? "Review & Submit"
+    : "View Application Status";
 
   return (
     <div className="space-y-6">
       <PageHeader
-        eyebrow="Pendaftaran"
-        title="Ringkasan Pendaftaran"
-        description="Lihat profil, divisi pilihan, kelengkapan dokumen, dan aksi berikutnya dalam satu tempat."
+        eyebrow="Application"
+        title="Application Overview"
+        description="See your profile, chosen division, document completeness, and next action in one place."
       />
 
       <CandidateNextActionCard
@@ -114,8 +114,8 @@ export default function ApplicationOverviewPage() {
       {!application && (
         <EmptyState
           icon={Inbox}
-          title="Pendaftaran belum dibuat"
-          description="Setelah memilih divisi, draft pendaftaran akan muncul di sini bersama progres dokumen."
+          title="No application created yet"
+          description="Once you choose a division, your application draft will appear here along with document progress."
         />
       )}
 
@@ -124,18 +124,18 @@ export default function ApplicationOverviewPage() {
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2 font-heading text-xl tracking-normal">
               <UserCircle2 className="h-5 w-5 text-primary" />
-              Profil Kandidat
+              Candidate Profile
             </CardTitle>
           </CardHeader>
           <CardContent className="grid grid-cols-1 gap-4 text-sm md:grid-cols-2">
-            <Detail label="Nama" value={profile.full_name} />
+            <Detail label="Full name" value={profile.full_name} />
             <Detail label="Email" value={profile.email} />
-            <Detail label="Nomor WhatsApp" value={profile.whatsapp} />
+            <Detail label="WhatsApp number" value={profile.whatsapp} />
             <Detail label="NIM" value={profile.nim} mono />
-            <Detail label="Fakultas" value={profile.faculty} />
-            <Detail label="Jurusan" value={profile.major} />
-            <Detail label="Angkatan" value={profile.year} />
-            <Detail label="IPK" value={formatIpk(profile.ipk)} />
+            <Detail label="Faculty" value={profile.faculty} />
+            <Detail label="Major" value={profile.major} />
+            <Detail label="Year" value={profile.year} />
+            <Detail label="GPA" value={formatIpk(profile.ipk)} />
           </CardContent>
         </Card>
 
@@ -143,29 +143,29 @@ export default function ApplicationOverviewPage() {
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2 font-heading text-xl tracking-normal">
               <ClipboardList className="h-5 w-5 text-primary" />
-              Detail Aplikasi
+              Application Details
             </CardTitle>
           </CardHeader>
           <CardContent className="grid grid-cols-1 gap-4 text-sm md:grid-cols-2">
             <Detail
-              label="Divisi pilihan"
+              label="Chosen division"
               value={formatDivision(application?.division || profile.division)}
             />
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-                Status aplikasi
+                Application status
               </p>
               <div className="mt-1">
                 {application ? (
                   <StatusBadge status={application.status} />
                 ) : (
-                  <StatusBadge label="Belum Mulai" tone="brand" />
+                  <StatusBadge label="Not Started" tone="brand" />
                 )}
               </div>
             </div>
             <Detail
-              label="Tanggal submit"
-              value={formatDateTime(application?.submitted_at, "Belum submit")}
+              label="Submitted at"
+              value={formatDateTime(application?.submitted_at, "Not submitted yet")}
             />
             <Detail
               label="Reference ID"

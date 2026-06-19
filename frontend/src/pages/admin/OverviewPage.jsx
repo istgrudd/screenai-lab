@@ -6,7 +6,6 @@ import {
   FileCheck2,
   Mail,
   Megaphone,
-  Settings,
   ShieldCheck,
   Sparkles,
   UserCog,
@@ -40,7 +39,7 @@ const ADMIN_ACTIONS = [
     title: "Periods",
     description: "Create, update, and close recruitment periods with safety checks.",
     to: "/admin/periods",
-    actionLabel: "Kelola Periode",
+    actionLabel: "Manage Periods",
     icon: CalendarClock,
     tone: "warning",
   },
@@ -59,14 +58,6 @@ const ADMIN_ACTIONS = [
     actionLabel: "Open Emails",
     icon: Mail,
     tone: "info",
-  },
-  {
-    title: "Settings",
-    description: "Placeholder for future backend-supported system settings.",
-    to: "/admin/settings",
-    actionLabel: "View Placeholder",
-    icon: Settings,
-    tone: "neutral",
   },
 ];
 
@@ -119,11 +110,11 @@ function buildRisks({ activePeriod, activeStats, applications, summary }) {
   if (!activePeriod) {
     risks.push({
       id: "no-active-period",
-      title: "Tidak ada periode aktif",
+      title: "No active period",
       description:
-        "Recruitment workflow belum terbuka. Buat periode baru sebelum meminta kandidat submit dokumen.",
+        "The recruitment workflow is not open yet. Create a new period before asking candidates to submit documents.",
       severity: "warning",
-      actionLabel: "Buat periode baru",
+      actionLabel: "Create a period",
       to: "/admin/periods",
     });
     return risks;
@@ -132,10 +123,10 @@ function buildRisks({ activePeriod, activeStats, applications, summary }) {
   if (activePeriod.current_phase === "EVALUATION" && pendingDocuments > 0) {
     risks.push({
       id: "pending-documents-evaluation",
-      title: "Evaluation phase aktif dengan dokumen belum final",
-      description: `${pendingDocuments} aplikasi masih berada di review/revisi dokumen. Evaluasi dapat melewati kandidat yang belum siap.`,
+      title: "Evaluation phase active with documents not finalized",
+      description: `${pendingDocuments} applications are still in document review/correction. Evaluation may skip candidates that are not ready.`,
       severity: "warning",
-      actionLabel: "Review dokumen",
+      actionLabel: "Review documents",
       to: "/recruiter/documents",
     });
   }
@@ -146,10 +137,10 @@ function buildRisks({ activePeriod, activeStats, applications, summary }) {
   ) {
     risks.push({
       id: "announcement-before-complete-evaluation",
-      title: "Pengumuman dibuka sebelum semua evaluasi selesai",
-      description: `${summary.pendingEvaluationCount} aplikasi terverifikasi belum memiliki skor evaluasi. Pastikan keputusan publish tidak melewatkan kandidat.`,
+      title: "Announcement opened before all evaluations are complete",
+      description: `${summary.pendingEvaluationCount} verified applications have no evaluation score yet. Make sure the publish decision does not skip any candidate.`,
       severity: "destructive",
-      actionLabel: "Cek evaluasi",
+      actionLabel: "Check evaluation",
       to: "/recruiter/evaluation",
     });
   }
@@ -157,11 +148,11 @@ function buildRisks({ activePeriod, activeStats, applications, summary }) {
   if (activePeriod.threshold_n == null) {
     risks.push({
       id: "threshold-missing",
-      title: "Threshold N belum diatur",
+      title: "Threshold N is not set",
       description:
-        "Ranking tetap dapat dibaca, tetapi batas kelulusan per divisi tidak tersampaikan sebagai konfigurasi eksplisit.",
+        "Ranking is still readable, but the per-division pass cutoff is not expressed as an explicit configuration.",
       severity: "info",
-      actionLabel: "Kelola periode",
+      actionLabel: "Manage period",
       to: "/admin/periods",
     });
   }
@@ -169,9 +160,9 @@ function buildRisks({ activePeriod, activeStats, applications, summary }) {
   if (activePeriod.current_phase !== "CLOSED") {
     risks.push({
       id: "period-running",
-      title: "Periode aktif sedang berjalan",
+      title: "Active period is running",
       description:
-        "Perubahan jadwal, threshold, atau close period berdampak pada workflow kandidat dan recruiter. Gunakan audit trail setelah tindakan besar.",
+        "Changing the schedule, threshold, or closing the period affects candidate and recruiter workflows. Use the audit trail after major actions.",
       severity: "info",
     });
   }
@@ -179,9 +170,9 @@ function buildRisks({ activePeriod, activeStats, applications, summary }) {
   if (activeStats === null) {
     risks.push({
       id: "stats-unavailable",
-      title: "Active period stats tidak tersedia",
+      title: "Active period stats unavailable",
       description:
-        "Dashboard tetap berjalan, tetapi beberapa angka periodik fallback ke data aplikasi yang tersedia di frontend.",
+        "The dashboard still works, but some period figures fall back to the application data available in the frontend.",
       severity: "info",
     });
   }

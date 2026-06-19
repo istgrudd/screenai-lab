@@ -31,8 +31,8 @@ export const REQUIRED_DOCUMENTS = [
   },
   {
     doc_type: "supporting_docs",
-    label: "Dokumen Pendukung",
-    short: "Pendukung",
+    label: "Supporting Documents",
+    short: "Supporting",
     tip: "A single PDF bundle: proof of following social media, broadcast shares, and other supporting evidence.",
   },
 ];
@@ -54,9 +54,9 @@ export const STATUS_LABELS = {
   document_review: "Document Review",
   correction_requested: "Correction Requested",
   verified: "Verified",
-  screening: "Evaluasi AI",
-  announced_pass: "Pengumuman",
-  announced_fail: "Pengumuman",
+  screening: "AI Evaluation",
+  announced_pass: "Announced",
+  announced_fail: "Announced",
   cancelled: "Cancelled",
 };
 
@@ -72,14 +72,14 @@ export const REQUIRED_PROFILE_FIELDS = [
 ];
 
 export const PROFILE_FIELD_LABELS = {
-  full_name: "Nama lengkap",
+  full_name: "Full name",
   email: "Email",
   nim: "NIM",
-  faculty: "Fakultas",
-  major: "Jurusan",
-  year: "Angkatan",
-  ipk: "IPK",
-  whatsapp: "Nomor WhatsApp",
+  faculty: "Faculty",
+  major: "Major",
+  year: "Year",
+  ipk: "GPA",
+  whatsapp: "WhatsApp number",
 };
 
 export function formatDivision(division) {
@@ -120,7 +120,12 @@ export function applicationReferenceId(application) {
 }
 
 export function isNotFoundError(error) {
-  return error?.message?.toLowerCase().includes("not found");
+  // Prefer the HTTP status: the backend 404 detail is "No application found
+  // for this user", which does not contain the substring "not found", so a
+  // message-only check silently fails and turns a normal empty state into a
+  // red error toast. Fall back to the message for non-ApiError shapes.
+  if (error?.status === 404) return true;
+  return Boolean(error?.message?.toLowerCase().includes("not found"));
 }
 
 export function isDraftApplication(application) {
@@ -157,14 +162,14 @@ export function isSubmissionPhase(period) {
 }
 
 export function submissionPhaseMessage(period) {
-  if (!period) return "Tidak ada periode rekrutasi aktif saat ini.";
+  if (!period) return "There is no active recruitment period right now.";
   const phase = period.current_phase;
-  if (phase === "UPCOMING") return "Periode rekrutasi belum dibuka.";
+  if (phase === "UPCOMING") return "The recruitment period has not opened yet.";
   if (phase === "EVALUATION" || phase === "ANNOUNCEMENT") {
-    return "Masa pendaftaran telah ditutup.";
+    return "The submission window has closed.";
   }
-  if (phase === "CLOSED") return "Periode rekrutasi telah berakhir.";
-  return "Pendaftaran tidak tersedia saat ini.";
+  if (phase === "CLOSED") return "The recruitment period has ended.";
+  return "Submission is not available right now.";
 }
 
 export function documentsByType(documents = []) {

@@ -39,14 +39,14 @@ function AnnouncementCard({ application, announcement }) {
       <CardHeader className="pb-3">
         <CardTitle className="flex items-center gap-2 font-heading text-xl tracking-normal">
           <Megaphone className={cx("h-5 w-5", passed ? "text-success" : "text-destructive")} />
-          {passed ? "Pengumuman: Lolos" : "Pengumuman: Tidak Lolos"}
+          {passed ? "Announcement: Passed" : "Announcement: Not Passed"}
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-2 text-sm leading-6 text-muted-foreground">
         <p>
           {passed
-            ? "Selamat, hasil seleksi kamu sudah dipublikasikan. Pantau instruksi lanjutan dari tim MBC Laboratory."
-            : "Terima kasih sudah mengikuti proses seleksi MBC Laboratory pada periode ini."}
+            ? "Congratulations — your result has been published. Watch for further instructions from the MBC Laboratory team."
+            : "Thank you for taking part in the MBC Laboratory selection this period."}
         </p>
         {announcement?.notes && (
           <p className="rounded-xl bg-card px-4 py-3 text-foreground">
@@ -55,7 +55,7 @@ function AnnouncementCard({ application, announcement }) {
         )}
         {announcement?.announced_at && (
           <p className="text-xs">
-            Diumumkan pada {formatDateTimeId(announcement.announced_at)}
+            Announced on {formatDateTimeId(announcement.announced_at)}
           </p>
         )}
       </CardContent>
@@ -108,11 +108,11 @@ export default function DashboardPage() {
           }
         } catch (error) {
           if (!isNotFoundError(error)) {
-            toast.error(error.message || "Gagal memuat pendaftaran.");
+            toast.error(error.message || "Failed to load your application.");
           }
         }
       } catch (error) {
-        toast.error(error.message || "Gagal memuat dashboard.");
+        toast.error(error.message || "Failed to load the dashboard.");
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -140,15 +140,15 @@ export default function DashboardPage() {
     application && application.status !== "draft" ? "status" : "application";
 
   if (loading) {
-    return <LoadingState label="Memuat dashboard kandidat..." />;
+    return <LoadingState label="Loading candidate dashboard..." />;
   }
 
   return (
     <div className="space-y-6">
       <PageHeader
-        eyebrow="Beranda Kandidat"
-        title="Dashboard Pendaftaran"
-        description="Pantau status, deadline, dan langkah paling penting untuk pendaftaran MBC Laboratory."
+        eyebrow="Candidate Home"
+        title="Application Dashboard"
+        description="Track your status, deadlines, and the most important next step for your MBC Laboratory application."
       />
 
       <CandidateStatusHero
@@ -167,14 +167,14 @@ export default function DashboardPage() {
         currentStep={!application ? "division" : undefined}
         application={application}
         documents={documents}
-        title={stepMode === "status" ? "Tahapan Seleksi" : "Alur Pendaftaran"}
+        title={stepMode === "status" ? "Selection Stages" : "Application Flow"}
       />
 
       {!application ? (
         <EmptyState
           icon={Sparkles}
-          title="Belum ada draft pendaftaran"
-          description="Kamu belum memilih divisi dan membuat pendaftaran. Gunakan tombol utama di atas untuk memulai perjalanan kandidat."
+          title="No application draft yet"
+          description="You haven't chosen a division or created an application yet. Use the main button above to start your candidate journey."
         />
       ) : (
         <>
@@ -190,10 +190,10 @@ export default function DashboardPage() {
           <section className="space-y-3">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.08em] text-primary">
-                Checklist Dokumen
+                Document Checklist
               </p>
               <h2 className="mt-1 font-heading text-xl font-bold tracking-normal">
-                Kebutuhan Pendaftaran
+                Application Requirements
               </h2>
             </div>
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">

@@ -110,9 +110,9 @@ export const ANNOUNCE_DECISIONS = {
 };
 
 export const ANNOUNCE_DECISION_LABEL = {
-  pass: "Lolos",
-  fail: "Tidak Lolos",
-  undecided: "Belum Diputuskan",
+  pass: "Passed",
+  fail: "Not Passed",
+  undecided: "Undecided",
 };
 
 /**

@@ -46,12 +46,12 @@ export default function DocumentRequirementCard({
     document?.notes;
   const canPreview = Boolean(document && onPreview);
   const actionLabel = locked
-    ? "Lihat Detail"
+    ? "View Details"
     : info.status === "missing"
-    ? "Unggah"
+    ? "Upload"
     : correctionMode && info.status === "rejected"
-    ? "Ganti Dokumen"
-    : "Kelola";
+    ? "Replace Document"
+    : "Manage";
 
   return (
     <Card
@@ -83,13 +83,13 @@ export default function DocumentRequirementCard({
               </h3>
               {required && (
                 <span className="rounded-full bg-surface-container-highest px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
-                  Wajib
+                  Required
                 </span>
               )}
               {locked && (
                 <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
                   <Lock className="h-3 w-3" />
-                  Terkunci
+                  Locked
                 </span>
               )}
             </div>
@@ -107,42 +107,42 @@ export default function DocumentRequirementCard({
         {document ? (
           <div className="rounded-xl bg-surface-container-low px-4 py-3">
             <p className="truncate text-sm font-medium" title={document.file_name}>
-              {document.file_name || "Dokumen terunggah"}
+              {document.file_name || "Uploaded document"}
             </p>
             <p className="mt-1 text-xs text-muted-foreground">
               {formatFileSize(document.file_size)}
               {document.uploaded_at
-                ? ` - Diunggah ${formatDateTimeId(document.uploaded_at)}`
+                ? ` - Uploaded ${formatDateTimeId(document.uploaded_at)}`
                 : ""}
             </p>
           </div>
         ) : (
           <p className="text-sm leading-6 text-muted-foreground">
-            Dokumen ini belum diunggah. Lengkapi sebelum pendaftaran dikirim.
+            This document hasn't been uploaded yet. Complete it before submitting.
           </p>
         )}
 
         {info.status === "verified" && (
           <p className="text-sm leading-6 text-success">
-            Dokumen sudah disetujui dan tidak perlu diganti.
+            This document is approved and doesn't need to be replaced.
           </p>
         )}
 
         {correctionMode && (
           <p className="text-sm leading-6 text-muted-foreground">
             {info.status === "rejected"
-              ? "Mode revisi aktif untuk dokumen ini. Unggah file pengganti yang sesuai catatan."
-              : "Pada mode revisi, hanya dokumen yang ditolak yang bisa diganti."}
+              ? "Revision mode is on for this document. Upload a replacement file that matches the note."
+              : "In revision mode, only rejected documents can be replaced."}
           </p>
         )}
 
         {info.status === "rejected" && (
           <div className="rounded-xl border border-destructive/20 bg-destructive/10 px-4 py-3">
             <p className="text-xs font-semibold uppercase tracking-[0.08em] text-destructive">
-              Catatan reviewer
+              Reviewer note
             </p>
             <p className="mt-1 text-sm leading-6 text-destructive">
-              {reviewerNote || "Catatan belum tersedia. Hubungi recruiter jika perlu klarifikasi."}
+              {reviewerNote || "No note provided yet. Contact a recruiter if you need clarification."}
             </p>
           </div>
         )}
@@ -158,7 +158,7 @@ export default function DocumentRequirementCard({
                 onClick={() => onPreview(document)}
               >
                 <Eye className="h-4 w-4" />
-                Pratinjau
+                Preview
               </Button>
             )}
             {onUpload && (

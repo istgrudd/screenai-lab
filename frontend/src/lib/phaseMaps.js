@@ -23,29 +23,29 @@ export const PHASE_TONE_CLASS = {
 
 export const PHASE_META = {
   UPCOMING: {
-    label: "Belum Dibuka",
+    label: "Upcoming",
     tone: "neutral",
-    description: "Periode rekrutasi belum dimulai.",
+    description: "The recruitment period has not started yet.",
   },
   SUBMISSION: {
-    label: "Pendaftaran",
+    label: "Submission",
     tone: "brand",
-    description: "Kandidat dapat mengirim pendaftaran dan dokumen.",
+    description: "Candidates can submit their application and documents.",
   },
   EVALUATION: {
-    label: "Evaluasi",
+    label: "Evaluation",
     tone: "warning",
-    description: "Aplikasi kandidat sedang masuk tahap evaluasi.",
+    description: "Candidate applications are in the evaluation stage.",
   },
   ANNOUNCEMENT: {
-    label: "Pengumuman",
+    label: "Announcement",
     tone: "info",
-    description: "Hasil seleksi dapat dipublikasikan atau dilihat.",
+    description: "Selection results can be published or viewed.",
   },
   CLOSED: {
-    label: "Ditutup",
+    label: "Closed",
     tone: "neutral",
-    description: "Periode rekrutasi telah berakhir.",
+    description: "The recruitment period has ended.",
   },
 };
 
@@ -81,7 +81,7 @@ export function getPhaseMeta(phase) {
     phase: normalized,
     label: getPhaseLabel(phase),
     tone: "neutral",
-    description: "Fase rekrutmen belum dikenali.",
+    description: "Unrecognized recruitment phase.",
   };
 }
 

@@ -64,7 +64,7 @@ function formatDateTime(iso) {
   if (!iso) return "-";
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return "-";
-  return date.toLocaleString("id-ID", {
+  return date.toLocaleString("en-GB", {
     day: "2-digit",
     month: "short",
     year: "numeric",
@@ -80,23 +80,23 @@ function validatePhaseDates({ startDate, submissionEnd, evaluationEnd, endDate }
   const evaluation = evaluationEnd ? new Date(evaluationEnd).getTime() : NaN;
   const end = endDate ? new Date(endDate).getTime() : NaN;
 
-  if (!startDate) errors.startDate = "Wajib diisi";
-  if (!submissionEnd) errors.submissionEnd = "Wajib diisi";
-  if (!evaluationEnd) errors.evaluationEnd = "Wajib diisi";
-  if (!endDate) errors.endDate = "Wajib diisi";
+  if (!startDate) errors.startDate = "Required";
+  if (!submissionEnd) errors.submissionEnd = "Required";
+  if (!evaluationEnd) errors.evaluationEnd = "Required";
+  if (!endDate) errors.endDate = "Required";
 
   if (!Number.isNaN(start) && !Number.isNaN(submission) && !(start < submission)) {
-    errors.submissionEnd = "Harus setelah Tanggal Mulai";
+    errors.submissionEnd = "Must be after the start date";
   }
   if (
     !Number.isNaN(submission) &&
     !Number.isNaN(evaluation) &&
     !(submission < evaluation)
   ) {
-    errors.evaluationEnd = "Harus setelah Akhir Pendaftaran";
+    errors.evaluationEnd = "Must be after the submission end";
   }
   if (!Number.isNaN(evaluation) && !Number.isNaN(end) && !(evaluation < end)) {
-    errors.endDate = "Harus setelah Akhir Evaluasi";
+    errors.endDate = "Must be after the evaluation end";
   }
 
   return Object.keys(errors).length ? errors : null;
@@ -112,9 +112,9 @@ function ActivePeriodSummary({ period, onClose }) {
     return (
       <EmptyState
         icon={CalendarClock}
-        title="Belum ada periode aktif"
-        description="Buat periode baru setelah memastikan jadwal fase, threshold, dan konsekuensi workflow sudah jelas."
-        actionLabel="Isi form periode baru"
+        title="No active period"
+        description="Create a new period once the phase schedule, threshold, and workflow consequences are clear."
+        actionLabel="Fill in the new-period form"
         onAction={() =>
           document
             .getElementById("create-period-form")
@@ -128,10 +128,10 @@ function ActivePeriodSummary({ period, onClose }) {
     <Card className="brand-card">
       <CardHeader className="pb-3">
         <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-          <div>
+          <div className="min-w-0">
             <CardTitle className="flex items-center gap-2 font-heading text-xl tracking-normal">
               <CalendarClock className="h-5 w-5 text-primary" />
-              Periode Aktif
+              Active Period
             </CardTitle>
             <p className="mt-1 text-sm text-muted-foreground">{period.name}</p>
           </div>
@@ -142,13 +142,13 @@ function ActivePeriodSummary({ period, onClose }) {
         <div className="grid grid-cols-2 gap-3 text-sm md:grid-cols-4">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-              Mulai
+              Start
             </p>
             <p className="mt-1 font-medium">{formatDateTime(period.start_date)}</p>
           </div>
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-              Akhir Pendaftaran
+              Submission End
             </p>
             <p className="mt-1 font-medium">
               {formatDateTime(period.submission_end_date)}
@@ -156,7 +156,7 @@ function ActivePeriodSummary({ period, onClose }) {
           </div>
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-              Akhir Evaluasi
+              Evaluation End
             </p>
             <p className="mt-1 font-medium">
               {formatDateTime(period.evaluation_end_date)}
@@ -164,7 +164,7 @@ function ActivePeriodSummary({ period, onClose }) {
           </div>
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-              Tutup
+              Close
             </p>
             <p className="mt-1 font-medium">{formatDateTime(period.end_date)}</p>
           </div>
@@ -173,12 +173,12 @@ function ActivePeriodSummary({ period, onClose }) {
               Threshold N
             </p>
             <p className="mt-1 font-medium">
-              {period.threshold_n ?? "Belum diatur"}
+              {period.threshold_n ?? "Not set"}
             </p>
           </div>
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-              Total Aplikasi
+              Total Applications
             </p>
             <p className="mt-1 font-medium">{period.application_count ?? 0}</p>
           </div>
@@ -187,10 +187,10 @@ function ActivePeriodSummary({ period, onClose }) {
           <div className="flex items-start gap-3">
             <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-destructive" />
             <div className="min-w-0">
-              <p className="font-medium">Tutup periode bersifat destructive</p>
+              <p className="font-medium">Closing a period is destructive</p>
               <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                Tindakan ini tidak dapat dibatalkan melalui form ini. Kandidat
-                tidak dapat submit sampai periode baru dibuat.
+                This action cannot be undone from this form. Candidates cannot
+                submit until a new period is created.
               </p>
               <Button
                 type="button"
@@ -200,7 +200,7 @@ function ActivePeriodSummary({ period, onClose }) {
                 onClick={() => onClose(period)}
               >
                 <X className="h-4 w-4" />
-                Tutup Periode
+                Close Period
               </Button>
             </div>
           </div>
@@ -238,11 +238,11 @@ function CreatePeriodForm({ activePeriod, onCreated }) {
   const onSubmit = async (event) => {
     event.preventDefault();
     if (activePeriod) {
-      toast.error("Tutup periode aktif terlebih dahulu sebelum membuat periode baru.");
+      toast.error("Close the active period before creating a new one.");
       return;
     }
     if (!name.trim()) {
-      toast.error("Lengkapi nama periode.");
+      toast.error("Enter a period name.");
       return;
     }
 
@@ -254,7 +254,7 @@ function CreatePeriodForm({ activePeriod, onCreated }) {
     });
     if (dateErrors) {
       setErrors(dateErrors);
-      toast.error("Periksa urutan dan kelengkapan tanggal.");
+      toast.error("Check the order and completeness of the dates.");
       return;
     }
 
@@ -269,11 +269,11 @@ function CreatePeriodForm({ activePeriod, onCreated }) {
         end_date: toIsoFromInput(endDate),
         threshold_n: thresholdN === "" ? null : Number(thresholdN),
       });
-      toast.success("Periode dibuat dan diaktifkan.");
+      toast.success("Period created and activated.");
       reset();
       onCreated();
     } catch (err) {
-      toast.error(err.message || "Gagal membuat periode");
+      toast.error(err.message || "Failed to create period");
     } finally {
       setBusy(false);
     }
@@ -285,11 +285,11 @@ function CreatePeriodForm({ activePeriod, onCreated }) {
         <CardHeader className="pb-3">
           <CardTitle className="flex items-center gap-2 font-heading text-xl tracking-normal">
             <Plus className="h-5 w-5 text-primary" />
-            Buat Periode Baru
+            Create New Period
           </CardTitle>
           <p className="text-sm leading-6 text-muted-foreground">
-            Periode baru hanya bisa dibuat saat tidak ada periode aktif.
-            Threshold N kosong akan dikirim sebagai null.
+            A new period can only be created when no period is active. An empty
+            Threshold N is sent as null.
           </p>
         </CardHeader>
         <CardContent>
@@ -298,10 +298,10 @@ function CreatePeriodForm({ activePeriod, onCreated }) {
               <div className="flex items-start gap-3">
                 <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-warning" />
                 <div>
-                  <p className="font-medium">Masih ada periode aktif.</p>
+                  <p className="font-medium">A period is still active.</p>
                   <p className="mt-1 leading-6 text-muted-foreground">
-                    Tutup periode "{activePeriod.name}" sebelum membuat periode
-                    baru. Backend tetap menjadi sumber aturan final.
+                    Close the period "{activePeriod.name}" before creating a new
+                    one. The backend remains the source of truth.
                   </p>
                 </div>
               </div>
@@ -314,12 +314,12 @@ function CreatePeriodForm({ activePeriod, onCreated }) {
                 Period Identity
               </h3>
               <div className="space-y-1.5">
-                <Label htmlFor="period-name">Nama Periode</Label>
+                <Label htmlFor="period-name">Period Name</Label>
                 <Input
                   id="period-name"
                   value={name}
                   onChange={(event) => setName(event.target.value)}
-                  placeholder="Rekrutasi Lab MBC 2026-2027"
+                  placeholder="MBC Lab Recruitment 2026-2027"
                   maxLength={255}
                   disabled={busy || Boolean(activePeriod)}
                 />
@@ -332,7 +332,7 @@ function CreatePeriodForm({ activePeriod, onCreated }) {
               </h3>
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 <div className="space-y-1.5">
-                  <Label htmlFor="period-start">Tanggal Mulai</Label>
+                  <Label htmlFor="period-start">Start Date</Label>
                   <Input
                     id="period-start"
                     type="datetime-local"
@@ -344,7 +344,7 @@ function CreatePeriodForm({ activePeriod, onCreated }) {
                   <FieldError message={errors.startDate} />
                 </div>
                 <div className="space-y-1.5">
-                  <Label htmlFor="period-submission-end">Akhir Pendaftaran</Label>
+                  <Label htmlFor="period-submission-end">Submission End</Label>
                   <Input
                     id="period-submission-end"
                     type="datetime-local"
@@ -356,7 +356,7 @@ function CreatePeriodForm({ activePeriod, onCreated }) {
                   <FieldError message={errors.submissionEnd} />
                 </div>
                 <div className="space-y-1.5">
-                  <Label htmlFor="period-evaluation-end">Akhir Evaluasi</Label>
+                  <Label htmlFor="period-evaluation-end">Evaluation End</Label>
                   <Input
                     id="period-evaluation-end"
                     type="datetime-local"
@@ -368,7 +368,7 @@ function CreatePeriodForm({ activePeriod, onCreated }) {
                   <FieldError message={errors.evaluationEnd} />
                 </div>
                 <div className="space-y-1.5">
-                  <Label htmlFor="period-end">Tanggal Tutup</Label>
+                  <Label htmlFor="period-end">Close Date</Label>
                   <Input
                     id="period-end"
                     type="datetime-local"
@@ -388,7 +388,7 @@ function CreatePeriodForm({ activePeriod, onCreated }) {
               </h3>
               <div className="space-y-1.5">
                 <Label htmlFor="period-threshold">
-                  Top N kandidat lolos per divisi
+                  Top N candidates who pass per division
                 </Label>
                 <Input
                   id="period-threshold"
@@ -396,12 +396,12 @@ function CreatePeriodForm({ activePeriod, onCreated }) {
                   min={1}
                   value={thresholdN}
                   onChange={(event) => setThresholdN(event.target.value)}
-                  placeholder="Kosongkan jika tidak ada threshold"
+                  placeholder="Leave empty for no threshold"
                   disabled={busy || Boolean(activePeriod)}
                 />
                 <p className="text-xs leading-5 text-muted-foreground">
-                  Jika kosong, nilai dikirim sebagai null dan UI akan
-                  menjelaskan bahwa threshold belum diatur.
+                  If left empty, the value is sent as null and the UI will note
+                  that the threshold is not set.
                 </p>
               </div>
             </section>
@@ -416,14 +416,14 @@ function CreatePeriodForm({ activePeriod, onCreated }) {
               ) : (
                 <Plus className="h-4 w-4" />
               )}
-              Buat & Aktifkan
+              Create & Activate
             </Button>
           </form>
         </CardContent>
       </Card>
 
       <PeriodTimelinePreview
-        title="Preview sebelum save"
+        title="Preview before saving"
         draft={draft}
         thresholdN={thresholdN}
       />
@@ -456,7 +456,7 @@ function PeriodRow({ period, onChanged }) {
     });
     if (dateErrors) {
       setErrors(dateErrors);
-      toast.error("Periksa urutan tanggal.");
+      toast.error("Check the order of the dates.");
       return;
     }
 
@@ -470,11 +470,11 @@ function PeriodRow({ period, onChanged }) {
         end_date: toIsoFromInput(endDate),
         threshold_n: thresholdN === "" ? null : Number(thresholdN),
       });
-      toast.success("Periode diperbarui.");
+      toast.success("Period updated.");
       setEditing(false);
       onChanged();
     } catch (err) {
-      toast.error(err.message || "Gagal memperbarui");
+      toast.error(err.message || "Failed to update");
     } finally {
       setBusy(false);
     }
@@ -524,7 +524,7 @@ function PeriodRow({ period, onChanged }) {
         </TableCell>
         <TableCell>
           <StatusBadge
-            label={period.is_active ? "Aktif" : "Tutup"}
+            label={period.is_active ? "Active" : "Closed"}
             tone={period.is_active ? "success" : "neutral"}
           />
         </TableCell>
@@ -547,10 +547,10 @@ function PeriodRow({ period, onChanged }) {
               ) : (
                 <Save className="h-3.5 w-3.5" />
               )}
-              Simpan
+              Save
             </Button>
             <Button size="sm" variant="outline" onClick={() => setEditing(false)} disabled={busy}>
-              Batal
+              Cancel
             </Button>
           </div>
         </TableCell>
@@ -578,11 +578,11 @@ function PeriodRow({ period, onChanged }) {
       </TableCell>
       <TableCell>
         <StatusBadge
-          label={period.is_active ? "Aktif" : "Tutup"}
+          label={period.is_active ? "Active" : "Closed"}
           tone={period.is_active ? "success" : "neutral"}
         />
       </TableCell>
-      <TableCell>{period.threshold_n ?? "Belum diatur"}</TableCell>
+      <TableCell>{period.threshold_n ?? "Not set"}</TableCell>
       <TableCell>{period.application_count ?? 0}</TableCell>
       <TableCell className="text-right">
         <Button size="sm" variant="outline" onClick={() => setEditing(true)} className="gap-2">
@@ -606,7 +606,7 @@ export default function RecruitmentPeriodPage() {
       const data = await listPeriods();
       setPeriods(Array.isArray(data) ? data : []);
     } catch (err) {
-      toast.error(err.message || "Gagal memuat periode");
+      toast.error(err.message || "Failed to load periods");
     } finally {
       setLoading(false);
     }
@@ -626,11 +626,11 @@ export default function RecruitmentPeriodPage() {
     setClosing(true);
     try {
       await closePeriod(closeTarget.id);
-      toast.success("Periode ditutup.");
+      toast.success("Period closed.");
       setCloseTarget(null);
       await fetchAll();
     } catch (err) {
-      toast.error(err.message || "Gagal menutup periode");
+      toast.error(err.message || "Failed to close period");
     } finally {
       setClosing(false);
     }
@@ -640,7 +640,7 @@ export default function RecruitmentPeriodPage() {
     <div className="space-y-6">
       <PageHeader
         eyebrow="Super Admin / Periods"
-        title="Kelola Periode Rekrutasi"
+        title="Manage Recruitment Periods"
         description="Create, update, and close recruitment periods with explicit safety context before high-impact changes."
       />
 
@@ -659,24 +659,24 @@ export default function RecruitmentPeriodPage() {
       <Card className="brand-card">
         <CardHeader className="pb-3">
           <CardTitle className="font-heading text-xl tracking-normal">
-            Riwayat Periode
+            Period History
           </CardTitle>
           <p className="text-sm text-muted-foreground">
-            {periods.length} total periode tercatat. Rows edit only the existing
+            {periods.length} total periods recorded. Rows edit only the existing
             editable fields: name, phase dates, end date, and threshold N.
           </p>
         </CardHeader>
         <CardContent className="p-0">
           {loading ? (
             <div className="p-5">
-              <LoadingState variant="table" label="Memuat periode..." />
+              <LoadingState variant="table" label="Loading periods..." />
             </div>
           ) : periods.length === 0 ? (
             <div className="p-5">
               <EmptyState
                 icon={CalendarClock}
-                title="Belum ada periode"
-                description="Buat periode pertama untuk membuka workflow pendaftaran dan seleksi."
+                title="No periods yet"
+                description="Create the first period to open the application and selection workflow."
               />
             </div>
           ) : (
@@ -684,16 +684,16 @@ export default function RecruitmentPeriodPage() {
               <Table className="min-w-[1180px]">
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Nama</TableHead>
-                    <TableHead>Mulai</TableHead>
-                    <TableHead>Akhir Pendaftaran</TableHead>
-                    <TableHead>Akhir Evaluasi</TableHead>
-                    <TableHead>Tutup</TableHead>
-                    <TableHead>Fase</TableHead>
+                    <TableHead>Name</TableHead>
+                    <TableHead>Start</TableHead>
+                    <TableHead>Submission End</TableHead>
+                    <TableHead>Evaluation End</TableHead>
+                    <TableHead>Close</TableHead>
+                    <TableHead>Phase</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Threshold N</TableHead>
-                    <TableHead>Total Aplikasi</TableHead>
-                    <TableHead className="w-[160px] text-right">Aksi</TableHead>
+                    <TableHead>Total Applications</TableHead>
+                    <TableHead className="w-[160px] text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -712,10 +712,10 @@ export default function RecruitmentPeriodPage() {
         onOpenChange={(open) => {
           if (!open) setCloseTarget(null);
         }}
-        title={closeTarget ? `Tutup periode "${closeTarget.name}"?` : "Tutup periode?"}
-        description="Tindakan ini tidak dapat dibatalkan melalui UI ini. Kandidat tidak dapat submit lagi sampai periode baru dibuat."
-        confirmLabel="Ya, tutup periode"
-        cancelLabel="Batal"
+        title={closeTarget ? `Close the period "${closeTarget.name}"?` : "Close period?"}
+        description="This action cannot be undone from this UI. Candidates cannot submit again until a new period is created."
+        confirmLabel="Yes, close the period"
+        cancelLabel="Cancel"
         destructive
         loading={closing}
         onConfirm={handleClosePeriod}

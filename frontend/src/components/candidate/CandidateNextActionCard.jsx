@@ -38,7 +38,7 @@ export default function CandidateNextActionCard({
             <div className="flex flex-wrap items-center gap-2">
               <StatusBadge
                 status={application?.status}
-                label={!application ? "Belum Mulai" : undefined}
+                label={!application ? "Not Started" : undefined}
                 tone={!application ? "brand" : undefined}
               />
               {activePeriod?.current_phase && (

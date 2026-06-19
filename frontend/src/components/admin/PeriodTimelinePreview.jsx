@@ -5,10 +5,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { PHASE_ORDER } from "@/lib/phaseMaps";
 
 function formatDateTime(value) {
-  if (!value) return "Belum diisi";
+  if (!value) return "Not set";
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "Tanggal tidak valid";
-  return date.toLocaleString("id-ID", {
+  if (Number.isNaN(date.getTime())) return "Invalid date";
+  return date.toLocaleString("en-GB", {
     day: "2-digit",
     month: "short",
     year: "numeric",
@@ -41,7 +41,7 @@ export default function PeriodTimelinePreview({
   const steps = [
     {
       key: "SUBMISSION",
-      label: "Pendaftaran",
+      label: "Submission",
       icon: Calendar,
       description: `${formatDateTime(source.startDate)} - ${formatDateTime(
         source.submissionEnd
@@ -49,7 +49,7 @@ export default function PeriodTimelinePreview({
     },
     {
       key: "EVALUATION",
-      label: "Evaluasi",
+      label: "Evaluation",
       icon: Sparkles,
       description: `${formatDateTime(source.submissionEnd)} - ${formatDateTime(
         source.evaluationEnd
@@ -57,7 +57,7 @@ export default function PeriodTimelinePreview({
     },
     {
       key: "ANNOUNCEMENT",
-      label: "Pengumuman",
+      label: "Announcement",
       icon: Megaphone,
       description: `${formatDateTime(source.evaluationEnd)} - ${formatDateTime(
         source.endDate
@@ -74,7 +74,7 @@ export default function PeriodTimelinePreview({
         <p className="text-sm leading-6 text-muted-foreground">
           Threshold N:{" "}
           <span className="font-medium text-foreground">
-            {threshold === "" || threshold == null ? "Belum diatur" : threshold}
+            {threshold === "" || threshold == null ? "Not set" : threshold}
           </span>
         </p>
       </CardHeader>

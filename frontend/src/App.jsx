@@ -41,7 +41,6 @@ import AdminPage from "@/pages/admin/AdminPage";
 import RecruitmentPeriodPage from "@/pages/admin/RecruitmentPeriodPage";
 import AuditLogsPage from "@/pages/admin/AuditLogsPage";
 import EmailTemplatesPage from "@/pages/admin/EmailTemplatesPage";
-import SettingsPage from "@/pages/admin/SettingsPage";
 import AdminProfilePage from "@/pages/admin/ProfilePage";
 import AdminEditProfilePage from "@/pages/admin/EditProfilePage";
 
@@ -433,14 +432,6 @@ export default function App() {
             element={
               <ProtectedShell roles={SUPER_ADMIN}>
                 <EmailTemplatesPage />
-              </ProtectedShell>
-            }
-          />
-          <Route
-            path="/admin/settings"
-            element={
-              <ProtectedShell roles={SUPER_ADMIN}>
-                <SettingsPage />
               </ProtectedShell>
             }
           />

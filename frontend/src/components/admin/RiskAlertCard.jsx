@@ -44,9 +44,9 @@ export default function RiskAlertCard({
       : [
           {
             id: "clear",
-            title: "Tidak ada risk alert kritis",
+            title: "No critical risk alerts",
             description:
-              "Status saat ini tidak menunjukkan kondisi yang perlu diblokir oleh UI. Tetap cek audit dan periode sebelum tindakan besar.",
+              "Nothing right now needs the UI to block an action. Still review the audit log and period before any major change.",
             severity: "success",
           },
         ];

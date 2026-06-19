@@ -17,7 +17,7 @@ function formatDate(value) {
   if (!value) return "-";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "-";
-  return date.toLocaleDateString("id-ID", {
+  return date.toLocaleDateString("en-GB", {
     day: "2-digit",
     month: "short",
     year: "numeric",
@@ -41,7 +41,7 @@ export default function AdminControlHero({
     applications?.length ??
     0;
   const action = primaryAction || {
-    label: hasActivePeriod ? "Kelola Periode" : "Buat Periode Rekrutmen",
+    label: hasActivePeriod ? "Manage Periods" : "Create Recruitment Period",
     to: "/admin/periods",
   };
 
@@ -62,15 +62,15 @@ export default function AdminControlHero({
           <div className="max-w-3xl">
             <h2 className="font-heading text-3xl font-bold tracking-normal text-white md:text-4xl">
               {periodLoading
-                ? "Memuat status sistem..."
+                ? "Loading system status..."
                 : hasActivePeriod
                 ? activePeriod.name
-                : "Belum ada periode aktif"}
+                : "No active period"}
             </h2>
             <p className="mt-3 max-w-2xl text-sm leading-6 text-white/78">
               {hasActivePeriod
-                ? "Pantau fase rekrutmen, ambang kelulusan, dan antrean operasional sebelum mengambil tindakan administratif."
-                : "Buat periode rekrutmen baru untuk membuka workflow pendaftaran, evaluasi, dan pengumuman secara terkendali."}
+                ? "Review the recruitment phase, pass threshold, and operational queue before taking administrative action."
+                : "Create a new recruitment period to open the application, evaluation, and announcement workflow in a controlled way."}
             </p>
           </div>
 
@@ -79,13 +79,13 @@ export default function AdminControlHero({
               <PhaseBadge phase={activePeriod.current_phase} size="md" />
             ) : (
               <span className="rounded-full border border-white/20 bg-white/10 px-3 py-1 text-sm font-medium text-white">
-                Tidak ada periode aktif
+                No active period
               </span>
             )}
             <span className="rounded-full border border-white/20 bg-white/10 px-3 py-1 text-sm text-white/90">
               Threshold N:{" "}
               <strong className="text-white">
-                {activePeriod?.threshold_n ?? "Belum diatur"}
+                {activePeriod?.threshold_n ?? "Not set"}
               </strong>
             </span>
             <span className="rounded-full border border-white/20 bg-white/10 px-3 py-1 text-sm text-white/90">
@@ -111,7 +111,7 @@ export default function AdminControlHero({
                 onClick={action?.onAction}
                 disabled={action?.disabled}
               >
-                {action?.label || "Kelola Periode"}
+                {action?.label || "Manage Periods"}
                 <ArrowRight className="h-4 w-4" />
               </Button>
             )}
@@ -140,15 +140,15 @@ export default function AdminControlHero({
           <div className="flex items-center justify-between gap-3">
             <span className="inline-flex items-center gap-2">
               <CalendarClock className="h-4 w-4" />
-              Mulai
+              Started
             </span>
             <strong className="text-right text-white">
               {hasActivePeriod ? formatDate(activePeriod.start_date) : "-"}
             </strong>
           </div>
           <div className="rounded-xl bg-white/10 px-3 py-2 text-xs leading-5 text-white/76">
-            Gunakan panel ini sebagai pemeriksaan awal sebelum mengubah user,
-            periode, audit, atau operasi email.
+            Use this panel as a first check before changing users, periods,
+            audit, or email operations.
           </div>
         </div>
       </div>
