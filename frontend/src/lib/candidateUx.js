@@ -45,7 +45,7 @@ export function formatDateTimeId(value, empty = "-") {
   if (!value) return empty;
   const date = parseDateTimeWithUtcFallback(value);
   if (Number.isNaN(date.getTime())) return empty;
-  return date.toLocaleString("id-ID", {
+  return date.toLocaleString("en-GB", {
     day: "2-digit",
     month: "short",
     year: "numeric",
@@ -60,7 +60,7 @@ export function timeLeftText(targetIso, now = new Date()) {
   if (Number.isNaN(target.getTime())) return null;
 
   const ms = target.getTime() - now.getTime();
-  if (ms <= 0) return "Deadline telah lewat";
+  if (ms <= 0) return "Deadline has passed";
 
   const dayMs = 24 * 60 * 60 * 1000;
   const hourMs = 60 * 60 * 1000;
@@ -69,9 +69,9 @@ export function timeLeftText(targetIso, now = new Date()) {
   const hours = Math.floor((ms % dayMs) / hourMs);
   const minutes = Math.floor((ms % hourMs) / minuteMs);
 
-  if (days > 0) return `${days} hari ${hours} jam lagi`;
-  if (hours > 0) return `${hours} jam ${minutes} menit lagi`;
-  return `${Math.max(1, minutes)} menit lagi`;
+  if (days > 0) return `${days}d ${hours}h left`;
+  if (hours > 0) return `${hours}h ${minutes}m left`;
+  return `${Math.max(1, minutes)}m left`;
 }
 
 function phaseDates(period) {
@@ -88,9 +88,9 @@ export function periodDeadlineContext(period) {
   if (!period) {
     return {
       phase: null,
-      phaseLabel: "Tidak ada periode aktif",
-      deadlineLabel: "Periode",
-      deadlineText: "Tidak ada periode rekrutasi aktif saat ini.",
+      phaseLabel: "No active period",
+      deadlineLabel: "Period",
+      deadlineText: "There is no active recruitment period right now.",
       countdown: null,
     };
   }
@@ -99,23 +99,23 @@ export function periodDeadlineContext(period) {
   const dates = phaseDates(period);
   const phaseLabel = getPhaseLabel(phase);
   let target = null;
-  let deadlineLabel = "Periode";
+  let deadlineLabel = "Period";
 
   if (phase === "UPCOMING") {
     target = dates.start;
-    deadlineLabel = "Dibuka";
+    deadlineLabel = "Opens";
   } else if (phase === "SUBMISSION") {
     target = dates.submissionEnd;
-    deadlineLabel = "Batas submit";
+    deadlineLabel = "Submission deadline";
   } else if (phase === "EVALUATION") {
     target = dates.evaluationEnd;
-    deadlineLabel = "Batas evaluasi";
+    deadlineLabel = "Evaluation deadline";
   } else if (phase === "ANNOUNCEMENT") {
     target = dates.announcementEnd;
-    deadlineLabel = "Jadwal pengumuman";
+    deadlineLabel = "Announcement schedule";
   } else if (phase === "CLOSED") {
     target = dates.announcementEnd;
-    deadlineLabel = "Ditutup";
+    deadlineLabel = "Closed";
   }
 
   return {
@@ -124,7 +124,7 @@ export function periodDeadlineContext(period) {
     deadlineLabel,
     deadlineText: target
       ? `${deadlineLabel}: ${formatDateTimeId(target)}`
-      : `Fase aktif: ${phaseLabel}`,
+      : `Active phase: ${phaseLabel}`,
     countdown: timeLeftText(target),
   };
 }
@@ -134,11 +134,11 @@ export function candidateNextAction(application, documents = []) {
 
   if (!application) {
     return {
-      label: "Mulai Pendaftaran",
+      label: "Start Application",
       to: "/application/start",
-      title: "Mulai pendaftaran",
+      title: "Start your application",
       description:
-        "Pilih divisi yang kamu tuju, lalu buat draft pendaftaran sebelum mengunggah dokumen.",
+        "Choose your target division, then create a draft application before uploading documents.",
       tone: "brand",
     };
   }
@@ -147,27 +147,27 @@ export function candidateNextAction(application, documents = []) {
 
   if (status === "correction_requested") {
     return {
-      label: "Perbaiki Dokumen",
+      label: "Fix Documents",
       to: "/documents",
-      title: "Dokumen perlu revisi",
+      title: "Documents need revision",
       description:
-        "Buka catatan reviewer dan unggah ulang hanya dokumen yang ditolak.",
+        "Open the reviewer notes and re-upload only the rejected documents.",
       tone: "warning",
     };
   }
 
   if (status === "announced_pass" || status === "announced_fail") {
     return {
-      label: "Cek Pengumuman",
+      label: "Check Announcement",
       to: "/application/status",
       title:
         status === "announced_pass"
-          ? "Hasil seleksi sudah tersedia"
-          : "Pengumuman sudah dipublikasikan",
+          ? "Your result is available"
+          : "The announcement has been published",
       description:
         status === "announced_pass"
-          ? "Selamat, kamu dapat melihat hasil dan catatan pengumuman di halaman status."
-          : "Terima kasih sudah mengikuti proses seleksi MBC Laboratory.",
+          ? "Congratulations — you can view your result and the announcement notes on the status page."
+          : "Thank you for taking part in the MBC Laboratory selection process.",
       tone: status === "announced_pass" ? "success" : "destructive",
     };
   }
@@ -175,43 +175,43 @@ export function candidateNextAction(application, documents = []) {
   if (status === "draft") {
     if (completeness.complete) {
       return {
-        label: "Tinjau & Kirim Pendaftaran",
+        label: "Review & Submit",
         to: "/application/review",
-        title: "Pendaftaran siap ditinjau",
+        title: "Your application is ready to review",
         description:
-          "Semua dokumen wajib sudah ada. Tinjau data dan kirim pendaftaran final.",
+          "All required documents are in. Review your details and submit the final application.",
         tone: "success",
       };
     }
 
     return {
-      label: "Lanjut Unggah Dokumen",
+      label: "Continue Uploading Documents",
       to: "/documents",
-      title: "Lengkapi dokumen wajib",
+      title: "Complete the required documents",
       description:
         completeness.missing.length > 0
-          ? `Masih ada ${completeness.missing.length} dokumen wajib yang belum diunggah.`
-          : "Lanjutkan unggah dokumen sebelum submit final.",
+          ? `${completeness.missing.length} required documents are still missing.`
+          : "Keep uploading documents before the final submit.",
       tone: "brand",
     };
   }
 
   if (WAITING_APPLICATION_STATUSES.has(status)) {
     return {
-      label: "Lihat Status Pendaftaran",
+      label: "View Application Status",
       to: "/application/status",
-      title: "Pendaftaran sedang diproses",
+      title: "Your application is being processed",
       description:
-        "Tidak ada aksi tambahan saat ini. Pantau status seleksi dan pengumuman dari halaman status.",
+        "Nothing else to do right now. Track the selection status and announcement from the status page.",
       tone: "info",
     };
   }
 
   return {
-    label: "Lihat Status Pendaftaran",
+    label: "View Application Status",
     to: "/application/status",
-    title: "Pantau pendaftaran",
-    description: "Buka halaman status untuk melihat perkembangan terbaru.",
+    title: "Track your application",
+    description: "Open the status page to see the latest updates.",
     tone: "info",
   };
 }
@@ -222,10 +222,10 @@ export function candidateStatusCopy(application, documents = [], announcement = 
 
   if (!application) {
     return {
-      title: "Pendaftaran belum dimulai",
+      title: "Application not started",
       description:
-        "Mulai dari memilih divisi MBC Laboratory. Setelah draft dibuat, kamu bisa melengkapi dokumen secara bertahap.",
-      statusLabel: "Belum Mulai",
+        "Start by choosing an MBC Laboratory division. Once the draft is created, you can complete the documents step by step.",
+      statusLabel: "Not Started",
       tone: "brand",
     };
   }
@@ -235,7 +235,7 @@ export function candidateStatusCopy(application, documents = [], announcement = 
     return {
       title: action.title,
       description: completeness.complete
-        ? "Dokumen wajib sudah lengkap. Langkah berikutnya adalah meninjau data dan mengirim pendaftaran final."
+        ? "All required documents are complete. The next step is to review your details and submit the final application."
         : action.description,
       statusLabel: "Draft",
       tone: completeness.complete ? "success" : "brand",
@@ -244,62 +244,62 @@ export function candidateStatusCopy(application, documents = [], announcement = 
 
   if (status === "correction_requested") {
     return {
-      title: "Perbaikan dokumen diminta",
+      title: "Document correction requested",
       description:
-        "Recruiter menemukan dokumen yang perlu diganti. Periksa catatan pada dokumen yang ditolak dan unggah ulang file yang benar.",
-      statusLabel: "Perlu Revisi",
+        "A recruiter found documents that need to be replaced. Check the notes on the rejected documents and re-upload the correct files.",
+      statusLabel: "Needs Revision",
       tone: "warning",
     };
   }
 
   if (status === "announced_pass") {
     return {
-      title: "Selamat, kamu lolos seleksi",
+      title: "Congratulations — you passed the selection",
       description:
         announcement?.notes ||
-        "Hasil seleksi sudah diumumkan. Pantau instruksi lanjutan dari tim MBC Laboratory.",
-      statusLabel: "Lolos",
+        "The result has been announced. Watch for further instructions from the MBC Laboratory team.",
+      statusLabel: "Passed",
       tone: "success",
     };
   }
 
   if (status === "announced_fail") {
     return {
-      title: "Hasil seleksi sudah diumumkan",
+      title: "The result has been announced",
       description:
         announcement?.notes ||
-        "Terima kasih sudah mendaftar. Kamu belum lolos pada periode seleksi ini.",
-      statusLabel: "Tidak Lolos",
+        "Thank you for applying. You did not pass in this selection period.",
+      statusLabel: "Not Passed",
       tone: "destructive",
     };
   }
 
   if (status === "document_review") {
     return {
-      title: "Dokumen sedang direview",
+      title: "Documents under review",
       description:
-        "Tim recruiter sedang memeriksa kelengkapan dokumen. Kamu akan diminta revisi jika ada dokumen yang belum sesuai.",
-      statusLabel: "Review Dokumen",
+        "The recruiter team is checking your documents. You'll be asked for a revision if anything needs to change.",
+      statusLabel: "Document Review",
       tone: "info",
     };
   }
 
   if (status === "verified") {
     return {
-      title: "Dokumen sudah terverifikasi",
+      title: "Documents verified",
       description:
-        "Kelengkapan dokumen sudah diterima. Pendaftaran akan masuk ke tahap evaluasi saat fase berjalan.",
-      statusLabel: "Terverifikasi",
+        "Your documents have been accepted. The application moves to evaluation once that phase begins.",
+      statusLabel: "Verified",
       tone: "success",
     };
   }
 
   if (status === "screening" || status === "evaluated") {
     return {
-      title: status === "evaluated" ? "Evaluasi selesai" : "Sedang dievaluasi",
+      title: status === "evaluated" ? "Evaluation complete" : "Being evaluated",
       description:
-        "Pendaftaranmu sudah masuk tahap evaluasi. Hasil akhir akan tersedia saat pengumuman dipublikasikan.",
-      statusLabel: status === "evaluated" ? "Terevaluasi" : "Sedang Dievaluasi",
+        "Your application is in the evaluation stage. The final result will be available once the announcement is published.",
+      statusLabel: status === "evaluated" ? "Evaluated" : "Being Evaluated",
       tone: "info",
     };
   }
@@ -307,7 +307,7 @@ export function candidateStatusCopy(application, documents = [], announcement = 
   return {
     title: action.title,
     description: action.description,
-    statusLabel: status ? formatDivision(status) : "Status tidak diketahui",
+    statusLabel: status ? formatDivision(status) : "Unknown status",
     tone: action.tone,
   };
 }
@@ -316,9 +316,9 @@ export function documentStatusInfo(document) {
   if (!document) {
     return {
       status: "missing",
-      label: "Belum Ada",
+      label: "Missing",
       tone: "neutral",
-      title: "Belum diunggah",
+      title: "Not uploaded",
     };
   }
 
@@ -326,40 +326,40 @@ export function documentStatusInfo(document) {
   if (status === "verified") {
     return {
       status,
-      label: "Terverifikasi",
+      label: "Verified",
       tone: "success",
-      title: "Dokumen disetujui",
+      title: "Document approved",
     };
   }
   if (status === "rejected") {
     return {
       status,
-      label: "Ditolak",
+      label: "Rejected",
       tone: "destructive",
-      title: "Perlu diganti",
+      title: "Needs to be replaced",
     };
   }
   if (status === "correction_requested") {
     return {
       status,
-      label: "Perlu Revisi",
+      label: "Needs Revision",
       tone: "warning",
-      title: "Perlu revisi",
+      title: "Needs revision",
     };
   }
   if (status === "pending") {
     return {
       status,
-      label: "Menunggu",
+      label: "Pending",
       tone: "neutral",
-      title: "Menunggu review",
+      title: "Awaiting review",
     };
   }
 
   return {
     status: "uploaded",
-    label: "Terunggah",
+    label: "Uploaded",
     tone: "info",
-    title: "Sudah diunggah",
+    title: "Uploaded",
   };
 }

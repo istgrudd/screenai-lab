@@ -6,7 +6,7 @@ export function makeDetailNavigationState(from, fromLabel, returnLabel) {
   return {
     from: isInternalPath(from) ? from : null,
     fromLabel: fromLabel || null,
-    returnLabel: returnLabel || (fromLabel ? `Kembali ke ${fromLabel}` : null),
+    returnLabel: returnLabel || (fromLabel ? `Back to ${fromLabel}` : null),
   };
 }
 
@@ -15,8 +15,8 @@ export function getSafeReturnPath(locationState, fallback = "/recruiter/candidat
   return fallback;
 }
 
-export function getReturnLabel(locationState, fallback = "Kembali") {
+export function getReturnLabel(locationState, fallback = "Back") {
   if (locationState?.returnLabel) return locationState.returnLabel;
-  if (locationState?.fromLabel) return `Kembali ke ${locationState.fromLabel}`;
+  if (locationState?.fromLabel) return `Back to ${locationState.fromLabel}`;
   return fallback;
 }

@@ -15,41 +15,41 @@ export const STATUS_TONE_CLASS = {
 
 export const APPLICATION_STATUS_META = {
   draft: { label: "Draft", tone: "neutral" },
-  submitted: { label: "Terkirim", tone: "info" },
-  document_review: { label: "Review Dokumen", tone: "info" },
-  correction_requested: { label: "Perlu Revisi", tone: "warning" },
-  verified: { label: "Terverifikasi", tone: "success" },
+  submitted: { label: "Submitted", tone: "info" },
+  document_review: { label: "Document Review", tone: "info" },
+  correction_requested: { label: "Needs Revision", tone: "warning" },
+  verified: { label: "Verified", tone: "success" },
   screening: { label: "Screening", tone: "info" },
-  evaluated: { label: "Terevaluasi", tone: "info" },
-  announced_pass: { label: "Lolos", tone: "success" },
-  announced_fail: { label: "Tidak Lolos", tone: "destructive" },
-  cancelled: { label: "Dibatalkan", tone: "neutral" },
-  closed: { label: "Ditutup", tone: "neutral" },
-  rejected: { label: "Ditolak", tone: "destructive" },
+  evaluated: { label: "Evaluated", tone: "info" },
+  announced_pass: { label: "Passed", tone: "success" },
+  announced_fail: { label: "Not Passed", tone: "destructive" },
+  cancelled: { label: "Cancelled", tone: "neutral" },
+  closed: { label: "Closed", tone: "neutral" },
+  rejected: { label: "Rejected", tone: "destructive" },
 };
 
 export const DOCUMENT_STATUS_META = {
-  pending: { label: "Menunggu", tone: "neutral" },
-  uploaded: { label: "Terunggah", tone: "info" },
-  verified: { label: "Terverifikasi", tone: "success" },
-  rejected: { label: "Ditolak", tone: "destructive" },
-  correction_requested: { label: "Perlu Revisi", tone: "warning" },
-  missing: { label: "Belum Ada", tone: "neutral" },
+  pending: { label: "Pending", tone: "neutral" },
+  uploaded: { label: "Uploaded", tone: "info" },
+  verified: { label: "Verified", tone: "success" },
+  rejected: { label: "Rejected", tone: "destructive" },
+  correction_requested: { label: "Needs Revision", tone: "warning" },
+  missing: { label: "Missing", tone: "neutral" },
 };
 
 export const USER_STATUS_META = {
-  active: { label: "Aktif", tone: "success" },
-  inactive: { label: "Tidak Aktif", tone: "neutral" },
-  deactivated: { label: "Dinonaktifkan", tone: "destructive" },
-  suspended: { label: "Ditangguhkan", tone: "warning" },
+  active: { label: "Active", tone: "success" },
+  inactive: { label: "Inactive", tone: "neutral" },
+  deactivated: { label: "Deactivated", tone: "destructive" },
+  suspended: { label: "Suspended", tone: "warning" },
 };
 
 export const EMAIL_STATUS_META = {
-  pending: { label: "Menunggu", tone: "neutral" },
-  captured: { label: "Tercatat", tone: "info" },
-  sent: { label: "Terkirim", tone: "success" },
-  failed: { label: "Gagal", tone: "destructive" },
-  disabled: { label: "Nonaktif", tone: "warning" },
+  pending: { label: "Pending", tone: "neutral" },
+  captured: { label: "Captured", tone: "info" },
+  sent: { label: "Sent", tone: "success" },
+  failed: { label: "Failed", tone: "destructive" },
+  disabled: { label: "Disabled", tone: "warning" },
 };
 
 export const AUDIT_ACTION_META = {
