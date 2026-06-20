@@ -72,7 +72,7 @@ export default function LoadingState({
     <div className={cx("flex min-h-48 items-center justify-center rounded-xl", className)}>
       <div className="flex items-center gap-3 text-sm font-medium text-muted-foreground">
         <Loader2 className="h-5 w-5 animate-spin" />
-        {label || "Memuat data..."}
+        {label || "Loading data..."}
       </div>
     </div>
   );

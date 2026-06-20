@@ -50,9 +50,9 @@ function ReferenceBlock({ application }) {
   const copyReference = async () => {
     try {
       await navigator.clipboard.writeText(reference);
-      toast.success("Reference ID disalin.");
+      toast.success("Reference ID copied.");
     } catch {
-      toast.error("Gagal menyalin. Salin manual dari teks yang tampil.");
+      toast.error("Failed to copy. Copy it manually from the text shown.");
     }
   };
 
@@ -65,12 +65,12 @@ function ReferenceBlock({ application }) {
           </p>
           <p className="mt-1 font-mono text-lg font-semibold">{reference}</p>
           <p className="mt-1 text-sm text-muted-foreground">
-            Gunakan ID ini jika perlu menghubungi recruiter terkait pendaftaran.
+            Use this ID if you need to contact a recruiter about your registration.
           </p>
         </div>
         <Button type="button" variant="outline" onClick={copyReference} className="gap-2">
           <ClipboardCopy className="h-4 w-4" />
-          Salin
+          Copy
         </Button>
       </CardContent>
     </Card>
@@ -84,14 +84,14 @@ function StatusExplanationCard({ application, announcement }) {
       <CardHeader className="pb-3">
         <CardTitle className="flex items-center gap-2 font-heading text-xl tracking-normal">
           <ShieldCheck className="h-5 w-5 text-primary" />
-          Penjelasan Status
+          Status Explanation
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="flex flex-wrap items-center gap-3">
           <StatusBadge status={application.status} size="md" />
           <span className="text-sm text-muted-foreground">
-            Divisi: {formatDivision(application.division)}
+            Division: {formatDivision(application.division)}
           </span>
         </div>
         <p className="text-sm leading-6 text-muted-foreground">
@@ -100,15 +100,15 @@ function StatusExplanationCard({ application, announcement }) {
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div className="rounded-xl bg-surface-container-low px-4 py-3">
             <p className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-              Tanggal Submit
+              Submission Date
             </p>
             <p className="mt-1 text-sm font-medium">
-              {formatDateTime(application.submitted_at, "Belum submit")}
+              {formatDateTime(application.submitted_at, "Not submitted")}
             </p>
           </div>
           <div className="rounded-xl bg-surface-container-low px-4 py-3">
             <p className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-              Status Saat Ini
+              Current Status
             </p>
             <p className="mt-1 text-sm font-medium">{copy.statusLabel}</p>
           </div>
@@ -128,10 +128,10 @@ function CorrectionDocumentsCard({ documents }) {
     <section className="space-y-3">
       <div>
         <p className="text-xs font-semibold uppercase tracking-[0.08em] text-destructive">
-          Revisi Dokumen
+          Document Revision
         </p>
         <h2 className="mt-1 font-heading text-xl font-bold tracking-normal">
-          Dokumen yang Perlu Diganti
+          Documents to Replace
         </h2>
       </div>
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
@@ -152,7 +152,7 @@ function CorrectionDocumentsCard({ documents }) {
       </div>
       <Button asChild className="gap-2">
         <Link to="/documents">
-          Perbaiki Dokumen
+          Fix Documents
           <ArrowRight className="h-4 w-4" />
         </Link>
       </Button>
@@ -174,14 +174,14 @@ function AnnouncementResultCard({ application, announcement }) {
       <CardHeader className="pb-3">
         <CardTitle className="flex items-center gap-2 font-heading text-xl tracking-normal">
           <Megaphone className={cx("h-5 w-5", passed ? "text-success" : "text-destructive")} />
-          {passed ? "Hasil: Lolos" : "Hasil: Tidak Lolos"}
+          {passed ? "Result: Passed" : "Result: Not Passed"}
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-3 text-sm leading-6 text-muted-foreground">
         <p>
           {passed
-            ? "Selamat. Hasil seleksi sudah tersedia dan kamu dinyatakan lolos."
-            : "Hasil seleksi sudah tersedia. Terima kasih sudah mengikuti proses rekrutasi."}
+            ? "Congratulations. The selection result is available and you have passed."
+            : "The selection result is available. Thank you for taking part in the recruitment process."}
         </p>
         {announcement?.notes && (
           <p className="rounded-xl bg-card px-4 py-3 text-foreground">
@@ -190,7 +190,7 @@ function AnnouncementResultCard({ application, announcement }) {
         )}
         {announcement?.announced_at && (
           <p className="text-xs">
-            Diumumkan pada {formatDateTimeId(announcement.announced_at)}
+            Announced on {formatDateTimeId(announcement.announced_at)}
           </p>
         )}
       </CardContent>
@@ -238,7 +238,7 @@ export default function ApplicationStatusPage() {
           const { documents: docs } = await listApplicationDocuments(app.id);
           if (!cancelled) setDocuments(docs || []);
         } catch (error) {
-          toast.error(error.message || "Gagal memuat dokumen.");
+          toast.error(error.message || "Failed to load documents.");
         }
 
         try {
@@ -249,7 +249,7 @@ export default function ApplicationStatusPage() {
         }
       } catch (error) {
         if (!isNotFoundError(error)) {
-          toast.error(error.message || "Gagal memuat status pendaftaran.");
+          toast.error(error.message || "Failed to load registration status.");
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -268,7 +268,7 @@ export default function ApplicationStatusPage() {
   );
 
   if (loading) {
-    return <LoadingState label="Memuat status pendaftaran..." />;
+    return <LoadingState label="Loading registration status..." />;
   }
 
   const isDraft = application?.status === "draft";
@@ -279,17 +279,17 @@ export default function ApplicationStatusPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        eyebrow="Pendaftaran / Status"
-        title="Status Seleksi"
-        description="Pantau proses setelah pendaftaran dikirim, termasuk revisi dokumen dan pengumuman akhir."
+        eyebrow="Registration / Status"
+        title="Selection Status"
+        description="Track the process after your registration is submitted, including document revisions and the final announcement."
       />
 
       {!application ? (
         <EmptyState
           icon={Inbox}
-          title="Belum ada pendaftaran"
-          description="Halaman status akan aktif setelah kamu membuat draft pendaftaran."
-          actionLabel="Mulai Pendaftaran"
+          title="No registration yet"
+          description="This status page becomes active after you create a registration draft."
+          actionLabel="Start Registration"
           to="/application/start"
         />
       ) : isDraft ? (
@@ -303,15 +303,15 @@ export default function ApplicationStatusPage() {
             onPrimaryAction={() => navigate(target)}
             primaryActionLabel={
               completeness.complete
-                ? "Tinjau & Kirim Pendaftaran"
-                : "Lanjut Unggah Dokumen"
+                ? "Review & Submit Registration"
+                : "Continue Uploading Documents"
             }
           />
           <CandidateApplicationStepTrack
             currentStep={completeness.complete ? "review" : "documents"}
             application={application}
             documents={documents}
-            title="Alur Pendaftaran"
+            title="Registration Flow"
           />
           <ApplicationProgressCard
             application={application}
@@ -320,8 +320,8 @@ export default function ApplicationStatusPage() {
             canManageDocuments
             actionLabel={
               completeness.complete
-                ? "Tinjau & Kirim Pendaftaran"
-                : "Lanjut Unggah Dokumen"
+                ? "Review & Submit Registration"
+                : "Continue Uploading Documents"
             }
             onAction={() => navigate(target)}
           />
@@ -343,7 +343,7 @@ export default function ApplicationStatusPage() {
             mode="status"
             application={application}
             documents={documents}
-            title="Tahapan Seleksi"
+            title="Selection Stages"
           />
 
           <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1fr_0.9fr]">
@@ -370,16 +370,16 @@ export default function ApplicationStatusPage() {
                   <FileText className="mt-0.5 h-5 w-5 text-primary" />
                   <div>
                     <p className="font-medium text-foreground">
-                      Tidak ada aksi tambahan saat ini
+                      No additional action right now
                     </p>
                     <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                      Dokumen sudah terkunci. Kamu cukup memantau halaman ini
-                      sampai fase berikutnya tersedia.
+                      Your documents are locked. Just keep an eye on this page
+                      until the next phase is available.
                     </p>
                   </div>
                 </div>
                 <Button asChild variant="outline">
-                  <Link to="/dashboard">Kembali ke Dashboard</Link>
+                  <Link to="/dashboard">Back to Dashboard</Link>
                 </Button>
               </CardContent>
             </Card>

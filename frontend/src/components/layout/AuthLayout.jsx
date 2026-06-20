@@ -18,10 +18,10 @@ const divisionChips = ["Big Data", "Cyber Security", "Game Technology", "GIS"];
 export default function AuthLayout({
   title,
   description,
-  eyebrow = "Rekrutmen MBC Laboratory",
+  eyebrow = "MBC Laboratory Recruitment",
   children,
-  sideTitle = "Portal Rekrutmen MBC Laboratory",
-  sideDescription = "Satu portal resmi untuk kandidat mengikuti proses seleksi, mengelola dokumen, dan memantau status pendaftaran.",
+  sideTitle = "MBC Laboratory Recruitment Portal",
+  sideDescription = "One official portal for candidates to take part in the selection process, manage documents, and track their registration status.",
   sideContent,
   footer,
   className,
@@ -47,7 +47,7 @@ export default function AuthLayout({
           <div className="relative z-10 max-w-xl py-16">
             <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.08em] text-white/90">
               <Sparkles className="h-3.5 w-3.5" />
-              Rekrutmen resmi
+              Official recruitment
             </div>
             <h1 className="font-heading text-4xl font-bold leading-tight tracking-normal xl:text-5xl">
               {sideTitle}
@@ -64,10 +64,10 @@ export default function AuthLayout({
                   </div>
                   <div>
                     <h2 className="font-heading text-lg font-bold tracking-normal">
-                      Tahapan seleksi terstruktur
+                      Structured selection stages
                     </h2>
                     <p className="mt-2 text-sm leading-6 text-white/75">
-                      Pantau pendaftaran, verifikasi dokumen, evaluasi, dan pengumuman dari satu alur yang jelas.
+                      Track registration, document verification, evaluation, and announcements in one clear flow.
                     </p>
                   </div>
                 </div>
@@ -89,19 +89,19 @@ export default function AuthLayout({
             <div className="rounded-2xl border border-white/20 bg-white/10 p-4 backdrop-blur-xl">
               <ShieldCheck className="h-5 w-5 text-white" />
               <div className="mt-3 font-heading text-sm font-bold tracking-normal">
-                Data kandidat aman
+                Candidate data is secure
               </div>
               <p className="mt-1 text-xs leading-5 text-white/70">
-                Proses seleksi berjalan melalui portal resmi MBC Laboratory.
+                The selection process runs through the official MBC Laboratory portal.
               </p>
             </div>
             <div className="rounded-2xl border border-white/20 bg-white/10 p-4 backdrop-blur-xl">
               <UsersRound className="h-5 w-5 text-white" />
               <div className="mt-3 font-heading text-sm font-bold tracking-normal">
-                Fokus kolaboratif
+                Collaborative focus
               </div>
               <p className="mt-1 text-xs leading-5 text-white/70">
-                Pilih divisi dan ikuti proses rekrutmen dengan status yang mudah dipantau.
+                Choose a division and follow the recruitment process with easy-to-track status.
               </p>
             </div>
           </div>

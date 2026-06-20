@@ -41,26 +41,26 @@ export default function EvaluationProgressPanel({ job, onCancel, cancelling = fa
         : 0;
 
   const title = isFailed
-    ? "Evaluasi gagal"
+    ? "Evaluation failed"
     : isCancelled
-      ? "Evaluasi dibatalkan"
+      ? "Evaluation cancelled"
       : isCompleted
-        ? "Evaluasi selesai"
+        ? "Evaluation complete"
         : isCancelling
-          ? "Membatalkan evaluasi…"
+          ? "Cancelling evaluation…"
           : status === "queued"
-            ? "Evaluasi dalam antrean"
-            : "Evaluasi sedang berjalan";
+            ? "Evaluation queued"
+            : "Evaluation in progress";
 
   const subtitle = isFailed
-    ? job.note || "Job evaluasi gagal diselesaikan. Silakan coba lagi."
+    ? job.note || "The evaluation job failed to complete. Please try again."
     : isCancelled
-      ? "Evaluasi dihentikan. Kandidat yang sudah dinilai tetap tersimpan."
+      ? "Evaluation stopped. Candidates already scored remain saved."
       : isCompleted
-        ? "Hasil sudah tersimpan. Tabel kandidat telah diperbarui."
+        ? "Results have been saved. The candidate table has been updated."
         : isCancelling
-          ? "Permintaan pembatalan diterima. Menyelesaikan kandidat yang sedang berjalan…"
-          : "Anda tetap bisa bekerja di halaman lain; progres diperbarui otomatis.";
+          ? "Cancellation request received. Finishing the in-progress candidate…"
+          : "You can keep working on other pages; progress updates automatically.";
 
   const barColor = isFailed
     ? "bg-destructive"
@@ -119,10 +119,10 @@ export default function EvaluationProgressPanel({ job, onCancel, cancelling = fa
               {cancelPending ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  Membatalkan…
+                  Cancelling…
                 </>
               ) : (
-                "Batalkan"
+                "Cancel"
               )}
             </Button>
           )}

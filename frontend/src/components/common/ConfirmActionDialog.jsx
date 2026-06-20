@@ -18,8 +18,8 @@ export default function ConfirmActionDialog({
   onOpenChange,
   title,
   description,
-  confirmLabel = "Konfirmasi",
-  cancelLabel = "Batal",
+  confirmLabel = "Confirm",
+  cancelLabel = "Cancel",
   onConfirm,
   loading = false,
   destructive = false,
@@ -51,7 +51,7 @@ export default function ConfirmActionDialog({
       {children && <AlertDialogTrigger asChild>{children}</AlertDialogTrigger>}
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>{title || "Konfirmasi tindakan"}</AlertDialogTitle>
+          <AlertDialogTitle>{title || "Confirm action"}</AlertDialogTitle>
           {description && (
             <AlertDialogDescription>{description}</AlertDialogDescription>
           )}

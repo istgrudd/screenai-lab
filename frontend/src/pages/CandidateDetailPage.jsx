@@ -192,11 +192,12 @@ function AiValidationCard({ validation, onValidate, onNeedsDiscussion }) {
         <div className="flex items-start justify-between gap-3 flex-wrap">
           <div>
             <CardTitle className="text-base flex items-center gap-2">
-              <ShieldCheck className="w-4 h-4" /> Validasi Evaluasi AI
+              <ShieldCheck className="w-4 h-4" /> AI Evaluation Validation
             </CardTitle>
             <CardDescription>
-              Checkpoint internal bahwa recruiter sudah mengecek hasil evaluasi
-              AI. Tidak mengubah skor dan bukan syarat pengumuman.
+              Internal checkpoint that a recruiter has reviewed the AI
+              evaluation result. It does not change the score and is not a
+              requirement for announcement.
             </CardDescription>
           </div>
           <AiValidationBadge status={status} />
@@ -206,19 +207,19 @@ function AiValidationCard({ validation, onValidate, onNeedsDiscussion }) {
         <div className="grid grid-cols-1 gap-x-6 gap-y-3 text-sm sm:grid-cols-3">
           <div>
             <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-              Divalidasi Oleh
+              Validated By
             </p>
             <p className="mt-1">{validation?.validated_by || "-"}</p>
           </div>
           <div>
             <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-              Waktu Validasi
+              Validation Time
             </p>
             <p className="mt-1">{formatDateTime(validation?.validated_at)}</p>
           </div>
           <div className="sm:col-span-3">
             <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-              Catatan Validasi
+              Validation Note
             </p>
             <p className="mt-1 whitespace-pre-wrap break-words">
               {validation?.note || "-"}
@@ -229,7 +230,7 @@ function AiValidationCard({ validation, onValidate, onNeedsDiscussion }) {
         <div className="flex flex-wrap gap-2">
           <Button size="sm" onClick={onValidate} className="gap-2">
             <CheckCircle2 className="w-4 h-4" />
-            Tandai Tervalidasi
+            Mark as Validated
           </Button>
           <Button
             size="sm"
@@ -238,12 +239,13 @@ function AiValidationCard({ validation, onValidate, onNeedsDiscussion }) {
             className="gap-2"
           >
             <MessageCircleWarning className="w-4 h-4" />
-            Perlu Diskusi
+            Needs Discussion
           </Button>
         </div>
         <p className="text-xs text-muted-foreground">
-          Catatan validasi terpisah dari alasan override skor. Override skor
-          tidak otomatis menandai hasil sebagai tervalidasi.
+          The validation note is separate from the score override reason.
+          Overriding a score does not automatically mark the result as
+          validated.
         </p>
       </CardContent>
     </Card>
@@ -296,7 +298,7 @@ export default function CandidateDetailPage() {
         prev.map((d) => (d.id === docId ? { ...d, is_verified: updated.is_verified } : d))
       );
       toast.success(
-        `Dokumen Pendukung marked as ${updated.is_verified ? "verified" : "not verified"}.`
+        `Supporting document marked as ${updated.is_verified ? "verified" : "not verified"}.`
       );
     } catch (err) {
       toast.error(`Verification failed: ${err.message}`);
@@ -336,13 +338,13 @@ export default function CandidateDetailPage() {
       });
       toast.success(
         validationDialogMode === "needs_discussion"
-          ? "Ditandai perlu diskusi."
-          : "Validasi evaluasi AI tersimpan."
+          ? "Marked as needs discussion."
+          : "AI evaluation validation saved."
       );
       setValidationDialogMode(null);
       fetchCandidate();
     } catch (err) {
-      toast.error(`Gagal menyimpan validasi: ${err.message}`);
+      toast.error(`Failed to save validation: ${err.message}`);
     }
   };
 
@@ -359,7 +361,7 @@ export default function CandidateDetailPage() {
       <div className="text-center py-24">
         <AlertTriangle className="w-12 h-12 mx-auto text-muted-foreground/40 mb-4" />
         <p className="text-sm text-muted-foreground">Candidate not found.</p>
-        <ContextBackButton fallback={fallbackPath} fallbackLabel="Kembali" className="mt-4 gap-2" />
+        <ContextBackButton fallback={fallbackPath} fallbackLabel="Back" className="mt-4 gap-2" />
       </div>
     );
   }
@@ -384,7 +386,7 @@ export default function CandidateDetailPage() {
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center gap-4">
-        <ContextBackButton fallback={fallbackPath} fallbackLabel="Kembali" className="gap-2" />
+        <ContextBackButton fallback={fallbackPath} fallbackLabel="Back" className="gap-2" />
         <Separator orientation="vertical" className="h-6" />
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
@@ -617,7 +619,7 @@ const APP_DOC_LABELS = {
   khs: "KHS / Transcript",
   ktm: "KTM / Student ID",
   swot: "SWOT Analysis",
-  supporting_docs: "Dokumen Pendukung",
+  supporting_docs: "Supporting Documents",
 };
 const APP_DOC_ORDER = [
   "cv",

@@ -80,7 +80,7 @@ export default function RecruiterCandidatesPage() {
         />
         <MetricCard
           icon={CheckCircle2}
-          label="Tervalidasi"
+          label="Validated"
           value={loading ? "..." : validatedCount}
           tone="success"
         />
@@ -139,7 +139,7 @@ export default function RecruiterCandidatesPage() {
               variant="ranking"
               from="/recruiter/candidates"
               fromLabel="Candidates"
-              returnLabel="Kembali ke Candidates"
+              returnLabel="Back to Candidates"
               showAcademicMeta
             />
           ))}

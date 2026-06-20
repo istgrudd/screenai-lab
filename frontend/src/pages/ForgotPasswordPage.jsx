@@ -10,7 +10,7 @@ import { Label } from "@/components/ui/label";
 import { forgotPassword, getApiErrorMessage } from "@/lib/api";
 
 const GENERIC_SUCCESS_MESSAGE =
-  "Jika email terdaftar, link reset password telah dikirim.";
+  "If the email is registered, a password reset link has been sent.";
 
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState("");
@@ -21,7 +21,7 @@ export default function ForgotPasswordPage() {
     event.preventDefault();
     const trimmedEmail = email.trim();
     if (!trimmedEmail) {
-      toast.error("Email wajib diisi.");
+      toast.error("Email is required.");
       return;
     }
 
@@ -31,7 +31,7 @@ export default function ForgotPasswordPage() {
       setSubmitted(true);
       toast.success(GENERIC_SUCCESS_MESSAGE);
     } catch (error) {
-      toast.error(getApiErrorMessage(error, "Permintaan reset password gagal."));
+      toast.error(getApiErrorMessage(error, "Password reset request failed."));
     } finally {
       setSubmitting(false);
     }
@@ -39,15 +39,15 @@ export default function ForgotPasswordPage() {
 
   return (
     <AuthLayout
-      eyebrow="Bantuan Akun"
-      title={submitted ? "Cek Email Kamu" : "Lupa Password?"}
+      eyebrow="Account Help"
+      title={submitted ? "Check Your Email" : "Forgot Password?"}
       description={
         submitted
           ? GENERIC_SUCCESS_MESSAGE
-          : "Masukkan email akun. Jika terdaftar, link reset password akan dikirim ke email tersebut."
+          : "Enter your account email. If it's registered, a password reset link will be sent to it."
       }
-      sideTitle="Akses akun tetap aman"
-      sideDescription="Portal hanya mengirimkan instruksi reset ke email yang terdaftar, sehingga informasi akun kandidat tetap terlindungi."
+      sideTitle="Your account access stays secure"
+      sideDescription="The portal only sends reset instructions to registered emails, so candidate account information stays protected."
     >
       <div className="space-y-5">
         {!submitted ? (
@@ -73,12 +73,12 @@ export default function ForgotPasswordPage() {
               {submitting ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  Mengirim...
+                  Sending...
                 </>
               ) : (
                 <>
                   <Send className="h-4 w-4" />
-                  Kirim Link Reset
+                  Send Reset Link
                 </>
               )}
             </Button>
@@ -91,10 +91,10 @@ export default function ForgotPasswordPage() {
               </div>
               <div>
                 <div className="font-heading text-base font-bold tracking-normal text-foreground">
-                  Instruksi reset telah diproses
+                  Reset instructions processed
                 </div>
                 <p className="mt-2 leading-6 text-muted-foreground">
-                  Periksa inbox dan folder spam, lalu buka link reset password dari email.
+                  Check your inbox and spam folder, then open the password reset link from the email.
                 </p>
               </div>
             </div>
@@ -116,7 +116,7 @@ export default function ForgotPasswordPage() {
             ) : (
               <Mail className="h-4 w-4" />
             )}
-            Kembali ke Login
+            Back to Login
           </Link>
         </Button>
       </div>

@@ -193,7 +193,7 @@ export default function RecruiterAnnouncementsPage() {
         passedApplicationIds: passIds,
       });
       toast.success(
-        `Published results: ${result.announced_pass} Lolos, ${result.announced_fail} Tidak Lolos.`
+        `Published results: ${result.announced_pass} passed, ${result.announced_fail} failed.`
       );
       setConfirmOpen(false);
       await loadApplications();
@@ -213,13 +213,13 @@ export default function RecruiterAnnouncementsPage() {
     : readyApplications.length === 0
     ? "No ready-to-announce candidates to publish."
     : decisionCounts.undecided > 0
-    ? `Masih ada ${decisionCounts.undecided} kandidat Belum Diputuskan.`
+    ? `${decisionCounts.undecided} candidate(s) still Undecided.`
     : null;
 
   const confirmDescription =
     decisionCounts.pass === 0
-      ? `Tidak ada kandidat yang dipilih lolos. Semua ${decisionCounts.fail} kandidat dalam scope ${formatDivision(divisionFilter)} akan diumumkan Tidak Lolos. Lanjutkan?`
-      : `Publish ${decisionCounts.pass} Lolos dan ${decisionCounts.fail} Tidak Lolos untuk ${formatDivision(divisionFilter)}. Tindakan ini tidak dapat dibatalkan.`;
+      ? `No candidates selected to pass. All ${decisionCounts.fail} candidate(s) in the ${formatDivision(divisionFilter)} scope will be announced as Fail. Continue?`
+      : `Publish ${decisionCounts.pass} Pass and ${decisionCounts.fail} Fail for ${formatDivision(divisionFilter)}. This action cannot be undone.`;
 
   return (
     <div className="space-y-6">
@@ -243,19 +243,19 @@ export default function RecruiterAnnouncementsPage() {
       <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
         <MetricCard
           icon={CheckCircle2}
-          label="Lolos"
+          label="Pass"
           value={loading ? "..." : decisionCounts.pass}
           tone="success"
         />
         <MetricCard
           icon={XCircle}
-          label="Tidak Lolos"
+          label="Fail"
           value={loading ? "..." : decisionCounts.fail}
           tone="destructive"
         />
         <MetricCard
           icon={HelpCircle}
-          label="Belum Diputuskan"
+          label="Undecided"
           value={loading ? "..." : decisionCounts.undecided}
           tone="warning"
         />
@@ -304,7 +304,7 @@ export default function RecruiterAnnouncementsPage() {
               variant="outline"
               onClick={handleMarkUndecidedAsFail}
             >
-              Tandai semua Belum Diputuskan → Tidak Lolos
+              Mark all Undecided → Fail
             </Button>
           )}
         </div>
@@ -313,7 +313,7 @@ export default function RecruiterAnnouncementsPage() {
       <section className="space-y-3">
         <SectionHeader
           title="Ready to Announce"
-          hint="Menampilkan kandidat yang sudah selesai Evaluasi AI dan belum diumumkan."
+          hint="Shows candidates who have completed AI Evaluation and are not yet announced."
           count={loading ? null : readyApplications.length}
         />
         <CandidateCompactTable
@@ -325,7 +325,7 @@ export default function RecruiterAnnouncementsPage() {
           emptyDescription="Candidates appear here once their AI evaluation is complete and before they are announced."
           detailFrom="/recruiter/announcements"
           detailFromLabel="Announcements"
-          detailReturnLabel="Kembali ke Announcements"
+          detailReturnLabel="Back to Announcements"
         />
       </section>
 
@@ -333,7 +333,7 @@ export default function RecruiterAnnouncementsPage() {
         <section className="space-y-3">
           <SectionHeader
             title="Published"
-            hint="Sudah diumumkan; read-only dan tidak ikut bulk publish."
+            hint="Already announced; read-only and excluded from bulk publish."
             count={publishedApplications.length}
           />
           <CandidateCompactTable
@@ -342,7 +342,7 @@ export default function RecruiterAnnouncementsPage() {
             readOnly
             detailFrom="/recruiter/announcements"
             detailFromLabel="Announcements"
-            detailReturnLabel="Kembali ke Announcements"
+            detailReturnLabel="Back to Announcements"
           />
         </section>
       )}
@@ -352,7 +352,7 @@ export default function RecruiterAnnouncementsPage() {
         onOpenChange={setConfirmOpen}
         title={
           decisionCounts.pass === 0
-            ? "Publikasikan semua sebagai Tidak Lolos?"
+            ? "Announce all as Fail?"
             : "Confirm result publication"
         }
         description={confirmDescription}

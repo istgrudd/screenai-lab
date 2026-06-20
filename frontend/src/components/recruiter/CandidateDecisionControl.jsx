@@ -25,10 +25,10 @@ export default function CandidateDecisionControl({
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
-        <SelectItem value={ANNOUNCE_DECISIONS.PASS}>Lolos</SelectItem>
-        <SelectItem value={ANNOUNCE_DECISIONS.FAIL}>Tidak Lolos</SelectItem>
+        <SelectItem value={ANNOUNCE_DECISIONS.PASS}>Pass</SelectItem>
+        <SelectItem value={ANNOUNCE_DECISIONS.FAIL}>Fail</SelectItem>
         <SelectItem value={ANNOUNCE_DECISIONS.UNDECIDED}>
-          Belum Diputuskan
+          Undecided
         </SelectItem>
       </SelectContent>
     </Select>

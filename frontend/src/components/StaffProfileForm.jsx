@@ -44,7 +44,7 @@ export default function StaffProfileForm({ title, description }) {
           setEmail(me.email || "");
         }
       } catch (err) {
-        toast.error(err.message || "Gagal memuat profil");
+        toast.error(err.message || "Failed to load profile");
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -59,11 +59,11 @@ export default function StaffProfileForm({ title, description }) {
   const onSubmit = async (e) => {
     e.preventDefault();
     if (password && password !== passwordConfirm) {
-      toast.error("Konfirmasi password tidak cocok.");
+      toast.error("Password confirmation does not match.");
       return;
     }
     if (password && password.length < 8) {
-      toast.error("Password minimal 8 karakter.");
+      toast.error("Password must be at least 8 characters.");
       return;
     }
 
@@ -75,7 +75,7 @@ export default function StaffProfileForm({ title, description }) {
     if (password) payload.password = password;
 
     if (Object.keys(payload).length === 0) {
-      toast.info("Tidak ada perubahan untuk disimpan.");
+      toast.info("No changes to save.");
       return;
     }
 
@@ -85,9 +85,9 @@ export default function StaffProfileForm({ title, description }) {
       setProfile(updated);
       setPassword("");
       setPasswordConfirm("");
-      toast.success("Profil berhasil diperbarui.");
+      toast.success("Profile updated successfully.");
     } catch (err) {
-      toast.error(err.message || "Gagal memperbarui profil");
+      toast.error(err.message || "Failed to update profile");
     } finally {
       setSaving(false);
     }
@@ -111,10 +111,10 @@ export default function StaffProfileForm({ title, description }) {
         <CardHeader className="pb-3">
           <CardTitle className="flex items-center gap-3 font-heading text-xl tracking-normal">
             <ShieldCheck className="h-5 w-5 text-primary" />
-            Akun Saya
+            My Account
           </CardTitle>
           <p className="text-sm leading-6 text-muted-foreground">
-            Update nama, email, atau password akun kamu.
+            Update your account name, email, or password.
           </p>
         </CardHeader>
         <CardContent>
@@ -127,7 +127,7 @@ export default function StaffProfileForm({ title, description }) {
                 htmlFor="full_name"
                 className="text-xs uppercase tracking-wide text-muted-foreground"
               >
-                Nama lengkap
+                Full name
               </Label>
               <Input
                 id="full_name"
@@ -174,7 +174,7 @@ export default function StaffProfileForm({ title, description }) {
 
             <div className="md:col-span-2 border-t pt-4 mt-2">
               <p className="text-xs uppercase tracking-wide text-muted-foreground mb-3">
-                Ubah Password
+                Change Password
               </p>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-1.5">
@@ -182,14 +182,14 @@ export default function StaffProfileForm({ title, description }) {
                     htmlFor="password"
                     className="text-xs uppercase tracking-wide text-muted-foreground"
                   >
-                    Password baru
+                    New password
                   </Label>
                   <Input
                     id="password"
                     type="password"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    placeholder="Kosongkan jika tidak diubah"
+                    placeholder="Leave blank to keep current"
                     autoComplete="new-password"
                     minLength={8}
                     maxLength={72}
@@ -201,14 +201,14 @@ export default function StaffProfileForm({ title, description }) {
                     htmlFor="password_confirm"
                     className="text-xs uppercase tracking-wide text-muted-foreground"
                   >
-                    Konfirmasi password
+                    Confirm password
                   </Label>
                   <Input
                     id="password_confirm"
                     type="password"
                     value={passwordConfirm}
                     onChange={(e) => setPasswordConfirm(e.target.value)}
-                    placeholder="Ulangi password baru"
+                    placeholder="Repeat new password"
                     autoComplete="new-password"
                     minLength={8}
                     maxLength={72}
@@ -225,7 +225,7 @@ export default function StaffProfileForm({ title, description }) {
                 ) : (
                   <Save className="w-4 h-4" />
                 )}
-                Simpan Perubahan
+                Save Changes
               </Button>
             </div>
           </form>

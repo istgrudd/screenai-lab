@@ -29,7 +29,7 @@ export default function EditProfilePage() {
         const data = await getMyProfile();
         if (!cancelled) setProfile(data);
       } catch (error) {
-        toast.error(error.message || "Gagal memuat profil.");
+        toast.error(error.message || "Failed to load profile.");
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -42,7 +42,7 @@ export default function EditProfilePage() {
   }, []);
 
   if (loading) {
-    return <LoadingState label="Memuat form profil..." />;
+    return <LoadingState label="Loading profile form..." />;
   }
 
   if (!profile) return null;
@@ -54,23 +54,23 @@ export default function EditProfilePage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        eyebrow="Akun Kandidat"
-        title="Edit Profil"
-        description="Lengkapi data pribadi, kontak, dan akademik agar pendaftaran bisa dikirim."
+        eyebrow="Candidate Account"
+        title="Edit Profile"
+        description="Complete your personal, contact, and academic details so your registration can be submitted."
         status={
           ipkCorrectionOpen ? (
-            <StatusBadge label="Koreksi IPK tersedia" tone="warning" size="md" />
+            <StatusBadge label="GPA correction available" tone="warning" size="md" />
           ) : locked ? (
-            <StatusBadge label="Field akademik terkunci" tone="warning" size="md" />
+            <StatusBadge label="Academic fields locked" tone="warning" size="md" />
           ) : (
-            <StatusBadge label="Bisa diedit" tone="brand" size="md" />
+            <StatusBadge label="Editable" tone="brand" size="md" />
           )
         }
         action={
           <Button asChild variant="outline" className="gap-2">
             <Link to="/profile">
               <ArrowLeft className="h-4 w-4" />
-              Kembali
+              Back
             </Link>
           </Button>
         }
@@ -82,10 +82,10 @@ export default function EditProfilePage() {
             <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-warning" />
             <div>
               <p className="font-medium text-foreground">
-                Lengkapi profil sebelum lanjut
+                Complete your profile before continuing
               </p>
               <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                Wajib diisi:{" "}
+                Required:{" "}
                 {missingFields
                   .map((field) => PROFILE_FIELD_LABELS[field] || field)
                   .join(", ")}
@@ -102,13 +102,14 @@ export default function EditProfilePage() {
             <Lock className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
             <div>
               <p className="font-medium text-foreground">
-                Beberapa field akademik terkunci
+                Some academic fields are locked
               </p>
               <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                Setelah pendaftaran dikirim, NIM, fakultas, jurusan, dan
-                angkatan tidak dapat diubah. IPK juga terkunci setelah submit,
-                tetapi dapat dibuka kembali jika KHS ditolak dan perlu koreksi.
-                Nama, email, WhatsApp, dan password tetap dapat diperbarui.
+                Once your registration is submitted, your NIM, faculty, major,
+                and year can no longer be changed. GPA is also locked after
+                submission, but can be reopened if the KHS is rejected and needs
+                correction. Your name, email, WhatsApp, and password can still be
+                updated.
               </p>
             </div>
           </CardContent>
@@ -119,11 +120,10 @@ export default function EditProfilePage() {
         <CardHeader className="pb-3">
           <CardTitle className="flex items-center gap-2 font-heading text-xl tracking-normal">
             <UserCircle2 className="h-5 w-5 text-primary" />
-            Informasi Kandidat
+            Candidate Information
           </CardTitle>
           <p className="text-sm leading-6 text-muted-foreground">
-            Nomor WhatsApp wajib diisi dan divalidasi oleh form sebelum data
-            disimpan.
+            WhatsApp number is required and validated by the form before saving.
           </p>
         </CardHeader>
         <CardContent>

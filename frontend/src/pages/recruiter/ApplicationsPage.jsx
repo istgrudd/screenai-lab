@@ -175,7 +175,7 @@ export default function RecruiterApplicationsPage() {
         emptyDescription="Adjust search, quick filters, division, or status to broaden the list."
         detailFrom="/recruiter/applications"
         detailFromLabel="Applications"
-        detailReturnLabel="Kembali ke Applications"
+        detailReturnLabel="Back to Applications"
       />
     </div>
   );

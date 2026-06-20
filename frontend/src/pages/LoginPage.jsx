@@ -41,7 +41,7 @@ export default function LoginPage() {
 
   useEffect(() => {
     if (location.state?.registered) {
-      toast.success("Akun berhasil dibuat. Silakan cek email sebelum login.");
+      toast.success("Account created successfully. Please check your email before signing in.");
     }
   }, [location.state]);
 
@@ -49,7 +49,7 @@ export default function LoginPage() {
     e.preventDefault();
     const trimmedEmail = email.trim();
     if (!trimmedEmail || !password) {
-      toast.error("Email dan password wajib diisi.");
+      toast.error("Email and password are required.");
       return;
     }
     setSubmitting(true);
@@ -58,17 +58,17 @@ export default function LoginPage() {
     try {
       const data = await loginApi(trimmedEmail, password);
       saveToken(data.access_token);
-      toast.success(`Selamat datang, ${data.user.full_name}`);
+      toast.success(`Welcome, ${data.user.full_name}`);
       navigate(defaultPathForRole(data.user.role), { replace: true });
     } catch (err) {
       if (getApiErrorCode(err) === "EMAIL_NOT_VERIFIED") {
         const message =
-          "Email belum diverifikasi. Silakan cek email verifikasi sebelum login.";
+          "Email not verified. Please check your verification email before signing in.";
         setUnverifiedEmail(trimmedEmail);
         setLoginError(message);
         toast.error(message);
       } else {
-        const message = getApiErrorMessage(err, "Login gagal");
+        const message = getApiErrorMessage(err, "Login failed");
         setLoginError(message);
         toast.error(message);
       }
@@ -80,16 +80,16 @@ export default function LoginPage() {
   const handleResendVerification = async () => {
     const targetEmail = unverifiedEmail || email.trim();
     if (!targetEmail) {
-      toast.error("Email wajib diisi.");
+      toast.error("Email is required.");
       return;
     }
 
     setResending(true);
     try {
       await resendVerification(targetEmail);
-      toast.success("Jika akun kandidat belum diverifikasi, email verifikasi telah dikirim.");
+      toast.success("If the candidate account is not yet verified, a verification email has been sent.");
     } catch (err) {
-      toast.error(getApiErrorMessage(err, "Gagal mengirim ulang email verifikasi."));
+      toast.error(getApiErrorMessage(err, "Failed to resend the verification email."));
     } finally {
       setResending(false);
     }
@@ -97,14 +97,14 @@ export default function LoginPage() {
 
   return (
     <AuthLayout
-      eyebrow="Portal Kandidat"
-      title="Masuk ke Portal Rekrutmen MBC Lab"
-      description="Kelola pendaftaran, dokumen, dan status seleksi dalam satu tempat."
+      eyebrow="Candidate Portal"
+      title="Sign in to the MBC Lab Recruitment Portal"
+      description="Manage your registration, documents, and selection status in one place."
       footer={
         <p className="text-center text-sm text-muted-foreground">
-          Belum punya akun?{" "}
+          Don't have an account?{" "}
           <Link to="/register" className="font-semibold text-primary hover:underline">
-            Buat akun kandidat
+            Create an account
           </Link>
         </p>
       }
@@ -132,7 +132,7 @@ export default function LoginPage() {
               className="inline-flex items-center gap-1 text-xs font-semibold text-primary hover:underline"
             >
               <KeyRound className="h-3.5 w-3.5" />
-              Lupa password?
+              Forgot password?
             </Link>
           </div>
           <div className="relative">
@@ -151,7 +151,7 @@ export default function LoginPage() {
               size="icon"
               className="absolute right-1 top-1/2 h-8 w-8 -translate-y-1/2 text-muted-foreground hover:text-foreground"
               onClick={() => setShowPassword((value) => !value)}
-              aria-label={showPassword ? "Sembunyikan password" : "Tampilkan password"}
+              aria-label={showPassword ? "Hide password" : "Show password"}
             >
               {showPassword ? (
                 <EyeOff className="h-4 w-4" />
@@ -170,12 +170,12 @@ export default function LoginPage() {
           {submitting ? (
             <>
               <Loader2 className="h-4 w-4 animate-spin" />
-              Memproses...
+              Processing...
             </>
           ) : (
             <>
               <LogIn className="h-4 w-4" />
-              Masuk
+              Sign in
             </>
           )}
         </Button>
@@ -185,7 +185,7 @@ export default function LoginPage() {
             <div className="flex items-start gap-2">
               <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
               <div>
-                <div className="font-semibold">Akses belum dapat dilanjutkan</div>
+                <div className="font-semibold">Access not available yet</div>
                 <div className="mt-1 leading-6">{loginError}</div>
               </div>
             </div>
@@ -200,12 +200,12 @@ export default function LoginPage() {
                 {resending ? (
                   <>
                     <Loader2 className="h-4 w-4 animate-spin" />
-                    Mengirim...
+                    Sending...
                   </>
                 ) : (
                   <>
                     <RefreshCw className="h-4 w-4" />
-                    Kirim Ulang Email Verifikasi
+                    Resend Verification Email
                   </>
                 )}
               </Button>

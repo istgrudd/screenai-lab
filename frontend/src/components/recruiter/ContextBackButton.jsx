@@ -10,7 +10,7 @@ import {
 
 export default function ContextBackButton({
   fallback = "/recruiter/candidates",
-  fallbackLabel = "Kembali",
+  fallbackLabel = "Back",
   className,
 }) {
   const navigate = useNavigate();

@@ -117,7 +117,7 @@ export default function CandidateCompactTable({
                 <TableHead>Candidate</TableHead>
                 <TableHead>Division</TableHead>
                 <TableHead className="text-right">Score / Rank</TableHead>
-                <TableHead>Validasi AI</TableHead>
+                <TableHead>AI Validation</TableHead>
                 <TableHead>{readOnly ? "Result" : "Decision"}</TableHead>
                 <TableHead className="w-10" />
               </TableRow>
@@ -192,7 +192,7 @@ export default function CandidateCompactTable({
                         />
                       ) : (
                         <span className="text-xs text-muted-foreground">
-                          Belum dievaluasi
+                          Not evaluated
                         </span>
                       )}
                     </TableCell>

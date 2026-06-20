@@ -45,22 +45,22 @@ export default function AiValidationDialog({ open, mode, onOpenChange, onSubmit 
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>
-            {needsDiscussion ? "Tandai Perlu Diskusi" : "Tandai Tervalidasi"}
+            {needsDiscussion ? "Mark as Needs Discussion" : "Mark as Validated"}
           </DialogTitle>
           <DialogDescription>
             {needsDiscussion
-              ? "Tandai hasil evaluasi AI sebagai perlu dibahas lebih lanjut. Catatan wajib diisi."
-              : "Tandai bahwa hasil evaluasi AI sudah Anda cek dan sesuai. Catatan opsional."}
+              ? "Mark the AI evaluation result as needing further discussion. A note is required."
+              : "Mark that you've reviewed the AI evaluation result and it looks correct. Note optional."}
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-2 py-2">
-          <Label>Catatan Validasi {needsDiscussion ? "(wajib)" : "(opsional)"}</Label>
+          <Label>Validation Note {needsDiscussion ? "(required)" : "(optional)"}</Label>
           <Textarea
             placeholder={
               needsDiscussion
-                ? "Jelaskan mengapa hasil evaluasi AI perlu didiskusikan…"
-                : "Catatan tambahan (opsional)…"
+                ? "Explain why the AI evaluation result needs discussion…"
+                : "Additional note (optional)…"
             }
             value={note}
             onChange={(e) => setNote(e.target.value)}
@@ -68,7 +68,7 @@ export default function AiValidationDialog({ open, mode, onOpenChange, onSubmit 
           />
           {needsDiscussion && !noteValid && (
             <p className="text-xs text-destructive">
-              Catatan wajib diisi untuk status Perlu Diskusi.
+              A note is required for the Needs Discussion status.
             </p>
           )}
         </div>
@@ -79,17 +79,17 @@ export default function AiValidationDialog({ open, mode, onOpenChange, onSubmit 
             onClick={() => handleOpenChange(false)}
             disabled={submitting}
           >
-            Batal
+            Cancel
           </Button>
           <Button onClick={handleSubmit} disabled={submitting || !noteValid}>
             {submitting ? (
               <>
-                <Loader2 className="w-4 h-4 mr-2 animate-spin" /> Menyimpan…
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" /> Saving…
               </>
             ) : needsDiscussion ? (
-              "Tandai Perlu Diskusi"
+              "Mark as Needs Discussion"
             ) : (
-              "Simpan Validasi"
+              "Save Validation"
             )}
           </Button>
         </DialogFooter>

@@ -42,42 +42,42 @@ function initialVerificationState(code) {
     status: code ? "loading" : "error",
     email: null,
     code: code ? null : "MISSING_CODE",
-    message: code ? "Memverifikasi email..." : null,
+    message: code ? "Verifying email..." : null,
   };
 }
 
 function verificationCopy(code) {
   if (code === "MISSING_CODE") {
     return {
-      title: "Link verifikasi tidak lengkap",
-      description: "Kode verifikasi tidak ditemukan pada link email.",
+      title: "Verification link incomplete",
+      description: "The verification code was not found in the email link.",
       canResend: true,
     };
   }
   if (code === "VERIFICATION_CODE_EXPIRED") {
     return {
-      title: "Kode verifikasi kedaluwarsa",
-      description: "Silakan minta email verifikasi baru untuk melanjutkan.",
+      title: "Verification code expired",
+      description: "Please request a new verification email to continue.",
       canResend: true,
     };
   }
   if (code === "VERIFICATION_CODE_USED") {
     return {
-      title: "Kode verifikasi sudah digunakan",
-      description: "Jika email sudah terverifikasi, silakan kembali ke login.",
+      title: "Verification code already used",
+      description: "If your email is already verified, please return to login.",
       canResend: false,
     };
   }
   if (code === "INVALID_VERIFICATION_CODE") {
     return {
-      title: "Kode verifikasi tidak valid",
-      description: "Link verifikasi tidak dapat digunakan.",
+      title: "Verification code invalid",
+      description: "The verification link cannot be used.",
       canResend: true,
     };
   }
   return {
-    title: "Verifikasi email gagal",
-    description: "Link verifikasi tidak dapat diproses saat ini.",
+    title: "Email verification failed",
+    description: "The verification link cannot be processed at this time.",
     canResend: true,
   };
 }
@@ -102,7 +102,7 @@ export default function VerifyEmailPage() {
           status: "error",
           email: null,
           code: getApiErrorCode(error),
-          message: getApiErrorMessage(error, "Verifikasi email gagal."),
+          message: getApiErrorMessage(error, "Email verification failed."),
         });
         return;
       }
@@ -111,7 +111,7 @@ export default function VerifyEmailPage() {
         status: "success",
         email: data?.email || null,
         code: null,
-        message: data?.message || "Email berhasil diverifikasi. Silakan login.",
+        message: data?.message || "Email verified successfully. Please sign in.",
       });
     });
 
@@ -124,7 +124,7 @@ export default function VerifyEmailPage() {
     event.preventDefault();
     const email = resendEmail.trim();
     if (!email) {
-      toast.error("Email wajib diisi.");
+      toast.error("Email is required.");
       return;
     }
 
@@ -133,9 +133,9 @@ export default function VerifyEmailPage() {
     try {
       await resendVerification(email);
       setResendSent(true);
-      toast.success("Jika akun kandidat belum diverifikasi, email verifikasi telah dikirim.");
+      toast.success("If the candidate account is not yet verified, a verification email has been sent.");
     } catch (error) {
-      toast.error(getApiErrorMessage(error, "Gagal mengirim ulang email verifikasi."));
+      toast.error(getApiErrorMessage(error, "Failed to resend the verification email."));
     } finally {
       setResending(false);
     }
@@ -149,17 +149,17 @@ export default function VerifyEmailPage() {
 
   return (
     <AuthLayout
-      eyebrow="Verifikasi Akun"
-      title="Verifikasi Email"
+      eyebrow="Account Verification"
+      title="Email Verification"
       description={
         isLoading
-          ? "Mohon tunggu sebentar, kami sedang memproses kode verifikasi."
+          ? "Please wait a moment while we process the verification code."
           : isSuccess
-            ? "Email berhasil diverifikasi. Kamu dapat masuk ke portal rekrutmen."
+            ? "Email verified successfully. You can now sign in to the recruitment portal."
             : copy.description
       }
-      sideTitle="Aktivasi akun kandidat"
-      sideDescription="Verifikasi email memastikan setiap akun kandidat terhubung dengan alamat yang benar sebelum melanjutkan proses seleksi."
+      sideTitle="Activate your candidate account"
+      sideDescription="Email verification ensures every candidate account is linked to the correct address before continuing the selection process."
     >
       <div className="space-y-5">
         {isLoading && (
@@ -170,10 +170,10 @@ export default function VerifyEmailPage() {
               </div>
               <div>
                 <div className="font-heading text-base font-bold tracking-normal text-foreground">
-                  Memverifikasi email
+                  Verifying email
                 </div>
                 <p className="mt-2 leading-6 text-muted-foreground">
-                  {currentState.message || "Memverifikasi email..."}
+                  {currentState.message || "Verifying email..."}
                 </p>
               </div>
             </div>
@@ -188,7 +188,7 @@ export default function VerifyEmailPage() {
               </div>
               <div>
                 <div className="font-heading text-base font-bold tracking-normal text-foreground">
-                  Akun sudah aktif
+                  Account is active
                 </div>
                 <p className="mt-2 leading-6 text-muted-foreground">
                   {currentState.message}
@@ -225,10 +225,10 @@ export default function VerifyEmailPage() {
           <form onSubmit={handleResend} className="space-y-4 rounded-2xl border border-border/70 bg-muted/40 p-4">
             <div>
               <h2 className="font-heading text-sm font-bold tracking-normal text-foreground">
-                Kirim ulang email verifikasi
+                Resend verification email
               </h2>
               <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                Masukkan email akun kandidat untuk menerima link verifikasi baru.
+                Enter the candidate account email to receive a new verification link.
               </p>
             </div>
             <div className="space-y-2">
@@ -252,18 +252,18 @@ export default function VerifyEmailPage() {
               {resending ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  Mengirim...
+                  Sending...
                 </>
               ) : (
                 <>
                   <RefreshCw className="h-4 w-4" />
-                  Kirim Ulang Email Verifikasi
+                  Resend Verification Email
                 </>
               )}
             </Button>
             {resendSent && (
               <p className="rounded-xl bg-primary/10 px-3 py-2 text-xs leading-5 text-primary-deep">
-                Jika akun kandidat belum diverifikasi, email verifikasi telah dikirim.
+                If the candidate account is not yet verified, a verification email has been sent.
               </p>
             )}
           </form>
@@ -276,14 +276,14 @@ export default function VerifyEmailPage() {
           >
             <Link to="/login">
               <ArrowLeft className="h-4 w-4" />
-              Kembali ke Login
+              Back to Login
             </Link>
           </Button>
           {!isLoading && !isSuccess && !copy.canResend && (
             <Button asChild variant="outline" className="h-10 flex-1 rounded-full">
               <Link to="/forgot-password">
                 <Mail className="h-4 w-4" />
-                Bantuan Akun
+                Account Help
               </Link>
             </Button>
           )}

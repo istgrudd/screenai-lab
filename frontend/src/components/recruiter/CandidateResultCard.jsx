@@ -131,7 +131,7 @@ export default function CandidateResultCard({
                 </span>
               </p>
             ) : (
-              <span className="text-xs text-muted-foreground">Belum dinilai</span>
+              <span className="text-xs text-muted-foreground">Not scored</span>
             ))}
           {candidateId ? (
             <Button asChild variant="outline" size="sm" className="gap-2">
@@ -148,7 +148,7 @@ export default function CandidateResultCard({
               className="text-xs text-muted-foreground"
               title="Run evaluation to unlock the detail view"
             >
-              Belum tersedia
+              Not available
             </span>
           )}
         </div>

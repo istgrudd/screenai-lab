@@ -35,22 +35,22 @@ const EVALUATION_QUEUE_GROUPS = [
   {
     key: "pending_eval",
     title: "Pending Evaluation",
-    hint: "Belum memiliki skor AI.",
+    hint: "No AI score yet.",
   },
   {
     key: "pending_validation",
     title: "Pending AI Validation",
-    hint: "Sudah dinilai AI, menunggu validasi recruiter.",
+    hint: "Scored by AI, awaiting recruiter validation.",
   },
   {
     key: "needs_discussion",
     title: "Needs Discussion",
-    hint: "Ditandai perlu dibahas lebih lanjut.",
+    hint: "Flagged for further discussion.",
   },
   {
     key: "validated",
     title: "Validated",
-    hint: "Sudah divalidasi recruiter.",
+    hint: "Validated by a recruiter.",
   },
 ];
 
@@ -506,7 +506,7 @@ export default function RecruiterEvaluationPage() {
                       variant="evaluation"
                       from="/recruiter/evaluation"
                       fromLabel="Evaluation"
-                      returnLabel="Kembali ke Evaluation"
+                      returnLabel="Back to Evaluation"
                     />
                   ))}
                 </div>

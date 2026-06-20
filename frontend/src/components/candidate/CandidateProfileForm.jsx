@@ -10,12 +10,14 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import FacultyMajorSelect from "@/components/forms/FacultyMajorSelect";
+import YearSelect from "@/components/forms/YearSelect";
 import { updateMyProfile } from "@/lib/api";
 
 const WHATSAPP_ERROR =
-  "Nomor WhatsApp tidak valid. Gunakan format 08..., 628..., atau +628...";
+  "Invalid WhatsApp number. Use the format 08..., 628..., or +628...";
 const IPK_ERROR =
-  "IPK harus berupa angka 0.00 sampai 4.00 dengan maksimal 2 desimal.";
+  "GPA must be a number from 0.00 to 4.00 with at most 2 decimals.";
 
 function isValidIndonesianWhatsapp(value) {
   const trimmed = value.trim();
@@ -51,13 +53,13 @@ function formatIpkForInput(value) {
   return Number.isNaN(number) ? "" : number.toFixed(2);
 }
 
-function LockHint({ message = "Tidak dapat diubah setelah submit." }) {
+function LockHint({ message = "Cannot be changed after submission." }) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
         <span
           className="inline-flex items-center text-muted-foreground"
-          aria-label="Field terkunci"
+          aria-label="Field locked"
         >
           <Lock className="w-3.5 h-3.5" />
         </span>
@@ -99,11 +101,11 @@ export default function CandidateProfileForm({ profile, locked, onSaved }) {
     event.preventDefault();
 
     if (password && password !== passwordConfirm) {
-      toast.error("Konfirmasi password tidak cocok.");
+      toast.error("Password confirmation does not match.");
       return;
     }
     if (password && password.length < 8) {
-      toast.error("Password minimal 8 karakter.");
+      toast.error("Password must be at least 8 characters.");
       return;
     }
     if (!isValidIndonesianWhatsapp(whatsapp || "")) {
@@ -111,7 +113,7 @@ export default function CandidateProfileForm({ profile, locked, onSaved }) {
       return;
     }
     if (!whatsapp.trim()) {
-      toast.error("Nomor WhatsApp wajib diisi sebelum submit aplikasi.");
+      toast.error("WhatsApp number is required before submitting your application.");
       return;
     }
     if (!isValidIpk(ipk || "")) {
@@ -157,23 +159,23 @@ export default function CandidateProfileForm({ profile, locked, onSaved }) {
     if (password) payload.password = password;
 
     if (Object.keys(payload).length === 0) {
-      toast.info("Tidak ada perubahan untuk disimpan.");
+      toast.info("No changes to save.");
       return;
     }
 
     setSaving(true);
     try {
       const updated = await updateMyProfile(payload);
-      toast.success("Profil berhasil diperbarui.");
+      toast.success("Profile updated successfully.");
       setPassword("");
       setPasswordConfirm("");
       onSaved(updated);
     } catch (error) {
-      const message = error.message || "Gagal memperbarui profil";
+      const message = error.message || "Failed to update profile";
       if (error.detail?.locked_fields?.includes("ipk")) {
-        toast.error("IPK tidak dapat diubah pada status aplikasi saat ini.");
+        toast.error("GPA cannot be changed in the current application status.");
       } else if (error.detail?.locked_fields?.length) {
-        toast.error("Field terkunci tidak dapat diubah setelah submit.");
+        toast.error("Locked fields cannot be changed after submission.");
       } else {
         toast.error(message);
       }
@@ -185,7 +187,7 @@ export default function CandidateProfileForm({ profile, locked, onSaved }) {
   return (
     <form onSubmit={onSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-4">
       <div className="space-y-1.5">
-        <FieldLabel htmlFor="full_name">Nama lengkap</FieldLabel>
+        <FieldLabel htmlFor="full_name">Full name</FieldLabel>
         <Input
           id="full_name"
           value={fullName}
@@ -208,7 +210,7 @@ export default function CandidateProfileForm({ profile, locked, onSaved }) {
         />
       </div>
       <div className="space-y-1.5">
-        <FieldLabel htmlFor="whatsapp">Nomor WhatsApp</FieldLabel>
+        <FieldLabel htmlFor="whatsapp">WhatsApp Number</FieldLabel>
         <Input
           id="whatsapp"
           type="tel"
@@ -236,54 +238,42 @@ export default function CandidateProfileForm({ profile, locked, onSaved }) {
           className="font-mono"
         />
       </div>
-      <div className="space-y-1.5">
-        <FieldLabel htmlFor="faculty" locked={locked}>
-          Fakultas
-        </FieldLabel>
-        <Input
-          id="faculty"
-          value={faculty}
-          onChange={(event) => setFaculty(event.target.value)}
-          maxLength={255}
-          disabled={saving || locked}
-          readOnly={locked}
-        />
-      </div>
-      <div className="space-y-1.5">
-        <FieldLabel htmlFor="major" locked={locked}>
-          Jurusan
-        </FieldLabel>
-        <Input
-          id="major"
-          value={major}
-          onChange={(event) => setMajor(event.target.value)}
-          maxLength={255}
-          disabled={saving || locked}
-          readOnly={locked}
-        />
-      </div>
+      <FacultyMajorSelect
+        faculty={faculty}
+        major={major}
+        onFacultyChange={setFaculty}
+        onMajorChange={setMajor}
+        disabled={saving || locked}
+        fieldClassName="space-y-1.5"
+        facultyLabel={
+          <FieldLabel htmlFor="faculty" locked={locked}>
+            Faculty
+          </FieldLabel>
+        }
+        majorLabel={
+          <FieldLabel htmlFor="major" locked={locked}>
+            Major
+          </FieldLabel>
+        }
+      />
       <div className="space-y-1.5">
         <FieldLabel htmlFor="year" locked={locked}>
-          Angkatan
+          Year
         </FieldLabel>
-        <Input
+        <YearSelect
           id="year"
-          type="number"
-          min={2000}
-          max={2100}
           value={year}
-          onChange={(event) => setYear(event.target.value)}
+          onChange={setYear}
           disabled={saving || locked}
-          readOnly={locked}
         />
       </div>
       <div className="space-y-1.5">
         <FieldLabel
           htmlFor="ipk"
           locked={ipkLocked}
-          lockMessage="IPK terkunci setelah submit kecuali KHS ditolak untuk koreksi."
+          lockMessage="GPA is locked after submission unless the KHS is rejected for correction."
         >
-          IPK
+          GPA
         </FieldLabel>
         <Input
           id="ipk"
@@ -291,7 +281,7 @@ export default function CandidateProfileForm({ profile, locked, onSaved }) {
           inputMode="decimal"
           value={ipk}
           onChange={(event) => setIpk(event.target.value)}
-          placeholder="Contoh: 3.75"
+          placeholder="e.g. 3.75"
           disabled={saving || ipkLocked}
           readOnly={ipkLocked}
         />
@@ -299,7 +289,7 @@ export default function CandidateProfileForm({ profile, locked, onSaved }) {
 
       <div className="md:col-span-2 border-t pt-4 mt-2">
         <p className="text-xs uppercase tracking-wide text-muted-foreground mb-3">
-          Ubah Password
+          Change Password
         </p>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="space-y-1.5">
@@ -307,14 +297,14 @@ export default function CandidateProfileForm({ profile, locked, onSaved }) {
               htmlFor="password"
               className="text-xs uppercase tracking-wide text-muted-foreground"
             >
-              Password baru
+              New password
             </Label>
             <Input
               id="password"
               type="password"
               value={password}
               onChange={(event) => setPassword(event.target.value)}
-              placeholder="Kosongkan jika tidak diubah"
+              placeholder="Leave blank to keep current"
               autoComplete="new-password"
               minLength={8}
               maxLength={72}
@@ -326,14 +316,14 @@ export default function CandidateProfileForm({ profile, locked, onSaved }) {
               htmlFor="password_confirm"
               className="text-xs uppercase tracking-wide text-muted-foreground"
             >
-              Konfirmasi password
+              Confirm password
             </Label>
             <Input
               id="password_confirm"
               type="password"
               value={passwordConfirm}
               onChange={(event) => setPasswordConfirm(event.target.value)}
-              placeholder="Ulangi password baru"
+              placeholder="Repeat new password"
               autoComplete="new-password"
               minLength={8}
               maxLength={72}
@@ -350,7 +340,7 @@ export default function CandidateProfileForm({ profile, locked, onSaved }) {
           ) : (
             <Save className="w-4 h-4" />
           )}
-          Simpan Perubahan
+          Save Changes
         </Button>
       </div>
     </form>

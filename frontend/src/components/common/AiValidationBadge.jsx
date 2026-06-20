@@ -9,18 +9,18 @@
 
 const META = {
   pending: {
-    compact: "Menunggu",
-    full: "Menunggu Validasi",
+    compact: "Pending",
+    full: "Pending Validation",
     className: "bg-amber-500/15 text-amber-700 dark:text-amber-400",
   },
   validated: {
-    compact: "Tervalidasi",
-    full: "Tervalidasi",
+    compact: "Validated",
+    full: "Validated",
     className: "bg-green-500/15 text-green-700 dark:text-green-400",
   },
   needs_discussion: {
-    compact: "Diskusi",
-    full: "Perlu Diskusi",
+    compact: "Discussion",
+    full: "Needs Discussion",
     className: "bg-orange-500/15 text-orange-700 dark:text-orange-400",
   },
 };

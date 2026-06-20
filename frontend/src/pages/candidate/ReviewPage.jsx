@@ -137,7 +137,7 @@ export default function ReviewPage() {
           navigate("/application/start", { replace: true });
           return;
         }
-        toast.error(error.message || "Gagal memuat data review.");
+        toast.error(error.message || "Failed to load review data.");
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -165,34 +165,34 @@ export default function ReviewPage() {
     setSubmitting(true);
     try {
       await submitApplication(application.id);
-      toast.success("Pendaftaran berhasil dikirim.");
+      toast.success("Registration submitted successfully.");
       navigate("/application/status", { replace: true });
     } catch (error) {
-      toast.error(error.message || "Gagal mengirim pendaftaran.");
+      toast.error(error.message || "Failed to submit registration.");
     } finally {
       setSubmitting(false);
     }
   };
 
   if (loading) {
-    return <LoadingState label="Memuat review pendaftaran..." />;
+    return <LoadingState label="Loading registration review..." />;
   }
 
   if (!user || !application) return null;
 
   const disabledReasons = [
-    !profileComplete && "Profil belum lengkap.",
-    !allDocsPresent && "Masih ada dokumen wajib yang belum diunggah.",
+    !profileComplete && "Your profile is incomplete.",
+    !allDocsPresent && "Some required documents are still not uploaded.",
     !submissionOpen && submissionPhaseMessage(activePeriod),
-    !allAcked && "Semua pernyataan konfirmasi harus dicentang.",
+    !allAcked && "All confirmation statements must be checked.",
   ].filter(Boolean);
 
   return (
     <div className="space-y-6">
       <PageHeader
-        eyebrow="Pendaftaran / Review"
-        title="Tinjau & Kirim Pendaftaran"
-        description="Pastikan profil, divisi, dan dokumen sudah benar sebelum pendaftaran dikirim final."
+        eyebrow="Registration / Review"
+        title="Review & Submit Registration"
+        description="Make sure your profile, division, and documents are correct before your registration is submitted as final."
       />
 
       <CandidateApplicationStepTrack
@@ -200,7 +200,7 @@ export default function ReviewPage() {
         application={application}
         documents={documents}
         profile={user}
-        title="Alur Pendaftaran"
+        title="Registration Flow"
       />
 
       <Card className="brand-card bg-warning/10">
@@ -208,11 +208,11 @@ export default function ReviewPage() {
           <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-warning" />
           <div>
             <p className="font-medium text-foreground">
-              Submit pendaftaran bersifat final
+              Submitting your registration is final
             </p>
             <p className="mt-1 text-sm leading-6 text-muted-foreground">
-              Setelah dikirim, divisi dan dokumen tidak bisa diubah kecuali
-              recruiter meminta revisi dokumen.
+              Once submitted, your division and documents cannot be changed
+              unless a recruiter requests a document revision.
             </p>
           </div>
         </CardContent>
@@ -222,46 +222,46 @@ export default function ReviewPage() {
         <CardHeader className="pb-3">
           <CardTitle className="flex items-center gap-2 font-heading text-xl tracking-normal">
             <ShieldCheck className="h-5 w-5 text-primary" />
-            Checklist Kesiapan
+            Readiness Checklist
           </CardTitle>
         </CardHeader>
         <CardContent className="grid grid-cols-1 gap-3 lg:grid-cols-2">
           <ReadinessItem
             ready={profileComplete}
-            title="Profil lengkap"
+            title="Profile complete"
             description={
               profileComplete
-                ? "Seluruh field wajib kandidat sudah terisi."
-                : `Wajib diisi: ${missingProfile
+                ? "All required candidate fields are filled in."
+                : `Required: ${missingProfile
                     .map((field) => PROFILE_FIELD_LABELS[field] || field)
                     .join(", ")}.`
             }
           />
           <ReadinessItem
             ready={allDocsPresent}
-            title="Dokumen wajib lengkap"
+            title="Required documents complete"
             description={
               allDocsPresent
-                ? "Semua dokumen wajib sudah tercatat."
-                : "Lengkapi semua dokumen dari halaman Dokumen."
+                ? "All required documents are recorded."
+                : "Complete all documents from the Documents page."
             }
           />
           <ReadinessItem
             ready={submissionOpen}
-            title="Fase pendaftaran aktif"
+            title="Registration phase active"
             description={
               submissionOpen
-                ? "Submit final tersedia pada fase ini."
+                ? "Final submission is available in this phase."
                 : submissionPhaseMessage(activePeriod)
             }
           />
           <ReadinessItem
             ready={allAcked}
-            title="Konfirmasi kandidat"
+            title="Candidate confirmation"
             description={
               allAcked
-                ? "Semua pernyataan sudah disetujui."
-                : "Centang seluruh pernyataan sebelum submit."
+                ? "All statements have been agreed to."
+                : "Check all statements before submitting."
             }
           />
         </CardContent>
@@ -271,13 +271,13 @@ export default function ReviewPage() {
         <Card className="brand-card bg-warning/10">
           <CardContent className="flex flex-col gap-3 p-5 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <p className="font-medium text-foreground">Profil belum lengkap</p>
+              <p className="font-medium text-foreground">Profile incomplete</p>
               <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                Lengkapi profil sebelum mengirim pendaftaran final.
+                Complete your profile before submitting your final registration.
               </p>
             </div>
             <Button asChild variant="outline">
-              <Link to="/profile/edit">Edit Profil</Link>
+              <Link to="/profile/edit">Edit Profile</Link>
             </Button>
           </CardContent>
         </Card>
@@ -288,20 +288,20 @@ export default function ReviewPage() {
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2 font-heading text-xl tracking-normal">
               <UserCircle2 className="h-5 w-5 text-primary" />
-              Ringkasan Profil
+              Profile Summary
             </CardTitle>
           </CardHeader>
           <CardContent className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            <Field label="Nama lengkap" value={user.full_name} />
+            <Field label="Full name" value={user.full_name} />
             <Field label="NIM" value={user.nim} mono />
             <Field label="Email" value={user.email} />
             <Field label="WhatsApp" value={user.whatsapp} />
-            <Field label="Angkatan" value={user.year} />
-            <Field label="IPK" value={formatIpk(user.ipk)} />
-            <Field label="Fakultas" value={user.faculty} />
-            <Field label="Jurusan" value={user.major} />
+            <Field label="Year" value={user.year} />
+            <Field label="GPA" value={formatIpk(user.ipk)} />
+            <Field label="Faculty" value={user.faculty} />
+            <Field label="Major" value={user.major} />
             <Field
-              label="Divisi pilihan"
+              label="Chosen division"
               value={(application.division || "").replace("_", " ")}
               emphasize
             />
@@ -312,7 +312,7 @@ export default function ReviewPage() {
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2 font-heading text-xl tracking-normal">
               <FileText className="h-5 w-5 text-primary" />
-              Ringkasan Dokumen
+              Document Summary
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
@@ -327,10 +327,10 @@ export default function ReviewPage() {
                     <p className="text-sm font-medium">{item.label}</p>
                     <p className="truncate text-xs text-muted-foreground">
                       {document
-                        ? `${document.file_name || "Dokumen"} - ${formatFileSize(
+                        ? `${document.file_name || "Document"} - ${formatFileSize(
                             document.file_size
                           )}`
-                        : "Belum diunggah"}
+                        : "Not uploaded"}
                     </p>
                   </div>
                   <StatusBadge
@@ -347,30 +347,30 @@ export default function ReviewPage() {
       <Card className="brand-card">
         <CardHeader className="pb-3">
           <CardTitle className="font-heading text-xl tracking-normal">
-            Konfirmasi Final
+            Final Confirmation
           </CardTitle>
           <p className="text-sm leading-6 text-muted-foreground">
-            Centang semua pernyataan untuk mengaktifkan tombol submit.
+            Check all statements to enable the submit button.
           </p>
         </CardHeader>
         <CardContent className="space-y-3">
           <ConfirmRow
             checked={ackAccurate}
             onChange={setAckAccurate}
-            label="Data sudah akurat"
-            hint="Profil, divisi, dan dokumen yang saya kirim sudah benar."
+            label="Data is accurate"
+            hint="The profile, division, and documents I'm submitting are correct."
           />
           <ConfirmRow
             checked={ackAuthentic}
             onChange={setAckAuthentic}
-            label="Dokumen asli milik saya"
-            hint="Seluruh file adalah milik saya dan tidak dimanipulasi."
+            label="Documents are my own"
+            hint="All files are mine and have not been manipulated."
           />
           <ConfirmRow
             checked={ackIrreversible}
             onChange={setAckIrreversible}
-            label="Saya memahami submit bersifat final"
-            hint="Saya tidak bisa mengganti dokumen setelah submit kecuali diminta revisi."
+            label="I understand submission is final"
+            hint="I cannot replace documents after submitting unless a revision is requested."
           />
 
           {disabledReasons.length > 0 && (
@@ -387,14 +387,14 @@ export default function ReviewPage() {
               className="gap-2"
             >
               <ArrowLeft className="h-4 w-4" />
-              Kembali ke Dokumen
+              Back to Documents
             </Button>
 
             <ConfirmActionDialog
-              title="Kirim pendaftaran final?"
-              description="Pendaftaran akan masuk ke proses review dan dokumen terkunci setelah dikirim."
-              confirmLabel="Kirim Pendaftaran"
-              cancelLabel="Periksa Lagi"
+              title="Submit final registration?"
+              description="Your registration will enter the review process and documents will be locked after submission."
+              confirmLabel="Submit Registration"
+              cancelLabel="Review Again"
               loading={submitting}
               onConfirm={handleSubmit}
             >
@@ -404,7 +404,7 @@ export default function ReviewPage() {
                 ) : (
                   <ShieldCheck className="h-4 w-4" />
                 )}
-                Kirim Pendaftaran
+                Submit Registration
               </Button>
             </ConfirmActionDialog>
           </div>

@@ -3,33 +3,33 @@ import { CheckCircle2, FileCheck2, FileSearch, Sparkles, Trophy } from "lucide-r
 const JOURNEY_STEPS = [
   {
     id: "pendaftaran",
-    label: "Pendaftaran",
+    label: "Registration",
     description:
-      "Aplikasi dan dokumen sudah dikirim atau masih berada di tahap pendaftaran.",
+      "Your application and documents have been submitted or are still in the registration stage.",
     icon: CheckCircle2,
   },
   {
     id: "review_dokumen",
-    label: "Review Dokumen",
-    description: "Dokumen sedang diverifikasi oleh recruiter/admin.",
+    label: "Document Review",
+    description: "Your documents are being verified by a recruiter/admin.",
     icon: FileSearch,
   },
   {
     id: "dokumen_valid",
-    label: "Dokumen Valid",
-    description: "Semua dokumen sudah diterima dan siap masuk evaluasi.",
+    label: "Documents Verified",
+    description: "All documents have been accepted and are ready for evaluation.",
     icon: FileCheck2,
   },
   {
     id: "evaluasi_ai",
-    label: "Evaluasi AI",
-    description: "Aplikasi sedang dievaluasi dan disaring oleh sistem AI.",
+    label: "AI Evaluation",
+    description: "Your application is being evaluated and screened by the AI system.",
     icon: Sparkles,
   },
   {
     id: "pengumuman",
-    label: "Pengumuman",
-    description: "Hasil akhir tersedia atau akan tampil di sini saat diumumkan.",
+    label: "Announcement",
+    description: "The final result is available or will appear here once announced.",
     icon: Trophy,
   },
 ];

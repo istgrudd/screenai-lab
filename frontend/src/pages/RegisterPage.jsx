@@ -15,6 +15,8 @@ import AuthLayout from "@/components/layout/AuthLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import FacultyMajorSelect from "@/components/forms/FacultyMajorSelect";
+import YearSelect from "@/components/forms/YearSelect";
 
 import {
   getApiErrorMessage,
@@ -28,7 +30,6 @@ import {
 } from "@/lib/auth";
 
 const NIM_PATTERN = /^\d{10,}$/;
-const CURRENT_YEAR = new Date().getFullYear();
 
 export default function RegisterPage() {
   const navigate = useNavigate();
@@ -38,7 +39,7 @@ export default function RegisterPage() {
   const [password, setPassword] = useState("");
   const [faculty, setFaculty] = useState("");
   const [major, setMajor] = useState("");
-  const [year, setYear] = useState(String(CURRENT_YEAR));
+  const [year, setYear] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [registrationResult, setRegistrationResult] = useState(null);
   const [resending, setResending] = useState(false);
@@ -69,20 +70,20 @@ export default function RegisterPage() {
       !trimmed.major ||
       !year
     ) {
-      toast.error("Semua field wajib diisi.");
+      toast.error("All fields are required.");
       return;
     }
     if (!NIM_PATTERN.test(trimmed.nim)) {
-      toast.error("NIM harus berupa angka minimal 10 digit.");
+      toast.error("NIM must be numeric with at least 10 digits.");
       return;
     }
     if (password.length < 8) {
-      toast.error("Password minimal 8 karakter.");
+      toast.error("Password must be at least 8 characters.");
       return;
     }
     const yearNum = Number(year);
-    if (!Number.isInteger(yearNum) || yearNum < 2000 || yearNum > 2100) {
-      toast.error("Masukkan tahun angkatan yang valid.");
+    if (!Number.isInteger(yearNum)) {
+      toast.error("Please select a valid year.");
       return;
     }
     setSubmitting(true);
@@ -99,14 +100,14 @@ export default function RegisterPage() {
       setRegistrationResult({
         email: data?.email || trimmed.email,
         message:
-          "Akun berhasil dibuat. Silakan cek email untuk verifikasi sebelum login.",
+          "Account created successfully. Please check your email to verify before signing in.",
       });
       setPassword("");
       toast.success(
-        "Akun berhasil dibuat. Silakan cek email untuk verifikasi sebelum login."
+        "Account created successfully. Please check your email to verify before signing in."
       );
     } catch (err) {
-      toast.error(getApiErrorMessage(err, "Registrasi gagal"));
+      toast.error(getApiErrorMessage(err, "Registration failed"));
     } finally {
       setSubmitting(false);
     }
@@ -115,16 +116,16 @@ export default function RegisterPage() {
   const handleResendVerification = async () => {
     const targetEmail = registrationResult?.email || email.trim();
     if (!targetEmail) {
-      toast.error("Email tujuan tidak tersedia.");
+      toast.error("No destination email available.");
       return;
     }
 
     setResending(true);
     try {
       await resendVerification(targetEmail);
-      toast.success("Jika akun kandidat belum diverifikasi, email verifikasi telah dikirim.");
+      toast.success("If the candidate account is not yet verified, a verification email has been sent.");
     } catch (err) {
-      toast.error(getApiErrorMessage(err, "Gagal mengirim ulang email verifikasi."));
+      toast.error(getApiErrorMessage(err, "Failed to resend the verification email."));
     } finally {
       setResending(false);
     }
@@ -132,21 +133,21 @@ export default function RegisterPage() {
 
   return (
     <AuthLayout
-      eyebrow="Pendaftaran Kandidat"
-      title={registrationResult ? "Verifikasi Email Diperlukan" : "Buat Akun Kandidat"}
+      eyebrow="Candidate Registration"
+      title={registrationResult ? "Email Verification Required" : "Create Candidate Account"}
       description={
         registrationResult
-          ? "Satu langkah lagi sebelum kamu bisa masuk ke portal rekrutmen."
-          : "Mulai perjalanan seleksi bersama MBC Laboratory."
+          ? "One more step before you can sign in to the recruitment portal."
+          : "Start your selection journey with MBC Laboratory."
       }
-      sideTitle="Bergabung dengan MBC Laboratory"
-      sideDescription="Lengkapi identitas kandidat dan pilih jalur divisi yang sesuai untuk mengikuti proses seleksi ScreenAI Lab."
+      sideTitle="Join MBC Laboratory"
+      sideDescription="Complete your candidate details and choose the right division track to take part in the ScreenAI Lab selection."
       footer={
         !registrationResult && (
           <p className="text-center text-sm text-muted-foreground">
-            Sudah punya akun?{" "}
+            Already have an account?{" "}
             <Link to="/login" className="font-semibold text-primary hover:underline">
-              Masuk ke portal
+              Sign in
             </Link>
           </p>
         )
@@ -161,14 +162,14 @@ export default function RegisterPage() {
               </div>
               <div>
                 <div className="font-heading text-base font-bold tracking-normal text-foreground">
-                  Akun kandidat berhasil dibuat
+                  Candidate account created
                 </div>
                 <p className="mt-2 leading-6 text-muted-foreground">
                   {registrationResult.message}
                 </p>
                 {registrationResult.email && (
                   <div className="mt-3 rounded-xl bg-card/80 px-3 py-2 text-xs text-muted-foreground">
-                    Email tujuan:{" "}
+                    Destination email:{" "}
                     <span className="break-all font-semibold text-foreground">
                       {registrationResult.email}
                     </span>
@@ -182,7 +183,7 @@ export default function RegisterPage() {
             <Button asChild className="brand-gradient h-10 flex-1 rounded-full shadow-sm hover:opacity-95">
               <Link to="/login">
                 <ArrowLeft className="h-4 w-4" />
-                Kembali ke Login
+                Back to Login
               </Link>
             </Button>
             <Button
@@ -195,12 +196,12 @@ export default function RegisterPage() {
               {resending ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  Mengirim...
+                  Sending...
                 </>
               ) : (
                 <>
                   <RefreshCw className="h-4 w-4" />
-                  Kirim Ulang Email
+                  Resend Email
                 </>
               )}
             </Button>
@@ -211,16 +212,16 @@ export default function RegisterPage() {
           <div className="space-y-4">
             <div>
               <h2 className="font-heading text-sm font-bold tracking-normal text-foreground">
-                Identitas Kandidat
+                Candidate Identity
               </h2>
               <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                Gunakan data akademik yang sesuai untuk proses verifikasi.
+                Use accurate academic data for verification.
               </p>
             </div>
 
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
               <div className="space-y-2 md:col-span-2">
-                <Label htmlFor="full_name">Nama lengkap</Label>
+                <Label htmlFor="full_name">Full name</Label>
                 <Input
                   id="full_name"
                   type="text"
@@ -228,7 +229,7 @@ export default function RegisterPage() {
                   required
                   value={fullName}
                   onChange={(e) => setFullName(e.target.value)}
-                  placeholder="Nama sesuai data akademik"
+                  placeholder="Name as in academic records"
                   className="h-10 bg-input/70"
                 />
               </div>
@@ -248,22 +249,17 @@ export default function RegisterPage() {
                   className="h-10 bg-input/70"
                 />
                 <p className="text-xs leading-5 text-muted-foreground">
-                  Masukkan NIM numerik sesuai data akademik.
+                  Enter your numeric NIM as in academic records.
                 </p>
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="year">Angkatan</Label>
-                <Input
+                <Label htmlFor="year">Year</Label>
+                <YearSelect
                   id="year"
-                  type="number"
-                  min={2000}
-                  max={2100}
                   required
                   value={year}
-                  onChange={(e) => setYear(e.target.value)}
-                  placeholder="2023"
-                  className="h-10 bg-input/70"
+                  onChange={setYear}
                 />
               </div>
             </div>
@@ -272,10 +268,10 @@ export default function RegisterPage() {
           <div className="space-y-4">
             <div>
               <h2 className="font-heading text-sm font-bold tracking-normal text-foreground">
-                Kontak dan Akun
+                Contact & Account
               </h2>
               <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                Email ini akan menerima link verifikasi dan informasi seleksi.
+                This email will receive the verification link and selection updates.
               </p>
             </div>
 
@@ -313,7 +309,7 @@ export default function RegisterPage() {
                     size="icon"
                     className="absolute right-1 top-1/2 h-8 w-8 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                     onClick={() => setShowPassword((value) => !value)}
-                    aria-label={showPassword ? "Sembunyikan password" : "Tampilkan password"}
+                    aria-label={showPassword ? "Hide password" : "Show password"}
                   >
                     {showPassword ? (
                       <EyeOff className="h-4 w-4" />
@@ -323,7 +319,7 @@ export default function RegisterPage() {
                   </Button>
                 </div>
                 <p className="text-xs leading-5 text-muted-foreground">
-                  Minimum 8 karakter.
+                  Minimum 8 characters.
                 </p>
               </div>
             </div>
@@ -332,39 +328,21 @@ export default function RegisterPage() {
           <div className="space-y-4">
             <div>
               <h2 className="font-heading text-sm font-bold tracking-normal text-foreground">
-                Program Studi
+                Study Program
               </h2>
               <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                Informasi ini membantu tim meninjau profil akademik kandidat.
+                This helps the team review the candidate's academic profile.
               </p>
             </div>
 
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="faculty">Fakultas</Label>
-                <Input
-                  id="faculty"
-                  type="text"
-                  required
-                  value={faculty}
-                  onChange={(e) => setFaculty(e.target.value)}
-                  placeholder="Fakultas Informatika"
-                  className="h-10 bg-input/70"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="major">Jurusan</Label>
-                <Input
-                  id="major"
-                  type="text"
-                  required
-                  value={major}
-                  onChange={(e) => setMajor(e.target.value)}
-                  placeholder="Data Science"
-                  className="h-10 bg-input/70"
-                />
-              </div>
+              <FacultyMajorSelect
+                required
+                faculty={faculty}
+                major={major}
+                onFacultyChange={setFaculty}
+                onMajorChange={setMajor}
+              />
             </div>
           </div>
 
@@ -376,12 +354,12 @@ export default function RegisterPage() {
             {submitting ? (
               <>
                 <Loader2 className="h-4 w-4 animate-spin" />
-                Membuat akun...
+                Creating account...
               </>
             ) : (
               <>
                 <UserPlus className="h-4 w-4" />
-                Buat Akun Kandidat
+                Create Candidate Account
               </>
             )}
           </Button>

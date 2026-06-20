@@ -52,26 +52,26 @@ export default function AnnouncementSafetyPanel({
       <CardContent className="grid grid-cols-1 gap-3 lg:grid-cols-2">
         <CheckItem
           ready={hasPeriod}
-          label="Active period tersedia"
-          description={hasPeriod ? activePeriod.name : "Publish membutuhkan active period."}
+          label="Active period available"
+          description={hasPeriod ? activePeriod.name : "Publishing requires an active period."}
         />
         <CheckItem
           ready={hasDivision}
-          label="Satu divisi dipilih"
-          description={hasDivision ? "Bulk publish akan diproses untuk divisi ini saja." : "Pilih satu divisi sebelum publish."}
+          label="One division selected"
+          description={hasDivision ? "Bulk publish will process this division only." : "Select one division before publishing."}
         />
         <CheckItem
           ready={evaluatedCount > 0}
-          label="Kandidat sudah dievaluasi"
+          label="Candidates evaluated"
           description={`${evaluatedCount} evaluated candidates in current view.`}
         />
         <CheckItem
           ready={allDecided}
-          label="Semua kandidat sudah diputuskan"
+          label="All candidates decided"
           description={
             undecidedCount > 0
-              ? `${undecidedCount} kandidat masih Belum Diputuskan.`
-              : `${passCount} Lolos · ${failCount} Tidak Lolos siap dipublikasikan.`
+              ? `${undecidedCount} candidate(s) still Undecided.`
+              : `${passCount} Pass · ${failCount} Fail ready to publish.`
           }
         />
         <CheckItem

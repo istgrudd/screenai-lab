@@ -26,31 +26,31 @@ import { removeToken } from "@/lib/auth";
 function resetErrorCopy(code, fallbackMessage) {
   if (code === "MISSING_CODE") {
     return {
-      title: "Link reset tidak lengkap",
-      description: "Kode reset password tidak ditemukan pada link email.",
+      title: "Reset link incomplete",
+      description: "The password reset code was not found in the email link.",
     };
   }
   if (code === "RESET_CODE_EXPIRED") {
     return {
-      title: "Kode reset kedaluwarsa",
-      description: "Silakan minta link reset password baru.",
+      title: "Reset code expired",
+      description: "Please request a new password reset link.",
     };
   }
   if (code === "RESET_CODE_USED") {
     return {
-      title: "Kode reset sudah digunakan",
-      description: "Kode reset password ini sudah pernah digunakan.",
+      title: "Reset code already used",
+      description: "This password reset code has already been used.",
     };
   }
   if (code === "INVALID_RESET_CODE") {
     return {
-      title: "Kode reset tidak valid",
-      description: "Link reset password tidak dapat digunakan.",
+      title: "Reset code invalid",
+      description: "The password reset link cannot be used.",
     };
   }
   return {
-    title: "Reset password gagal",
-    description: fallbackMessage || "Password belum dapat direset saat ini.",
+    title: "Password reset failed",
+    description: fallbackMessage || "The password could not be reset at this time.",
   };
 }
 
@@ -76,15 +76,15 @@ export default function ResetPasswordPage() {
       return;
     }
     if (!newPassword) {
-      toast.error("Password baru wajib diisi.");
+      toast.error("New password is required.");
       return;
     }
     if (newPassword.length < 8) {
-      toast.error("Password minimal 8 karakter.");
+      toast.error("Password must be at least 8 characters.");
       return;
     }
     if (newPassword !== confirmPassword) {
-      toast.error("Konfirmasi password harus sama.");
+      toast.error("Password confirmation must match.");
       return;
     }
 
@@ -95,11 +95,11 @@ export default function ResetPasswordPage() {
       setSuccess(true);
       setNewPassword("");
       setConfirmPassword("");
-      toast.success("Password berhasil direset. Silakan login ulang.");
+      toast.success("Password reset successfully. Please sign in again.");
     } catch (error) {
       setErrorState({
         code: getApiErrorCode(error),
-        message: getApiErrorMessage(error, "Reset password gagal."),
+        message: getApiErrorMessage(error, "Password reset failed."),
       });
     } finally {
       setSubmitting(false);
@@ -120,23 +120,23 @@ export default function ResetPasswordPage() {
 
   return (
     <AuthLayout
-      eyebrow="Keamanan Akun"
+      eyebrow="Account Security"
       title={
         success
-          ? "Password Berhasil Direset"
+          ? "Password Reset Successful"
           : terminalCodeError
             ? errorCopy.title
-            : "Atur Password Baru"
+            : "Set a New Password"
       }
       description={
         success
-          ? "Silakan login ulang menggunakan password baru."
+          ? "Please sign in again with your new password."
           : terminalCodeError
             ? errorCopy.description
-            : "Masukkan password baru untuk mengamankan akses akun kandidat."
+            : "Enter a new password to secure your candidate account access."
       }
-      sideTitle="Pulihkan akses portal"
-      sideDescription="Gunakan link reset dari email resmi untuk mengganti password dan kembali melanjutkan proses rekrutmen."
+      sideTitle="Restore portal access"
+      sideDescription="Use the reset link from the official email to change your password and continue the recruitment process."
     >
       <div className="space-y-5">
         {success ? (
@@ -148,10 +148,10 @@ export default function ResetPasswordPage() {
                 </div>
                 <div>
                   <div className="font-heading text-base font-bold tracking-normal text-foreground">
-                    Password baru sudah aktif
+                    Your new password is active
                   </div>
                   <p className="mt-2 leading-6 text-muted-foreground">
-                    Token sesi lama telah dihapus. Masuk kembali untuk melanjutkan.
+                    Your old session token has been cleared. Sign in again to continue.
                   </p>
                 </div>
               </div>
@@ -159,7 +159,7 @@ export default function ResetPasswordPage() {
             <Button asChild className="brand-gradient h-10 w-full rounded-full shadow-sm hover:opacity-95">
               <Link to="/login">
                 <ArrowLeft className="h-4 w-4" />
-                Kembali ke Login
+                Back to Login
               </Link>
             </Button>
           </div>
@@ -168,7 +168,7 @@ export default function ResetPasswordPage() {
             {code && !terminalCodeError && (
               <form onSubmit={handleSubmit} className="space-y-5">
                 <div className="space-y-2">
-                  <Label htmlFor="new_password">Password baru</Label>
+                  <Label htmlFor="new_password">New password</Label>
                   <div className="relative">
                     <Input
                       id="new_password"
@@ -187,7 +187,7 @@ export default function ResetPasswordPage() {
                       className="absolute right-1 top-1/2 h-8 w-8 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                       onClick={() => setShowNewPassword((value) => !value)}
                       aria-label={
-                        showNewPassword ? "Sembunyikan password baru" : "Tampilkan password baru"
+                        showNewPassword ? "Hide new password" : "Show new password"
                       }
                     >
                       {showNewPassword ? (
@@ -198,12 +198,12 @@ export default function ResetPasswordPage() {
                     </Button>
                   </div>
                   <p className="text-xs leading-5 text-muted-foreground">
-                    Minimum 8 karakter.
+                    Minimum 8 characters.
                   </p>
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="confirm_password">Konfirmasi password</Label>
+                  <Label htmlFor="confirm_password">Confirm password</Label>
                   <div className="relative">
                     <Input
                       id="confirm_password"
@@ -223,8 +223,8 @@ export default function ResetPasswordPage() {
                       onClick={() => setShowConfirmPassword((value) => !value)}
                       aria-label={
                         showConfirmPassword
-                          ? "Sembunyikan konfirmasi password"
-                          : "Tampilkan konfirmasi password"
+                          ? "Hide password confirmation"
+                          : "Show password confirmation"
                       }
                     >
                       {showConfirmPassword ? (
@@ -244,7 +244,7 @@ export default function ResetPasswordPage() {
                   {submitting ? (
                     <>
                       <Loader2 className="h-4 w-4 animate-spin" />
-                      Menyimpan...
+                      Saving...
                     </>
                   ) : (
                     <>
@@ -272,14 +272,14 @@ export default function ResetPasswordPage() {
               <Button asChild variant="outline" className="h-10 flex-1 rounded-full">
                 <Link to="/login">
                   <ArrowLeft className="h-4 w-4" />
-                  Kembali ke Login
+                  Back to Login
                 </Link>
               </Button>
               {errorState && (
                 <Button asChild className="brand-gradient h-10 flex-1 rounded-full shadow-sm hover:opacity-95">
                   <Link to="/forgot-password">
                     <KeyRound className="h-4 w-4" />
-                    Minta Link Baru
+                    Request New Link
                   </Link>
                 </Button>
               )}

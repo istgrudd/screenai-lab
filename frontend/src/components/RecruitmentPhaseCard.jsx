@@ -70,13 +70,13 @@ function countdownText(targetIso, now) {
   const target = new Date(targetIso);
   if (Number.isNaN(target.getTime())) return null;
   const ms = target.getTime() - now.getTime();
-  if (ms <= 0) return "Berakhir";
+  if (ms <= 0) return "Ended";
   const days = Math.floor(ms / (24 * 60 * 60 * 1000));
   const hours = Math.floor((ms % (24 * 60 * 60 * 1000)) / (60 * 60 * 1000));
   const minutes = Math.floor((ms % (60 * 60 * 1000)) / (60 * 1000));
-  if (days > 0) return `${days}h ${hours}j tersisa`;
-  if (hours > 0) return `${hours}j ${minutes}m tersisa`;
-  return `${minutes}m tersisa`;
+  if (days > 0) return `${days}d ${hours}h left`;
+  if (hours > 0) return `${hours}h ${minutes}m left`;
+  return `${minutes}m left`;
 }
 
 function PhaseRow({ icon, title, range, status, countdown }) {
@@ -145,7 +145,7 @@ function StatsBlock({ stats, threshold }) {
   return (
     <div className="border-t pt-4 mt-2 space-y-3">
       <p className="text-xs uppercase tracking-wide text-muted-foreground">
-        Statistik Periode
+        Period Statistics
       </p>
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
         <div className="rounded-lg border bg-muted/30 px-3 py-2.5">
@@ -156,7 +156,7 @@ function StatsBlock({ stats, threshold }) {
           <p className="text-lg font-semibold tabular-nums mt-0.5">
             {threshold ?? (
               <span className="text-sm font-normal text-muted-foreground">
-                Tidak diatur
+                Not set
               </span>
             )}
           </p>
@@ -171,7 +171,7 @@ function StatsBlock({ stats, threshold }) {
         <div className="rounded-lg border bg-muted/30 px-3 py-2.5 sm:col-span-1 col-span-2">
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <Layers className="w-3.5 h-3.5" />
-            Divisi Aktif
+            Active Divisions
           </div>
           <p className="text-lg font-semibold tabular-nums mt-0.5">
             {divisionEntries.filter(([, n]) => n > 0).length || 0}
@@ -180,11 +180,11 @@ function StatsBlock({ stats, threshold }) {
       </div>
       <div className="space-y-1.5">
         <p className="text-xs uppercase tracking-wide text-muted-foreground">
-          Per Divisi
+          By Division
         </p>
         {divisionEntries.length === 0 ? (
           <p className="text-xs text-muted-foreground italic">
-            Belum ada submit per divisi.
+            No submissions per division yet.
           </p>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
@@ -210,27 +210,27 @@ function actionHintText({ role, phase, period, submittedCount }) {
   if (!phase) return null;
   if (role === "candidate") {
     if (phase === "SUBMISSION")
-      return "Segera lengkapi dan submit dokumen kamu.";
+      return "Complete and submit your documents soon.";
     if (phase === "EVALUATION")
-      return "Aplikasi kamu sedang dievaluasi oleh AI.";
-    if (phase === "ANNOUNCEMENT") return "Cek hasil seleksi kamu di bawah.";
-    if (phase === "CLOSED") return "Periode rekrutasi telah berakhir.";
+      return "Your application is being evaluated by AI.";
+    if (phase === "ANNOUNCEMENT") return "Check your selection result below.";
+    if (phase === "CLOSED") return "The recruitment period has ended.";
     if (phase === "UPCOMING") {
       const dt = period?.start_date ? formatDate(period.start_date) : "—";
-      return `Pendaftaran akan dibuka pada ${dt}.`;
+      return `Registration opens on ${dt}.`;
     }
   }
   if (role === "recruiter") {
     if (phase === "SUBMISSION") {
       const n = submittedCount ?? period?.application_count ?? 0;
-      return `Periode pendaftaran sedang berjalan. ${n} kandidat telah submit.`;
+      return `The registration period is in progress. ${n} candidates have submitted.`;
     }
     if (phase === "EVALUATION")
-      return "Jalankan evaluasi per divisi sebelum fase ini berakhir.";
+      return "Run the per-division evaluation before this phase ends.";
     if (phase === "ANNOUNCEMENT")
-      return "Publikasikan hasil seleksi untuk setiap divisi.";
-    if (phase === "CLOSED") return "Periode rekrutasi telah ditutup.";
-    if (phase === "UPCOMING") return "Periode rekrutasi belum dibuka.";
+      return "Publish the selection results for each division.";
+    if (phase === "CLOSED") return "The recruitment period is closed.";
+    if (phase === "UPCOMING") return "The recruitment period hasn't opened yet.";
   }
   // super_admin role intentionally returns no action hint — the stats
   // block carries everything they need (threshold, totals, by division).
@@ -252,8 +252,8 @@ function phaseStatus(phase, target) {
 function EmptyState({ role }) {
   const text =
     role === "super_admin"
-      ? "Tidak ada periode aktif. Buat periode baru di halaman Periode Rekrutasi."
-      : "Tidak ada periode rekrutasi aktif saat ini.";
+      ? "No active period. Create a new period on the Recruitment Periods page."
+      : "There is no active recruitment period right now.";
   return (
     <Card className="border-dashed">
       <CardContent className="py-8 flex items-center gap-4">
@@ -327,7 +327,7 @@ export default function RecruitmentPhaseCard({
               {period.name}
             </CardTitle>
             <CardDescription className="text-xs mt-1">
-              Timeline periode rekrutasi
+              Recruitment period timeline
             </CardDescription>
           </div>
           {phase && (
@@ -344,21 +344,21 @@ export default function RecruitmentPhaseCard({
         <div className="space-y-1">
           <PhaseRow
             icon={Calendar}
-            title="Pendaftaran"
+            title="Registration"
             range={`${formatDate(submissionStart)} → ${formatDate(subEnd)}`}
             status={phaseStatus(phase, "SUBMISSION")}
             countdown={subCountdown}
           />
           <PhaseRow
             icon={Sparkles}
-            title="Evaluasi AI"
+            title="AI Evaluation"
             range={`${formatDate(evaluationStart)} → ${formatDate(evalEnd)}`}
             status={phaseStatus(phase, "EVALUATION")}
             countdown={evalCountdown}
           />
           <PhaseRow
             icon={ChevronRight}
-            title="Pengumuman"
+            title="Announcement"
             range={`${formatDate(announcementStart)} → ${formatDate(annEnd)}`}
             status={phaseStatus(phase, "ANNOUNCEMENT")}
             countdown={annCountdown}

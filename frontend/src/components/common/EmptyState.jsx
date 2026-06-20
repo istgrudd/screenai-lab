@@ -10,7 +10,7 @@ function cx(...classes) {
 
 export default function EmptyState({
   icon,
-  title = "Belum ada informasi",
+  title = "No information yet",
   description,
   actionLabel,
   onAction,
