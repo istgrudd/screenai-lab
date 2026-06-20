@@ -119,7 +119,7 @@ export default function LoginPage() {
             required
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            placeholder="nama@email.com"
+            placeholder="name@student.telkomuniversity.ac.id"
             className="h-10 bg-input/70"
           />
         </div>
