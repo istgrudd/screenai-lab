@@ -40,7 +40,10 @@ function isValidIndonesianWhatsapp(value) {
 }
 
 function isValidIpk(value) {
-  const trimmed = value.trim();
+  // Accept a comma decimal separator: the iOS decimal keypad renders the
+  // separator per device locale, and the Indonesian locale shows only a comma.
+  // Normalize to the canonical period form before validating.
+  const trimmed = String(value).trim().replace(/,/g, ".");
   if (!trimmed) return true;
   if (!/^\d+(?:\.\d{1,2})?$/.test(trimmed)) return false;
   const number = Number(trimmed);
@@ -144,7 +147,9 @@ export default function CandidateProfileForm({ profile, locked, onSaved }) {
       if (yearNum != null && yearNum !== profile.year) payload.year = yearNum;
     }
     if (!ipkLocked) {
-      const ipkText = (ipk || "").trim();
+      // Belt-and-suspenders: normalize again here so paste/autofill values that
+      // bypass the onChange normalization are still sent in the period form.
+      const ipkText = String(ipk || "").replace(/,/g, ".").trim();
       const currentIpk = profile.ipk == null ? null : Number(profile.ipk);
       if (!ipkText && currentIpk != null) {
         payload.ipk = null;
@@ -280,11 +285,14 @@ export default function CandidateProfileForm({ profile, locked, onSaved }) {
           type="text"
           inputMode="decimal"
           value={ipk}
-          onChange={(event) => setIpk(event.target.value)}
-          placeholder="e.g. 3.75"
+          onChange={(event) => setIpk(event.target.value.replace(/,/g, "."))}
+          placeholder="e.g., 3.75"
           disabled={saving || ipkLocked}
           readOnly={ipkLocked}
         />
+        <p className="text-xs leading-5 text-muted-foreground">
+          You can type a dot or a comma — e.g., 3.75.
+        </p>
       </div>
 
       <div className="md:col-span-2 border-t pt-4 mt-2">

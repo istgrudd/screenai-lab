@@ -4,6 +4,7 @@ import {
   CheckCircle2,
   ChevronDown,
   CloudUpload,
+  Copy,
   Download,
   FileText,
   Loader2,
@@ -13,6 +14,13 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  POSTER_CAPTION,
+  POSTER_IMAGE_URL,
+  TWIBBON_CAPTION,
+  TWIBBON_TEMPLATE_URL,
+} from "@/lib/supportingDocAssets";
 
 function formatSize(bytes) {
   if (bytes == null) return "";
@@ -25,20 +33,125 @@ function CvTemplateDownloadPanel() {
   return (
     <details className="group rounded-xl border border-border bg-surface-container-low px-4 py-3">
       <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm font-medium text-foreground">
-        <span>Template CV opsional</span>
+        <span>Optional CV template</span>
         <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" />
       </summary>
       <div className="mt-3 space-y-3 border-t border-border/60 pt-3">
         <p className="text-sm leading-6 text-muted-foreground">
-          Template ini bersifat opsional, namun direkomendasikan agar format CV
-          lebih standar dan mudah dibaca recruiter.
+          This template is optional but recommended so your CV format is more
+          standard and easier for recruiters to read.
         </p>
         <Button asChild variant="outline" size="sm" className="gap-2">
           <a href="/templates/mbc-cv-template.docx" download>
             <Download className="h-4 w-4" />
-            Download Template CV
+            Download CV Template
           </a>
         </Button>
+      </div>
+    </details>
+  );
+}
+
+const SUPPORTING_DOC_CHECKLIST = [
+  "Proof of following MBC's Instagram account.",
+  "Proof of sharing the poster to your Instagram Story.",
+  "Proof of sharing the poster and broadcasting it to 3 WhatsApp groups.",
+  "Proof of your uploaded Twibbon on your own Instagram.",
+];
+
+function CaptionBox({ label, caption }) {
+  const copyCaption = async () => {
+    try {
+      await navigator.clipboard.writeText(caption);
+      toast.success(`${label} copied.`);
+    } catch {
+      toast.error("Failed to copy. Copy it manually from the text shown.");
+    }
+  };
+
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          {label}
+        </span>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="h-7 gap-1.5"
+          onClick={copyCaption}
+        >
+          <Copy className="h-3.5 w-3.5" />
+          Copy
+        </Button>
+      </div>
+      <Textarea
+        readOnly
+        value={caption}
+        rows={3}
+        className="resize-none bg-background text-muted-foreground"
+      />
+    </div>
+  );
+}
+
+// Guidance for the final upload step: the supporting PDF must combine four
+// engagement-proof screenshots into one file. Mirrors CvTemplateDownloadPanel's
+// collapsible card + anchor-download pattern; defaults open since the checklist
+// is required reading, not an optional extra.
+function SupportingDocGuidancePanel() {
+  return (
+    <details
+      className="group rounded-xl border border-border bg-surface-container-low px-4 py-3"
+      open
+    >
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm font-medium text-foreground">
+        <span>What to include in the supporting PDF</span>
+        <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" />
+      </summary>
+      <div className="mt-3 space-y-4 border-t border-border/60 pt-3">
+        <div className="space-y-2">
+          <p className="text-sm leading-6 text-muted-foreground">
+            Combine these four screenshots into a single PDF and upload it here:
+          </p>
+          <ol className="space-y-1.5">
+            {SUPPORTING_DOC_CHECKLIST.map((item, index) => (
+              <li
+                key={index}
+                className="flex items-start gap-2 text-sm text-foreground"
+              >
+                <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[11px] font-semibold text-primary">
+                  {index + 1}
+                </span>
+                <span className="leading-6">{item}</span>
+              </li>
+            ))}
+          </ol>
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          <Button asChild variant="outline" size="sm" className="gap-2">
+            <a href={POSTER_IMAGE_URL} download>
+              <Download className="h-4 w-4" />
+              Download Poster
+            </a>
+          </Button>
+          <Button asChild variant="outline" size="sm" className="gap-2">
+            <a href={TWIBBON_TEMPLATE_URL} download>
+              <Download className="h-4 w-4" />
+              Download Twibbon Template
+            </a>
+          </Button>
+        </div>
+
+        <div className="space-y-3">
+          <CaptionBox label="Poster / WhatsApp caption" caption={POSTER_CAPTION} />
+          <CaptionBox
+            label="Twibbon Instagram caption"
+            caption={TWIBBON_CAPTION}
+          />
+        </div>
       </div>
     </details>
   );
@@ -170,6 +283,8 @@ export default function DocumentUploadStep({
       )}
 
       {doc.doc_type === "cv" && <CvTemplateDownloadPanel />}
+
+      {doc.doc_type === "supporting_docs" && <SupportingDocGuidancePanel />}
 
       {existing ? (
         <div className="flex items-center justify-between gap-3 rounded-xl border bg-muted/30 p-4">
