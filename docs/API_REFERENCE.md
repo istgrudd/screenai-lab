@@ -1391,7 +1391,7 @@ Read-only workflow notification delivery log used by the Admin Emails monitoring
       "id": 1,
       "notification_type": "application_submitted",
       "to_email": "candidate@example.com",
-      "subject": "Aplikasi ScreenAI Lab berhasil dikirim",
+      "subject": "Your ScreenAI Lab application was received",
       "provider": "disabled",
       "status": "captured",
       "created_at": "2026-06-02T05:00:00Z",

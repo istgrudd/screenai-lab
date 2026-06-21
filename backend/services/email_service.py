@@ -114,6 +114,10 @@ def send_email(
         "html": html,
         "text": text,
     }
+    # Let candidates reply to a real support inbox instead of the no-reply sender.
+    support_email = (settings.support_email or "").strip()
+    if support_email:
+        payload["reply_to"] = support_email
     body = json.dumps(payload).encode("utf-8")
     user_agent_url = (
         settings.public_frontend_url

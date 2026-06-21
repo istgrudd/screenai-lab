@@ -58,6 +58,9 @@ class Settings(BaseSettings):
     # --- Email / account verification ---
     resend_api_key: str = ""
     email_from: str = ""
+    # Support inbox candidates can reply to for help. Surfaced as the Reply-To on
+    # every outgoing email and in each template footer.
+    support_email: str = "support@mbclaboratory.com"
     public_frontend_url: str = "http://localhost:5173"
     email_enabled: bool = False
     email_verification_expire_minutes: int = 60

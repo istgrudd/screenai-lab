@@ -124,6 +124,7 @@ def _create_user(
         faculty="Fakultas Informatika" if role == UserRole.CANDIDATE else None,
         major="Data Science" if role == UserRole.CANDIDATE else None,
         year=2023 if role == UserRole.CANDIDATE else None,
+        ipk=3.5 if role == UserRole.CANDIDATE else None,
         whatsapp="+6281234567890" if role == UserRole.CANDIDATE else None,
         role=role,
         is_active=True,
@@ -448,7 +449,7 @@ def main() -> int:
     failures += _check(
         bool(submit_outbox)
         and submit_outbox[0].get("to") == _email("candidate_submit")
-        and submit_outbox[0].get("subject") == "Aplikasi ScreenAI Lab berhasil dikirim",
+        and submit_outbox[0].get("subject") == "Your ScreenAI Lab application was received",
         "disabled dev outbox captured application_submitted email for candidate",
     )
 
