@@ -10,7 +10,7 @@ export default function AppShell({ children }) {
         <GlassTopbar />
         <PageContainer>{children}</PageContainer>
         <footer className="px-4 py-6 text-center text-xs text-muted-foreground">
-          Menemukan bug atau punya masukan? Hubungi{" "}
+          Found a bug or have feedback? Contact{" "}
           <a
             href="mailto:support@mbclaboratory.com?subject=ScreenAI%20Lab%20%E2%80%94%20Bug%20Report%20%2F%20Feedback"
             className="font-medium text-primary underline-offset-2 hover:underline"
