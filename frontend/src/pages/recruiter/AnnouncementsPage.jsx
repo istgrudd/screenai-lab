@@ -21,6 +21,7 @@ import {
   formatDivision,
   isAnnouncedApplication,
   isReadyToAnnounce,
+  sortRankedApplications,
 } from "@/lib/recruiterWorkspace";
 
 function SectionHeader({ title, hint, count }) {
@@ -94,13 +95,14 @@ export default function RecruiterAnnouncementsPage() {
   }, [loadApplications]);
 
   // Bulk publish only touches ready-to-announce (screening) candidates.
+  // Order best-first (rank asc, then composite score desc) so #1 is on top.
   const readyApplications = useMemo(
-    () => applications.filter(isReadyToAnnounce),
+    () => sortRankedApplications(applications.filter(isReadyToAnnounce)),
     [applications]
   );
   // Already-announced candidates are monitoring-only; never in the payload.
   const publishedApplications = useMemo(
-    () => applications.filter(isAnnouncedApplication),
+    () => sortRankedApplications(applications.filter(isAnnouncedApplication)),
     [applications]
   );
 
