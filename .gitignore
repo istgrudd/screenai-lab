@@ -31,6 +31,10 @@ data/*.db
 uploads/
 uploads/*
 
+# Per-period archive output (scripts/archive_period.py) — contains copies of
+# candidate-uploaded documents (PII) and full-DB dumps; never commit it.
+/archive/
+
 # Vector store persistence
 backend/vectorstore/
 

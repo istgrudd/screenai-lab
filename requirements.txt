@@ -22,3 +22,6 @@ email-validator>=2.0.0
 psycopg2-binary>=2.9.0
 alembic>=1.13.0
 slowapi>=0.1.9
+# Used only by scripts/archive_period.py to write the per-period archive
+# report.xlsx. Not imported by the FastAPI app at runtime.
+openpyxl>=3.1.0
