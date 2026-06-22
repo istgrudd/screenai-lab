@@ -7,7 +7,9 @@ or download candidate files one-by-one from the web UI.
 What it writes (idempotent — re-running for the same period refreshes cleanly)::
 
     archive/{period_id}_{period_name_slug}/
-    ├── report.xlsx                       # 2 sheets: Candidates, Dimension Scores
+    ├── report.xlsx                       # Candidates sheet + a per-division pair
+    │                                     # (Dimension Score {Div} + Justification {Div})
+    │                                     # for every division with >=1 application
     ├── documents/
     │   └── {NIM}_{FullNameSlug}/         # one folder per candidate/application
     │       ├── CV.pdf
@@ -80,10 +82,11 @@ from sqlalchemy import func  # noqa: E402
 import backend.models  # noqa: F401,E402  (side-effect: register all mappers)
 from backend.config import settings  # noqa: E402
 from backend.database import SessionLocal  # noqa: E402
-from backend.models.application import Application, ApplicationStatus  # noqa: E402
+from backend.models.application import Application, ApplicationStatus, Division  # noqa: E402
 from backend.models.candidate import Candidate  # noqa: E402
 from backend.models.document import Document, DocumentType  # noqa: E402
 from backend.models.period import RecruitmentPeriod  # noqa: E402
+from backend.models.rubric import Rubric  # noqa: E402
 from backend.models.user import User  # noqa: E402
 
 try:
@@ -270,10 +273,26 @@ CANDIDATE_HEADERS = [
     "Language Score",
 ]
 
-DIMENSION_HEADERS = [
-    "Full Name", "NIM", "Division", "Dimension", "Score", "Weighted Score",
+# Per-division justification sheet: the old "Dimension Scores" content, minus the
+# now-redundant Division column (the sheet itself is division-scoped).
+JUSTIFICATION_HEADERS = [
+    "Full Name", "NIM", "Dimension", "Score", "Weighted Score",
     "Is Override", "Justification",
 ]
+
+# Human-readable division labels used in the per-division sheet tab names.
+DIVISION_LABEL: dict[Division, str] = {
+    Division.BIG_DATA: "Big Data",
+    Division.CYBER_SECURITY: "Cyber Security",
+    Division.GAME_TECH: "Game Tech",
+    Division.GIS: "GIS",
+}
+
+# Dimension-matrix cells show the RAW per-dimension score (0-100). The weighted
+# score (score x dimension weight) lives in the Justification sheet, so the matrix
+# stays a clean apples-to-apples view across dimensions. Flip this to True to put
+# weighted scores in the matrix instead (see the archive-pipeline report note).
+MATRIX_USE_WEIGHTED = False
 
 
 def _write_sheet(ws, headers: list[str], rows: list[list]) -> None:
@@ -313,13 +332,124 @@ def _write_sheet(ws, headers: list[str], rows: list[list]) -> None:
             ws[f"{jcol}{row_idx}"].alignment = Alignment(wrap_text=True, vertical="top")
 
 
-def build_report(path: Path, records: list[CandidateRecord]) -> None:
+def _sheet_title(prefix: str, division_label: str, used: set[str]) -> str:
+    """Build an Excel sheet title, failing loudly instead of silently truncating.
+
+    Excel caps sheet names at 31 chars and requires them unique within a
+    workbook. A future, longer division label must blow up here rather than be
+    quietly cut (which would also risk a name collision).
+    """
+    title = f"{prefix} {division_label}"
+    if len(title) > 31:
+        raise ValueError(
+            f"Excel sheet name exceeds 31 chars and would be truncated: "
+            f"{title!r} ({len(title)} chars). Shorten the division label in "
+            f"DIVISION_LABEL."
+        )
+    if title in used:
+        raise ValueError(f"duplicate Excel sheet name: {title!r}")
+    used.add(title)
+    return title
+
+
+def _write_dim_matrix_sheet(ws, dim_names: list[str], rows: list[list]) -> None:
+    """Wide per-division matrix sheet.
+
+    Columns: Rank | Full Name | NIM | IPK | <one per dimension> | Composite | Status.
+    Freezes Rank/Full Name/NIM so candidate identity stays visible while the
+    dimension columns scroll, and wraps the (often long) dimension headers.
+    """
+    from openpyxl.styles import Alignment, Font
+    from openpyxl.utils import get_column_letter
+
+    headers = ["Rank", "Full Name", "NIM", "IPK"] + dim_names + ["Composite", "Status"]
+    ws.append(headers)
+    for r in rows:
+        ws.append(r)
+
+    n_fixed_left = 4  # Rank, Full Name, NIM, IPK
+    n_dims = len(dim_names)
+    bold = Font(bold=True)
+    for col_idx in range(1, len(headers) + 1):
+        c = ws.cell(row=1, column=col_idx)
+        c.font = bold
+        if n_fixed_left < col_idx <= n_fixed_left + n_dims:
+            # Wrap long dimension headers so the matrix stays narrow.
+            c.alignment = Alignment(wrap_text=True, vertical="top", horizontal="center")
+    ws.row_dimensions[1].height = 48
+
+    # Freeze the column AFTER NIM (col D) and row 2: keeps Rank/Full Name/NIM and
+    # the header row pinned while the dimension columns scroll.
+    ws.freeze_panes = "D2"
+    if rows:
+        last_col = get_column_letter(len(headers))
+        ws.auto_filter.ref = f"A1:{last_col}{len(rows) + 1}"
+
+    for col_idx in range(1, len(headers) + 1):
+        if col_idx == 1:  # Rank
+            width = 6
+        elif n_fixed_left < col_idx <= n_fixed_left + n_dims:  # dimension cols
+            width = 14  # fixed-narrow; the wrapped header carries the long name
+        else:  # Full Name / NIM / IPK / Composite / Status — size to content
+            width = len(str(headers[col_idx - 1]))
+            for r in rows:
+                v = r[col_idx - 1]
+                width = max(width, len(str(v)) if v not in (None, "") else 0)
+            width = min(max(width + 2, 8), 40)
+        ws.column_dimensions[get_column_letter(col_idx)].width = width
+
+
+def _division_dimension_columns(div_records: list[CandidateRecord], db):
+    """Resolve the ordered dimension columns for one division.
+
+    Order comes from the rubric (``Rubric.dimensions`` by ``dimension.id``),
+    resolved via the division's candidates' ``rubric_id`` — NOT the order rows
+    happen to appear in ``DimensionScore`` — so columns are stable across runs.
+    If more than one rubric shows up in a division the columns are the union,
+    ordered by ``(rubric_id, dimension_id)`` (and a warning is logged).
+
+    Returns ``(ordered_dimension_ids, dimension_names, rubric_ids)``.
+    """
+    col_meta: dict[int, tuple[int, str]] = {}  # dimension_id -> (rubric_id, name)
+    rubric_ids = sorted({
+        r.candidate.rubric_id for r in div_records
+        if r.candidate is not None and r.candidate.rubric_id is not None
+    })
+    for rid in rubric_ids:
+        rubric = db.get(Rubric, rid)
+        if rubric is None:
+            continue
+        for dim in rubric.dimensions:
+            col_meta.setdefault(dim.id, (rid, dim.name))
+
+    # Safety net: never silently drop a dimension a candidate was actually scored
+    # on but which the resolved rubric(s) don't cover (deleted rubric/dimension,
+    # or a legacy candidate with a null rubric_id). Such columns sort last.
+    for r in div_records:
+        if r.candidate is None:
+            continue
+        for ds in r.candidate.dimension_scores:
+            if ds.dimension_id not in col_meta:
+                name = (ds.dimension.name if ds.dimension is not None
+                        else f"(deleted dimension #{ds.dimension_id})")
+                col_meta[ds.dimension_id] = (
+                    ds.rubric_id if ds.rubric_id is not None else 10 ** 9, name)
+
+    ordered_dim_ids = sorted(col_meta, key=lambda d: (col_meta[d][0], d))
+    dim_names = [col_meta[d][1] for d in ordered_dim_ids]
+    return ordered_dim_ids, dim_names, rubric_ids
+
+
+def build_report(path: Path, records: list[CandidateRecord], db) -> None:
     from openpyxl import Workbook
 
     wb = Workbook()
+    used_titles: set[str] = set()
 
+    # --- Sheet 1: Candidates (unchanged) ---
     cand_ws = wb.active
     cand_ws.title = "Candidates"
+    used_titles.add(cand_ws.title)
     cand_rows: list[list] = []
     for i, r in enumerate(records, start=1):
         u, c = r.user, r.candidate
@@ -341,31 +471,77 @@ def build_report(path: Path, records: list[CandidateRecord]) -> None:
         ])
     _write_sheet(cand_ws, CANDIDATE_HEADERS, cand_rows)
 
-    dim_ws = wb.create_sheet("Dimension Scores")
-    dim_rows: list[list] = []
-    for r in records:
-        for ds in r.dimension_scores:
-            # ds.dimension can be None when the Dimension row was deleted
-            # (orphaned score); surface the id so the row is still meaningful.
-            if ds.dimension is not None:
-                dim_name = ds.dimension.name
+    # --- Per-division sheet pairs, in Division enum order ---
+    pair_count = 0
+    for div in Division:
+        div_records = [r for r in records if r.app.division == div]
+        if not div_records:
+            continue  # only divisions with >=1 application get a sheet pair
+        label = DIVISION_LABEL[div]
+
+        ordered_dim_ids, dim_names, rubric_ids = _division_dimension_columns(
+            div_records, db)
+        if len(rubric_ids) > 1:
+            log.warning("division %s spans %d rubrics %s; dimension columns are "
+                        "the union ordered by (rubric_id, dimension_id)",
+                        div.value, len(rubric_ids), rubric_ids)
+
+        # Scored = has a Candidate row AND a non-null composite. Scored rows are
+        # ranked by composite descending; unscored rows go last with blank
+        # Rank/dimension/Composite cells (Status shows *why* they're unscored).
+        scored, unscored = [], []
+        for r in div_records:
+            if r.candidate is not None and r.candidate.composite_score is not None:
+                scored.append(r)
             else:
-                dim_name = f"(deleted dimension #{ds.dimension_id})"
-            dim_rows.append([
-                cell(r.user.full_name),
-                cell(r.user.nim),
-                cell(r.app.division),
-                cell(dim_name),
-                cell(ds.score),
-                cell(ds.weighted_score),
-                "Yes" if ds.is_override else "No",
-                cell(ds.justification),
-            ])
-    _write_sheet(dim_ws, DIMENSION_HEADERS, dim_rows)
+                unscored.append(r)
+        scored.sort(key=lambda r: r.candidate.composite_score, reverse=True)
+
+        matrix_rows: list[list] = []
+        for rank, r in enumerate(scored, start=1):
+            by_dim = {}
+            for ds in r.candidate.dimension_scores:
+                by_dim[ds.dimension_id] = (
+                    ds.weighted_score if MATRIX_USE_WEIGHTED else ds.score)
+            dim_cells = [cell(by_dim.get(did)) for did in ordered_dim_ids]
+            matrix_rows.append(
+                [rank, cell(r.user.full_name), cell(r.user.nim), cell(r.user.ipk)]
+                + dim_cells
+                + [cell(r.candidate.composite_score), cell(r.app.status)]
+            )
+        for r in unscored:
+            matrix_rows.append(
+                ["", cell(r.user.full_name), cell(r.user.nim), cell(r.user.ipk)]
+                + ["" for _ in ordered_dim_ids]
+                + ["", cell(r.app.status)]
+            )
+
+        ms = wb.create_sheet(_sheet_title("Dimension Score", label, used_titles))
+        _write_dim_matrix_sheet(ms, dim_names, matrix_rows)
+
+        # Justification sheet: one row per (candidate x dimension) in this
+        # division — the old "Dimension Scores" content, division-filtered.
+        just_rows: list[list] = []
+        for r in div_records:
+            for ds in r.dimension_scores:  # CandidateRecord prop: weighted desc, [] if None
+                dim_name = (ds.dimension.name if ds.dimension is not None
+                            else f"(deleted dimension #{ds.dimension_id})")
+                just_rows.append([
+                    cell(r.user.full_name),
+                    cell(r.user.nim),
+                    cell(dim_name),
+                    cell(ds.score),
+                    cell(ds.weighted_score),
+                    "Yes" if ds.is_override else "No",
+                    cell(ds.justification),
+                ])
+        js = wb.create_sheet(_sheet_title("Justification", label, used_titles))
+        _write_sheet(js, JUSTIFICATION_HEADERS, just_rows)
+        pair_count += 1
 
     wb.save(path)
-    log.info("wrote report.xlsx (%d candidate rows, %d dimension-score rows)",
-             len(cand_rows), len(dim_rows))
+    log.info("wrote report.xlsx (%d candidate rows, %d division sheet-pair(s))",
+             len(cand_rows), pair_count)
 
 
 # ---------------------------------------------------------------------------
@@ -471,6 +647,32 @@ def _capture_pg_dump_version(dump_mode: str, compose: list[str], db_service: str
     return None
 
 
+def _libpq_from_database_url() -> dict:
+    """Parse ``settings.DATABASE_URL`` into libpq connection parts (best-effort).
+
+    Inside the backend container DATABASE_URL already resolves to ``db:5432``
+    with the right credentials, so ``--dump-mode local`` can derive everything it
+    needs to reach Postgres without any extra ``PG*`` env. Returns ``{}`` for a
+    non-postgres URL (e.g. the sqlite dev default), in which case the caller
+    falls back to the ``POSTGRES_*`` env vars.
+    """
+    try:
+        from sqlalchemy.engine import make_url
+
+        url = make_url(settings.database_url)
+    except Exception:
+        return {}
+    if not url.drivername.startswith("postgresql"):
+        return {}
+    return {
+        "host": url.host,
+        "port": str(url.port) if url.port else None,
+        "user": url.username,
+        "password": url.password,
+        "dbname": url.database,
+    }
+
+
 def run_db_dump(work_dir: Path, args) -> tuple[dict, bool]:
     """Write a full-DB ``pg_dump -Fc`` snapshot and validate it.
 
@@ -496,13 +698,35 @@ def run_db_dump(work_dir: Path, args) -> tuple[dict, bool]:
 
     compose = shlex.split(args.compose_cmd)
     env = os.environ.copy()
+
+    # --dump-mode local: when the libpq PG* env vars aren't already set, derive
+    # the connection from DATABASE_URL so an in-container run needs no extra env
+    # (DATABASE_URL there already points at db:5432 with the right creds).
+    # Explicit PG* / POSTGRES_* always win. Docker mode is unchanged: it talks to
+    # the db container via `docker compose exec`, so DATABASE_URL host/port don't
+    # apply there.
+    if args.dump_mode == "local":
+        parsed = _libpq_from_database_url()
+        user = os.environ.get("PGUSER") or user or parsed.get("user")
+        db_name = os.environ.get("PGDATABASE") or db_name or parsed.get("dbname")
+        password = os.environ.get("PGPASSWORD") or password or parsed.get("password")
+        if not env.get("PGHOST") and parsed.get("host"):
+            env["PGHOST"] = parsed["host"]
+        if not env.get("PGPORT") and parsed.get("port"):
+            env["PGPORT"] = parsed["port"]
+        if parsed.get("host"):
+            frag["connection"] = (
+                f"{parsed['host']}:{parsed.get('port') or '5432'}/{db_name}")
+
     if password:
         env["PGPASSWORD"] = password
 
     if not user or not db_name:
         frag["error"] = (
-            "POSTGRES_USER / POSTGRES_DB not set in the environment (.env). "
-            "The dump needs them to connect; set them or pass --no-dump."
+            "could not resolve the Postgres user/database to dump. Set "
+            "POSTGRES_USER / POSTGRES_DB (or PGUSER / PGDATABASE), ensure "
+            "DATABASE_URL is a postgresql:// URL for --dump-mode local, or pass "
+            "--no-dump."
         )
         log.error(frag["error"])
         return frag, False
@@ -732,7 +956,7 @@ def main(argv: list[str] | None = None) -> int:
         work_dir.mkdir(parents=True)
 
         report_path = work_dir / "report.xlsx"
-        build_report(report_path, records)
+        build_report(report_path, records, db)
         doc_manifest, doc_count = copy_documents(db, work_dir, records)
 
         dump_ok = True
@@ -745,11 +969,25 @@ def main(argv: list[str] | None = None) -> int:
         build_manifest(work_dir, period, records, doc_manifest, doc_count,
                        report_path, dump_frag)
 
-        # Atomic-ish swap: replace any existing archive only once the new one is
-        # fully built, so re-runs never leave half-written state.
+        # Finalize: swap the freshly built .partial dir into place without ever
+        # leaving the previous archive half-replaced. Renaming a directory over a
+        # NON-EMPTY target fails with ENOTEMPTY on POSIX, so move any existing
+        # archive aside first, rename the new one in, then delete the old copy.
+        # On any failure the previous archive is restored and left intact; after
+        # success neither a .partial nor a .old-* directory remains.
+        old_dir = None
         if final_dir.exists():
-            shutil.rmtree(final_dir)
-        work_dir.rename(final_dir)
+            old_dir = output_dir / f"{slug}.old-{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            final_dir.rename(old_dir)
+        try:
+            work_dir.rename(final_dir)
+        except OSError:
+            # Roll back: restore the previous archive if we'd moved it aside.
+            if old_dir is not None and not final_dir.exists():
+                old_dir.rename(final_dir)
+            raise
+        if old_dir is not None:
+            shutil.rmtree(old_dir)
 
         log.info("archive ready: %s", final_dir)
         if not args.no_dump and not dump_ok:

@@ -51,6 +51,33 @@ AutoTokenizer.from_pretrained(settings.ner_model_name, cache_dir=settings.ner_ca
 AutoModelForTokenClassification.from_pretrained(settings.ner_model_name, cache_dir=settings.ner_cache_dir); \
 print('[build] NER model cached to', settings.ner_cache_dir)"
 
+# PostgreSQL 16 client (pg_dump/pg_restore) for scripts/archive_period.py.
+# The archive's full-DB snapshot has to run from INSIDE this container
+# (`--dump-mode local`): the db container is reachable only on the compose
+# network as db:5432, and the host has neither Python nor a published Postgres
+# port. The client MUST be v16 to match the postgres:16-alpine server — a v15
+# pg_dump refuses to dump a v16 server. Debian's bundled postgresql-client is
+# too old, so install from the official PGDG apt repo for THIS image's codename
+# (read from /etc/os-release, so it tracks whatever Debian python:3.11-slim is
+# on). apt lists are cleaned in the same layer to keep the image lean. Placed
+# AFTER the ~1.3 GB model bake so that expensive layer stays cached on rebuilds.
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends curl ca-certificates gnupg; \
+    install -d /usr/share/postgresql-common/pgdg; \
+    curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+        -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc; \
+    . /etc/os-release; \
+    echo "[build] base image codename: ${VERSION_CODENAME}"; \
+    echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" \
+        > /etc/apt/sources.list.d/pgdg.list; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends postgresql-client-16; \
+    apt-get purge -y --auto-remove curl gnupg; \
+    rm -rf /var/lib/apt/lists/*; \
+    pg_dump --version; \
+    pg_restore --version
+
 # Runtime is fully offline for Hugging Face: the model is already baked in above,
 # so boot performs no network calls (no config/tokenizer/safetensors HEAD+GET,
 # no 'unauthenticated requests to HF Hub' warning). The libraries read these at

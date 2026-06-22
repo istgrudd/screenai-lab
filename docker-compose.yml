@@ -57,6 +57,16 @@ services:
       # settings.upload_dir to ./uploads, which resolves to /app/uploads inside
       # the container, so this mount makes uploads survive container recreation.
       - ./uploads:/app/uploads
+      # Per-period archive output. scripts/archive_period.py defaults
+      # --output-dir to ./archive -> /app/archive inside the container, so the
+      # canonical in-container run
+      #   docker compose exec backend python -m scripts.archive_period \
+      #       --period-id <ID> --dump-mode local
+      # lands the {id}_{slug} archive folder here on the host, where it survives
+      # container recreation. The backend image declares no non-root USER, so the
+      # container's root can write this bind mount with no chown. Contains
+      # candidate PII + full-DB dumps and is gitignored (/archive/).
+      - ./archive:/app/archive
       # NOTE: the IndoBERT NER model is pre-baked into the image (W5) at
       # /app/models/ner, so there is deliberately NO ./models bind mount here —
       # a bind mount would shadow the baked-in model with an (empty) host dir
