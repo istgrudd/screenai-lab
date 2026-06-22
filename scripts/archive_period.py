@@ -273,13 +273,6 @@ CANDIDATE_HEADERS = [
     "Language Score",
 ]
 
-# Per-division justification sheet: the old "Dimension Scores" content, minus the
-# now-redundant Division column (the sheet itself is division-scoped).
-JUSTIFICATION_HEADERS = [
-    "Full Name", "NIM", "Dimension", "Score", "Weighted Score",
-    "Is Override", "Justification",
-]
-
 # Human-readable division labels used in the per-division sheet tab names.
 DIVISION_LABEL: dict[Division, str] = {
     Division.BIG_DATA: "Big Data",
@@ -296,7 +289,7 @@ MATRIX_USE_WEIGHTED = False
 
 
 def _write_sheet(ws, headers: list[str], rows: list[list]) -> None:
-    from openpyxl.styles import Alignment, Font
+    from openpyxl.styles import Font
 
     ws.append(headers)
     for r in rows:
@@ -321,15 +314,6 @@ def _write_sheet(ws, headers: list[str], rows: list[list]) -> None:
             val = r[col_idx - 1]
             width = max(width, len(str(val)) if val is not None else 0)
         ws.column_dimensions[get_column_letter(col_idx)].width = min(max(width + 2, 8), 60)
-
-    # Wrap the (potentially long) Justification column on the dimension sheet.
-    if "Justification" in headers:
-        from openpyxl.utils import get_column_letter
-
-        jcol = get_column_letter(headers.index("Justification") + 1)
-        ws.column_dimensions[jcol].width = 60
-        for row_idx in range(2, len(rows) + 2):
-            ws[f"{jcol}{row_idx}"].alignment = Alignment(wrap_text=True, vertical="top")
 
 
 def _sheet_title(prefix: str, division_label: str, used: set[str]) -> str:
@@ -396,6 +380,75 @@ def _write_dim_matrix_sheet(ws, dim_names: list[str], rows: list[list]) -> None:
                 v = r[col_idx - 1]
                 width = max(width, len(str(v)) if v not in (None, "") else 0)
             width = min(max(width + 2, 8), 40)
+        ws.column_dimensions[get_column_letter(col_idx)].width = width
+
+
+def _justification_cell(ds) -> str:
+    """Wide-justification cell text for one DimensionScore.
+
+    The candidate's ``justification`` for that dimension (blank, never ``"None"``,
+    when null), prefixed ``[OVERRIDE] `` when the score was manually overridden.
+    An overridden dimension with no justification renders as just ``[OVERRIDE]``.
+    """
+    text = "" if ds.justification is None else str(ds.justification)
+    if ds.is_override:
+        return f"[OVERRIDE] {text}" if text else "[OVERRIDE]"
+    return text
+
+
+def _write_justification_matrix_sheet(ws, dim_names: list[str], rows: list[list]) -> None:
+    """Wide per-division justification sheet, aligned with the Dimension Score one.
+
+    Columns: Rank | Full Name | NIM | <one per dimension>. Each dimension cell is
+    that candidate's wrapped justification text for that dimension (see
+    ``_justification_cell``). Rows are passed in already matching the paired
+    ``Dimension Score`` sheet row-for-row. Freezes Rank/Full Name/NIM, wraps and
+    top-aligns the justification cells, and leaves row heights unset so Excel can
+    grow them to fit the wrapped paragraphs.
+    """
+    from openpyxl.styles import Alignment, Font
+    from openpyxl.utils import get_column_letter
+
+    headers = ["Rank", "Full Name", "NIM"] + dim_names
+    ws.append(headers)
+    for r in rows:
+        ws.append(r)
+
+    n_fixed_left = 3  # Rank, Full Name, NIM
+    bold = Font(bold=True)
+    for col_idx in range(1, len(headers) + 1):
+        c = ws.cell(row=1, column=col_idx)
+        c.font = bold
+        if col_idx > n_fixed_left:
+            # Wrap long dimension headers so the columns stay readable.
+            c.alignment = Alignment(wrap_text=True, vertical="top", horizontal="center")
+    ws.row_dimensions[1].height = 48
+
+    # Freeze the first dimension column (col D) and row 2: keeps Rank/Full Name/NIM
+    # and the header row pinned while the justification columns scroll.
+    ws.freeze_panes = "D2"
+    if rows:
+        last_col = get_column_letter(len(headers))
+        ws.auto_filter.ref = f"A1:{last_col}{len(rows) + 1}"
+
+    # Wrap + top-align every justification cell. No fixed data-row height is set,
+    # so Excel grows each row to fit its longest wrapped justification.
+    for row_idx in range(2, len(rows) + 2):
+        for col_idx in range(n_fixed_left + 1, len(headers) + 1):
+            ws.cell(row=row_idx, column=col_idx).alignment = Alignment(
+                wrap_text=True, vertical="top")
+
+    for col_idx in range(1, len(headers) + 1):
+        if col_idx == 1:  # Rank
+            width = 6
+        elif col_idx <= n_fixed_left:  # Full Name / NIM — size to content
+            width = len(str(headers[col_idx - 1]))
+            for r in rows:
+                v = r[col_idx - 1]
+                width = max(width, len(str(v)) if v not in (None, "") else 0)
+            width = min(max(width + 2, 8), 40)
+        else:  # justification (dimension) columns — generous, fixed width
+            width = 60
         ws.column_dimensions[get_column_letter(col_idx)].width = width
 
 
@@ -497,17 +550,27 @@ def build_report(path: Path, records: list[CandidateRecord], db) -> None:
                 unscored.append(r)
         scored.sort(key=lambda r: r.candidate.composite_score, reverse=True)
 
+        # Build both per-division sheets from the SAME scored/unscored ordering so
+        # the score matrix and the justification matrix line up row-for-row and
+        # share the rubric-ordered dimension columns.
         matrix_rows: list[list] = []
+        just_rows: list[list] = []
         for rank, r in enumerate(scored, start=1):
             by_dim = {}
+            by_dim_just = {}
             for ds in r.candidate.dimension_scores:
                 by_dim[ds.dimension_id] = (
                     ds.weighted_score if MATRIX_USE_WEIGHTED else ds.score)
+                by_dim_just[ds.dimension_id] = _justification_cell(ds)
             dim_cells = [cell(by_dim.get(did)) for did in ordered_dim_ids]
             matrix_rows.append(
                 [rank, cell(r.user.full_name), cell(r.user.nim), cell(r.user.ipk)]
                 + dim_cells
                 + [cell(r.candidate.composite_score), cell(r.app.status)]
+            )
+            just_rows.append(
+                [rank, cell(r.user.full_name), cell(r.user.nim)]
+                + [by_dim_just.get(did, "") for did in ordered_dim_ids]
             )
         for r in unscored:
             matrix_rows.append(
@@ -515,28 +578,18 @@ def build_report(path: Path, records: list[CandidateRecord], db) -> None:
                 + ["" for _ in ordered_dim_ids]
                 + ["", cell(r.app.status)]
             )
+            just_rows.append(
+                ["", cell(r.user.full_name), cell(r.user.nim)]
+                + ["" for _ in ordered_dim_ids]
+            )
 
         ms = wb.create_sheet(_sheet_title("Dimension Score", label, used_titles))
         _write_dim_matrix_sheet(ms, dim_names, matrix_rows)
 
-        # Justification sheet: one row per (candidate x dimension) in this
-        # division — the old "Dimension Scores" content, division-filtered.
-        just_rows: list[list] = []
-        for r in div_records:
-            for ds in r.dimension_scores:  # CandidateRecord prop: weighted desc, [] if None
-                dim_name = (ds.dimension.name if ds.dimension is not None
-                            else f"(deleted dimension #{ds.dimension_id})")
-                just_rows.append([
-                    cell(r.user.full_name),
-                    cell(r.user.nim),
-                    cell(dim_name),
-                    cell(ds.score),
-                    cell(ds.weighted_score),
-                    "Yes" if ds.is_override else "No",
-                    cell(ds.justification),
-                ])
+        # Justification sheet: wide, one row per candidate, justifications as
+        # dimension columns — same rows/columns as the Dimension Score sheet.
         js = wb.create_sheet(_sheet_title("Justification", label, used_titles))
-        _write_sheet(js, JUSTIFICATION_HEADERS, just_rows)
+        _write_justification_matrix_sheet(js, dim_names, just_rows)
         pair_count += 1
 
     wb.save(path)
