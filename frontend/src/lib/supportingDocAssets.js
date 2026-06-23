@@ -60,13 +60,13 @@ Join us and be part of the future innovation! 🌟
 // Caption the candidate copies for their Twibbon Instagram post.
 export const TWIBBON_CAPTION = `Hey MBCzen! [Nama Lengkap] here, from [Nama Jurusan].
 
-The future doesn't wait. It's built by those who show up, speak up, and level up. And I'm showing up for the Research Assistant recruitment at MBC Laboratory 2025!
+The future doesn't wait. It's built by those who show up, speak up, and level up. And I'm showing up for the Research Assistant recruitment at MBC Laboratory 2026!
 
 Let's innovate together!
 
 @mbclab
 
-#MBCRecruitment2025 #ResearchAssistant #WeAttackWeProtect #MBCLaboratory #TelkomUniversity`;
+#MBCRecruitment2026 #ResearchAssistant #WeAttackWeProtect #MBCLaboratory #TelkomUniversity`;
 
 // Downloadable images served statically from frontend/public/templates/.
 // [Lab provides the real images.] — replace the placeholder PNGs in that
