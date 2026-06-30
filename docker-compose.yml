@@ -32,6 +32,8 @@ services:
       start_period: 10s
     # Port intentionally NOT published — Postgres is reachable only on the
     # compose network as `db:5432`, never from the public internet.
+    ports:
+      - "127.0.0.1:5432:5432"
 
   backend:
     build:
