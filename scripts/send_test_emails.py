@@ -83,7 +83,8 @@ def _build_all(recipient_name: str) -> dict[str, EmailTemplate]:
             recipient_name=recipient_name,
             result="pass",
             portal_url=portal,
-            notes="Please attend the onboarding session next week.",
+            # Accepted emails ignore notes — they always carry the fixed
+            # technical test guidebook block.
         ),
         "announcement_fail": announcement_published_email(
             recipient_name=recipient_name,

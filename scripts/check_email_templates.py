@@ -73,7 +73,8 @@ def _build_templates() -> dict[str, EmailTemplate]:
             recipient_name="Ada Lovelace",
             result="pass",
             portal_url=PORTAL_URL,
-            notes="Please follow the onboarding steps shown in the portal.",
+            # Accepted emails ignore notes — they always carry the fixed
+            # technical test guidebook block.
         ),
         "announcement_fail": announcement_published_email(
             recipient_name="Ada Lovelace",

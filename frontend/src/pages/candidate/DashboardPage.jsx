@@ -10,6 +10,7 @@ import ApplicationProgressCard from "@/components/candidate/ApplicationProgressC
 import CandidateApplicationStepTrack from "@/components/candidate/CandidateApplicationStepTrack";
 import CandidateStatusHero from "@/components/candidate/CandidateStatusHero";
 import DocumentRequirementCard from "@/components/candidate/DocumentRequirementCard";
+import TechnicalTestCallout from "@/components/candidate/TechnicalTestCallout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   getActivePeriod,
@@ -48,6 +49,7 @@ function AnnouncementCard({ application, announcement }) {
             ? "Congratulations — your result has been published. Watch for further instructions from the MBC Laboratory team."
             : "Thank you for taking part in the MBC Laboratory selection this period."}
         </p>
+        {passed && <TechnicalTestCallout />}
         {announcement?.notes && (
           <p className="rounded-xl bg-card px-4 py-3 text-foreground">
             {announcement.notes}

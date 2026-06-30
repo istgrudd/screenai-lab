@@ -18,6 +18,7 @@ import ApplicationProgressCard from "@/components/candidate/ApplicationProgressC
 import CandidateApplicationStepTrack from "@/components/candidate/CandidateApplicationStepTrack";
 import CandidateStatusHero from "@/components/candidate/CandidateStatusHero";
 import DocumentRequirementCard from "@/components/candidate/DocumentRequirementCard";
+import TechnicalTestCallout from "@/components/candidate/TechnicalTestCallout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -183,6 +184,7 @@ function AnnouncementResultCard({ application, announcement }) {
             ? "Congratulations. The selection result is available and you have passed."
             : "The selection result is available. Thank you for taking part in the recruitment process."}
         </p>
+        {passed && <TechnicalTestCallout />}
         {announcement?.notes && (
           <p className="rounded-xl bg-card px-4 py-3 text-foreground">
             {announcement.notes}

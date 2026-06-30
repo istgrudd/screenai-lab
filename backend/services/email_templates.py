@@ -16,6 +16,15 @@ class EmailTemplate:
 # ``settings.support_email`` defaulting to this same address).
 SUPPORT_EMAIL = "support@mbclaboratory.com"
 
+# Fixed next-step guidance attached to every ACCEPTED announcement. The technical
+# test guidebook is a single document covering the task for every division, so the
+# link is the same for all accepted candidates regardless of division. This copy is
+# intentionally not recruiter-editable. The same link is mirrored in the candidate
+# portal (see frontend TechnicalTestCallout); update both places if it ever changes.
+TECHNICAL_TEST_GUIDEBOOK_URL = (
+    "https://drive.google.com/file/d/1aoU46dtBDew9-TjSc6GRfHznsnWfWi0O/view?usp=sharing"
+)
+
 
 # Dark-mode + color-scheme defense injected into every email <head>. Held as a
 # plain (non-f) string so the CSS braces stay literal. Gmail and Apple Mail honor
@@ -36,10 +45,12 @@ _DARK_MODE_STYLE = """
         .panel      { background-color: #1B2330 !important; border-color: rgba(255,255,255,0.12) !important; }
         .muted      { color: #AEB6C2 !important; }
         .footer-cell{ background-color: #11151B !important; border-color: rgba(255,255,255,0.10) !important; }
+        .panel-link { color: #8AB4F8 !important; }
       }
       /* Outlook.com generated-style dark mode */
       [data-ogsc] .email-body, [data-ogsc] .email-body p, [data-ogsc] .email-body li { color: #E6EAF0 !important; }
       [data-ogsc] .muted { color: #AEB6C2 !important; }
+      [data-ogsc] .panel-link { color: #8AB4F8 !important; }
     </style>
 """.strip("\n")
 
@@ -478,15 +489,40 @@ def announcement_published_email(
             "Open the candidate portal for the official result and any further notes:"
         )
 
-    notes_html = (
-        _info_panel(
-            _section_label("Recruiter note")
-            + f'<p style="margin: 0;">{escape(cleaned_notes)}</p>'
+    if accepted:
+        # Accepted candidates always receive the same fixed next-step guidance —
+        # the technical test guidebook. Any recruiter-supplied ``notes`` are
+        # intentionally ignored here so this stage is never accidentally omitted
+        # or customized per announcement (the bulk-announce path sends no notes).
+        notes_html = _info_panel(
+            _section_label("Next step — Technical Test")
+            + _body_paragraph(
+                "You have advanced to the Technical Test stage. The guidebook "
+                "below contains the task for each division along with the "
+                "submission instructions and deadline — please read it carefully "
+                "before you begin."
+            )
+            + f'<p style="margin: 0;"><a href="{TECHNICAL_TEST_GUIDEBOOK_URL}" '
+            'class="panel-link" style="color: #1E3F75; font-weight: 700; '
+            'text-decoration: underline;">Open the Technical Test guidebook →</a></p>'
         )
-        if cleaned_notes
-        else ""
-    )
-    notes_text = f"\nRecruiter note: {cleaned_notes}\n" if cleaned_notes else ""
+        notes_text = (
+            "\nNext step - Technical Test:\n"
+            "You have advanced to the Technical Test stage. The guidebook below "
+            "contains the task for each division along with the submission "
+            "instructions and deadline. Please read it carefully before you begin.\n"
+            f"Guidebook: {TECHNICAL_TEST_GUIDEBOOK_URL}\n"
+        )
+    else:
+        notes_html = (
+            _info_panel(
+                _section_label("Recruiter note")
+                + f'<p style="margin: 0;">{escape(cleaned_notes)}</p>'
+            )
+            if cleaned_notes
+            else ""
+        )
+        notes_text = f"\nRecruiter note: {cleaned_notes}\n" if cleaned_notes else ""
 
     text = (
         f"Hi {recipient_name},\n\n"

@@ -64,6 +64,8 @@ The future doesn't wait. It's built by those who show up, speak up, and level up
 
 Let's innovate together!
 
+Tag 3 friends to join the journey!
+
 @mbclab
 
 #MBCRecruitment2026 #ResearchAssistant #WeAttackWeProtect #MBCLaboratory #TelkomUniversity`;
